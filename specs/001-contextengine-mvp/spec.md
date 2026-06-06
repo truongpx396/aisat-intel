@@ -14,6 +14,16 @@ AISAT-STUDIO is an AI-powered shared second brain for work teams. Members upload
 
 This specification covers **Phase 1 (Core App)** only. The Evaluation Suite (Phase 2) and automated security red-teaming (Phase 3) are out of scope, except for a minimal evaluation seed set and the structural prompt-injection defenses that must ship in Phase 1 because untrusted content flows through the core data path.
 
+## Clarifications
+
+### Session 2026-06-05
+
+- Q: How many clearance levels exist and what access level do new documents get by default? → A: Fixed ladder of 5 ordered levels (1–5); a new document defaults to the uploader's own clearance level when none is chosen.
+- Q: How must cached answers be scoped so a higher-clearance answer never leaks to a lower-clearance member? → A: Any cached answer is keyed by workspace + requester clearance + the authorized document set, and is reused only for requesters whose authorization scope is identical.
+- Q: At what usage level should the near-limit warning fire? → A: An admin-configurable threshold per workspace, defaulting to 80% of the workspace balance and per-user daily limit.
+- Q: What is the maximum per-file size for ingestion? → A: An admin-configurable per-file size limit per workspace, defaulting to 50 MB; oversize files are rejected at the boundary with a clear message.
+- Q: How long are raw prompt/response bodies retained before only metadata/aggregates remain? → A: 30 days, after which raw bodies are purged and only PII-scrubbed metadata, hashes, and aggregates are kept.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Ingest knowledge into a searchable library (Priority: P1)
@@ -30,7 +40,8 @@ A team member uploads documents (PDF, DOCX, markdown/plain text, images) or past
 2. **Given** an authenticated member, **When** they paste a web link, **Then** the system crawls the page, converts it to text, ingests it, and surfaces it in the library.
 3. **Given** an uploaded image or diagram, **When** ingestion runs, **Then** a text caption describing the image is generated and stored alongside it.
 4. **Given** an unsupported source type (e.g., video/audio in Phase 1), **When** a member attempts to ingest it, **Then** the system clearly indicates the type is not yet supported rather than failing silently.
-5. **Given** an upload, **When** the member chooses an access level no higher than their own clearance, **Then** the document is stored at that level; absent a choice, the workspace default level is applied.
+5. **Given** a file larger than the workspace's per-file size limit (default 50 MB), **When** a member attempts to upload it, **Then** the system rejects it at the boundary with a clear over-size message rather than failing silently.
+6. **Given** an upload, **When** the member chooses an access level no higher than their own clearance, **Then** the document is stored at that level; absent a choice, the document defaults to the uploader's own clearance level.
 
 ---
 
@@ -81,7 +92,7 @@ Every AI operation (ingestion, captioning, querying, reranking) deducts from a s
 **Acceptance Scenarios**:
 
 1. **Given** a workspace with a credit balance, **When** an AI operation runs, **Then** the appropriate credit cost is deducted in real time and reflected in the displayed balance.
-2. **Given** usage approaching a workspace or per-user daily limit, **When** the threshold (e.g., 80%) is crossed, **Then** the member sees a warning banner with an upgrade option.
+2. **Given** usage approaching a workspace or per-user daily limit, **When** the configured warning threshold (admin-configurable per workspace, default 80%) is crossed, **Then** the member sees a warning banner with an upgrade option.
 3. **Given** an exhausted credit balance, **When** a member attempts an AI operation, **Then** it is blocked with a clear "payment required / limit reached" message rather than failing silently.
 4. **Given** a retried or accidentally double-submitted operation, **When** it is processed, **Then** credits are deducted only once.
 5. **Given** a new or trial account, **When** it consumes credits, **Then** stricter new-account and per-IP cumulative ceilings apply to prevent free-credit farming.
@@ -142,10 +153,11 @@ A member optionally connects a local agent to the workspace to run complex, mult
 
 - **Provider outage**: When a primary AI provider times out, returns a server error, or is rate-limited, the system fails over to a fallback provider (capped at one hop) for generation/captioning; it does not fail over on merely "low-quality" output.
 - **Embedding-provider outage during ingestion**: Content cannot be re-embedded with a different model into the same index; affected items are parked for retry rather than embedded inconsistently.
-- **Cross-clearance cache safety**: The same question asked by two members with different clearance must never return one member's higher-clearance answer to the other.
+- **Cross-clearance cache safety**: The same question asked by two members with different clearance must never return one member's higher-clearance answer to the other. Any cached answer is keyed by workspace + requester clearance + the authorized document set and is reused only when the requester's authorization scope is identical.
 - **Redis/hot-state loss**: If the hot credit balance is lost, it is rebuilt from the durable ledger before serving; periodic reconciliation corrects any drift.
 - **Stale long-horizon worker**: A task whose worker stops sending heartbeats is automatically re-queued rather than abandoned.
 - **Unsupported ingestion type (video/audio)**: Accepted at the boundary but clearly reported as not yet implemented.
+- **Oversize upload**: A file exceeding the workspace's per-file size limit (default 50 MB) is rejected at the upload boundary with a clear message before any ingestion or credit spend.
 - **Empty or unanswerable query**: When no authorized documents are relevant, the assistant responds that it has no relevant information rather than fabricating an answer or leaking restricted content.
 - **Bring-your-own-key agents**: Agents using their own provider keys bypass server-side moderation and token metering; members must explicitly accept this gap at registration, and admins can disable this mode per workspace.
 
@@ -157,14 +169,14 @@ A member optionally connects a local agent to the workspace to run complex, mult
 
 - **FR-001**: System MUST allow authenticated members to ingest PDF, DOCX, markdown/plain-text, and image files, and to ingest web pages from pasted links.
 - **FR-002**: System MUST automatically convert ingested content to a searchable form, generate descriptive captions for images/diagrams, and assign auto-taxonomy tags and a summary to each document.
-- **FR-003**: System MUST report ingestion progress to the member in real time and clearly indicate when an unsupported source type (e.g., video/audio in Phase 1) cannot be processed.
-- **FR-004**: System MUST assign each document's security attributes (workspace, owner, tenant, access level) from the authenticated upload context, never from model-inferred content, and MUST prevent an uploader from assigning an access level above their own clearance.
+- **FR-003**: System MUST report ingestion progress to the member in real time and clearly indicate when an unsupported source type (e.g., video/audio in Phase 1) cannot be processed. System MUST enforce a per-file size limit that is admin-configurable per workspace (default 50 MB) and reject oversize files at the upload boundary with a clear message before any ingestion or credit spend.
+- **FR-004**: System MUST assign each document's security attributes (workspace, owner, tenant, access level) from the authenticated upload context, never from model-inferred content, MUST prevent an uploader from assigning an access level above their own clearance, and MUST default a document's access level to the uploader's own clearance level when none is explicitly chosen. Clearance is a fixed ladder of 5 ordered levels (1–5).
 - **FR-005**: System MUST treat any model-suggested sensitivity as advisory only, never as the enforced access level without explicit human confirmation.
 
 **Query & AI**
 
 - **FR-006**: System MUST let members ask natural-language questions and receive relevant answers with citations to the contributing source documents.
-- **FR-007**: System MUST restrict every query to the member's own documents plus shared workspace documents at or below the member's clearance, enforced at the data layer.
+- **FR-007**: System MUST restrict every query to the member's own documents plus shared workspace documents at or below the member's clearance, enforced at the data layer. Any cached answer or retrieval result MUST be keyed by workspace + requester clearance + authorized document set and reused only for requesters with an identical authorization scope.
 - **FR-008**: System MUST answer structured-data questions (e.g., employees, projects, metrics) using fixed, workspace-scoped queries rather than free-form generated database queries.
 - **FR-009**: System MUST retain conversational session context so follow-up questions are answered coherently.
 - **FR-010**: System MUST screen each user input and short-circuit disallowed content or obvious prompt-injection attempts before performing retrieval or consuming credits, recording the event.
@@ -180,7 +192,7 @@ A member optionally connects a local agent to the workspace to run complex, mult
 **Credits & Budgets**
 
 - **FR-016**: System MUST deduct credits in real time for each AI operation (ingestion, captioning, querying, reranking) from a shared workspace balance and display the remaining balance to members.
-- **FR-017**: System MUST enforce three independent cost ceilings — workspace balance, per-user daily limit, and per-call output cap — and MUST warn the member as limits approach rather than failing silently.
+- **FR-017**: System MUST enforce three independent cost ceilings — workspace balance, per-user daily limit, and per-call output cap — and MUST warn the member when usage crosses a warning threshold that is admin-configurable per workspace (default 80% of the workspace balance and per-user daily limit) rather than failing silently.
 - **FR-018**: System MUST block AI operations with a clear, actionable message when the balance is exhausted, including an upgrade path.
 - **FR-019**: System MUST ensure a retried or duplicated operation is charged at most once, and MUST keep the displayed/hot balance reconciled with a durable record of all credit changes.
 - **FR-020**: System MUST apply stricter limits to new/trial accounts and cumulative per-IP ceilings to deter free-credit abuse.
@@ -190,7 +202,7 @@ A member optionally connects a local agent to the workspace to run complex, mult
 - **FR-021**: System MUST provide a debug panel that, for each answer, shows detected intent, tool called, index tier, access-filter result, retrieval and rerank scores, chunk expansion, injected memory, model used, token cost, and credits deducted, with a link to the full trace.
 - **FR-022**: System MUST provide an admin dashboard showing per-user and per-feature AI usage and cost, and allow admins to manage member limits.
 - **FR-023**: System MUST record an audit trail of AI tool calls (tool, role, cost, result fingerprint, trace reference) and of workspace/member actions.
-- **FR-024**: System MUST scrub personally identifiable information from prompts/responses before they are written to trace or evaluation stores, and MUST retain full prompt/response bodies only for a short, bounded window, keeping only metadata and aggregates long-term.
+- **FR-024**: System MUST scrub personally identifiable information from prompts/responses before they are written to trace or evaluation stores, and MUST retain full prompt/response bodies only for a 30-day window, after which raw bodies are purged and only metadata, hashes, and aggregates are kept long-term.
 
 **Local Agents (optional)**
 
@@ -233,19 +245,19 @@ A member optionally connects a local agent to the workspace to run complex, mult
 - **SC-007**: Disallowed or injection inputs are refused before any retrieval or credit spend in 100% of seeded injection-canary cases.
 - **SC-008**: All core capabilities (ingest, query, library, workspace, credits, debug panel) function with zero local agents connected.
 - **SC-009**: An interrupted long-horizon task resumes and completes (or is cleanly cancelled) without loss, and never exceeds its per-task cost cap.
-- **SC-010**: Near-limit usage produces a member-visible warning at the defined threshold, and exhaustion produces a clear actionable message rather than a silent failure, in 100% of cases.
+- **SC-010**: Near-limit usage produces a member-visible warning at the configured threshold (admin-configurable per workspace, default 80%), and exhaustion produces a clear actionable message rather than a silent failure, in 100% of cases.
 
 ## Assumptions
 
 - **Phase scope**: Only Phase 1 (Core App) is in scope. Video/audio ingestion, payment/subscription UI, infographic/mind-map generation, agent file-edit actions, the full evaluation suite, and automated security red-teaming are deferred; structural prompt-injection defenses and a minimal evaluation seed set are included in Phase 1.
 - **Audience**: The primary audience is a developer/hiring showcase, so every architectural pattern must be observable and named in the UI.
 - **Authentication**: A standard authenticated session model is assumed; identity, workspaces, and invitations reuse the existing SaaS kernel.
-- **Clearance model**: Access is governed by ordered numeric clearance levels; a member sees documents at or below their level plus their own personal documents.
+- **Clearance model**: Access is governed by a fixed ladder of 5 ordered numeric clearance levels (1–5); a member sees documents at or below their level plus their own personal documents. A new document with no explicitly chosen access level defaults to the uploader's own clearance level.
 - **Credit pricing**: Credits are priced proportionally to real AI cost with a margin; exact per-operation credit costs follow the documented pricing table and may be tuned without changing behavior.
-- **Connectivity**: Members have stable internet connectivity; large file uploads go directly to object storage via the application.
+- **Connectivity**: Members have stable internet connectivity; large file uploads go directly to object storage via the application. Individual files are bounded by an admin-configurable per-file size limit per workspace (default 50 MB).
 - **Demo data**: New workspaces may be seeded with demo knowledge and structured records to demonstrate capabilities.
 - **Local agents**: Local agents are optional and additive; supported agent types are those offering a configurable AI base URL and/or tool-protocol client support, with bring-your-own-key as the fallback integration mode.
-- **Retention**: Raw prompt/response bodies are retained only briefly for replay; long-term storage keeps metadata, hashes, and aggregates, with PII scrubbed before write.
+- **Retention**: Raw prompt/response bodies are retained for a 30-day window for replay; after 30 days they are purged and long-term storage keeps metadata, hashes, and aggregates, with PII scrubbed before write.
 
 ## Out of Scope (Phase 1)
 
