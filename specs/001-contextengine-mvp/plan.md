@@ -41,14 +41,20 @@ Technical approach: a three-runtime system — a Go BFF/gateway (kernel + agent 
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-Constitution v1.0.0 — four core principles evaluated:
+Constitution v2.1.0 — ten core principles evaluated:
 
 | Principle | Assessment | Status |
 |-----------|------------|--------|
-| **I. Code Quality (NON-NEGOTIABLE)** | Stack matches mandated ecosystems (Go/Python/React). Plan adopts a kernel/product split with `golangci-lint depguard` to prevent kernel→product imports. Lint/format tooling (gofmt/golangci-lint, ruff/black, eslint/prettier) is part of the CI gate. | PASS |
-| **II. Testing Standards (NON-NEGOTIABLE)** | TDD mandated. Contracts define service boundaries before implementation; contract + integration tests required for the BFF↔Python NATS boundary, the MCP tool surface, the credit ledger, and access-control filters. A hard access-filter assertion ships in the eval seed set (FR-030). 80% coverage floor applies per runtime. | PASS |
-| **III. UX Consistency** | Frontend uses a shared React design system; SSE event taxonomy is a single typed contract; API error formats unified across Go/Python. Debug panel is a first-class, consistent surface. WCAG 2.1 AA applies to all new screens. | PASS |
-| **IV. Performance Requirements** | Performance budgets defined in Technical Context. Hot/cold routing, payload indexes, RLS, Redis fast path, and semantic cache address N+1 / hot-path concerns. Langfuse + OTel provide production measurement. | PASS |
+| **I. Code Quality (NON-NEGOTIABLE)** | Stack matches mandated ecosystems (Go/Python/React). Plan adopts a kernel/product split with `golangci-lint depguard` to prevent kernel→product imports. Lint/format tooling (gofmt/golangci-lint, ruff/black, eslint/prettier) is part of the CI gate; complexity ceiling and constants-over-magic-values enforced via lint. | PASS |
+| **II. Clean Architecture (layered)** | High-level kernel/product split retained; the product tier is organized **feature-first** inside `internal/<feature>/{model,dto,errors,service,infra}` (Go), with mirrored feature folders in Python (`src/<feature>/`) and React (`src/features/<feature>/`). Consumer-defined interfaces; external services (Auth/Bus/Storage) behind kernel interfaces; DI only at the app root via `SetupModule`. | PASS |
+| **III. API-First / Contract-First** | All boundaries are declared as contracts before implementation: OpenAPI-shaped REST, NATS subjects, MCP tools, SSE taxonomy, LLM gateway (see `contracts/`). REST versioned under `/api/v1/`. Unified error envelope. | PASS |
+| **IV. Modular Design & Feature Flags** | Each feature wires itself via `SetupModule(appCtx)`; only `cmd/api/main.go` performs wiring. New user-facing behavior gated behind the kernel `Flags` interface; modules are independently removable. | PASS |
+| **V. Testing Standards** | Layered suite: table-driven + parallel Go unit tests, `//go:build integration` integration tests against containerized deps, contract tests per boundary, E2E for critical journeys. 80% coverage floor per runtime; hard access-filter assertion in the eval seed set (FR-030). | PASS |
+| **VI. Test-Driven Development (NON-NEGOTIABLE)** | Red-Green-Refactor mandated; contracts precede handlers/workers; test commits precede/accompany implementation (verifiable in git history). | PASS |
+| **VII. Backend for Frontend (BFF)** | Go BFF shapes responses to SPA view-models, aggregates downstream calls, holds no core business logic. Responses mirror UI structure with consistent field naming, stable list keys, and shared enums for codegen. | PASS |
+| **VIII. UX Consistency** | Shared React design system; SSE event taxonomy is a single typed contract; canonical `{code,message,details}` error schema unified across Go/Python; ISO-8601 UTC timestamps; integer credits. WCAG 2.1 AA applies to all new screens. | PASS |
+| **IX. Performance Requirements** | Performance budgets defined in Technical Context. Hot/cold routing, payload indexes, RLS, Redis fast path, and semantic cache address N+1 / hot-path concerns; `EXPLAIN`-validated queries. Langfuse + OTel provide production measurement. | PASS |
+| **X. Verification Before Completion (NON-NEGOTIABLE)** | Tasks are claimed done only with evidence — the verifying commands (`go test`/`pytest`/`vitest`, lint, build, the Phase 1 eval gate) and their actual output, plus failing→passing runs for bug fixes (Principle VI). Unverified items reported as unverified. | PASS |
 
 **Security/Technology constraints**: OWASP Top 10 — access control enforced at data layer (RLS + payload filter), untrusted-content (prompt-injection) structural defenses ship in Phase 1, secrets from environment only, idempotency on credit-affecting calls. No constitutional violations.
 
@@ -82,18 +88,22 @@ specs/001-contextengine-mvp/
 ```text
 backend-go/                      # Go BFF, gateway, kernel (template-level + product)
 ├── cmd/api/
-│   ├── main.go                  # wire kernel interfaces + start server
-│   └── routes.go                # register routes
-├── kernel/                      # template-level; never imports product/
+│   ├── main.go                  # build appCtx (platform clients) + call each feature's SetupModule
+│   └── routes.go                # shared router
+├── kernel/                      # template-level; never imports product (depguard-enforced)
 │   ├── auth.go bus.go storage.go mailer.go meter.go flags.go cache.go actor.go
 │   └── identity/ tenancy/ billing/ notifications/ audit/ flags/ files/ observability/ admin/
-├── internal/
-│   ├── handler/                 # auth, workspace, invite, ingest, query, admin, policy
-│   ├── service/                 # auth, workspace, invite, credits, policy, notification
-│   ├── repo/                    # user, workspace, invite, credits, policy, audit, notification
-│   └── middleware/              # kernel.go, auth.go, tenant.go, agent_gateway.go
+├── internal/                    # product tier — feature-first (Principle II)
+│   ├── platform/                # concrete infra clients: postgres/ redis/ qdrant/ nats/ otel/ logger/
+│   ├── shared/                  # cross-cutting: dto/ errors/ middleware/ model/
+│   ├── workspace/               # feature: module.go, model/, dto/, errors/, service/, infra/{repo/db,transport/http}
+│   ├── invite/                  # feature: same internal layout
+│   ├── credits/                 # feature: ledger service + repo + transport
+│   ├── ingest/                  # feature: presign/transport + ingestion orchestration
+│   ├── query/                   # feature: query transport + SSE relay
+│   └── policy/                  # feature: agent-gateway policy + repo
 ├── migrations/                  # SQL migrations (RLS policies, partitions)
-└── tests/                       # contract, integration, unit
+└── tests/                       # contract, integration (//go:build integration), e2e
 
 backend-python/                  # ML/AI workers, agent, ingestion, MCP server
 ├── src/
@@ -112,11 +122,11 @@ backend-python/                  # ML/AI workers, agent, ingestion, MCP server
 
 frontend/                        # React 19 + Vite SPA
 ├── src/
-│   ├── pages/                   # Chat, Library, Upload, Admin, Workspace
-│   ├── components/              # DebugPanel, SourceCard, CreditBadge, IngestionStatus, TagFilter
-│   ├── hooks/                   # useQuery, useIngestion, useCredits
+│   ├── features/                # feature-first: chat/, library/, upload/, admin/, workspace/
+│   │   └── <feature>/           #   components/, hooks/, api/, types/ per feature
+│   ├── components/              # shared design-system primitives only
 │   ├── lib/                     # api.ts, sse.ts
-│   └── types/                   # agent, document, workspace, credits
+│   └── types/                   # cross-cutting shared types
 └── tests/                       # vitest
 
 deploy/
@@ -126,7 +136,7 @@ deploy/
 Makefile                         # canonical task runner: up/down, build, test, lint, migrate, eval, dev
 ```
 
-**Structure Decision**: Web application with three runtimes plus shared infra. The Go backend follows a strict kernel/product split (constitution Principle I + risk mitigation): `kernel/` is template-level and never imports `product/`, enforced by `golangci-lint depguard`. Authentication is provided through the swappable kernel `Auth` interface (Casdoor in this deployment). The Python tier centralizes all LLM access in `llm_gateway.py` and all tool access in the MCP server, mirroring the Go policy chokepoint. The frontend is a single SPA consuming the BFF over REST + SSE, served behind Caddy (reverse proxy + automatic TLS) locally and CloudFront in production. NATS is the async seam between Go and Python; Redis/Postgres/Qdrant/S3 are shared backing stores.
+**Structure Decision**: Web application with three runtimes plus shared infra. Per constitution Principle II, the architecture is **layered**: a high-level kernel/product split in Go (`kernel/` is template-level and never imports product code, enforced by `golangci-lint depguard`), and a **lower-level feature-based** organization inside each runtime's product tier — Go `internal/<feature>/{model,dto,errors,service,infra}` wired by `SetupModule(appCtx)`, Python `src/<feature>/`, and React `src/features/<feature>/`, each with a shared/platform layer for cross-cutting concerns. Authentication is provided through the swappable kernel `Auth` interface (Casdoor in this deployment). The Python tier centralizes all LLM access in `llm_gateway.py` and all tool access in the MCP server (shared platform chokepoints), mirroring the Go policy chokepoint. The frontend is a single SPA consuming the BFF over REST + SSE, served behind Caddy (reverse proxy + automatic TLS) locally and CloudFront in production. NATS is the async seam between Go and Python; Redis/Postgres/Qdrant/S3 are shared backing stores.
 
 ## Complexity Tracking
 
