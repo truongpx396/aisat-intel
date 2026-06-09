@@ -15,9 +15,9 @@ Technical approach: a three-runtime system — a Go BFF/gateway (kernel + agent 
 **Language/Version**: Go 1.23 (BFF, gateway, middleware, kernel) · Python 3.12 (ML/AI workers, LangGraph agent, ingestion, MCP server) · TypeScript 5.x + React 19 (Vite SPA)
 
 **Primary Dependencies**:
-- Go: Gin (HTTP), GORM (Postgres), nats.go, go-redis, OpenTelemetry, zerolog, Sentry
-- Python: FastAPI, LangGraph, Mem0, BAML, FastMCP, MarkItDown, Crawl4AI, qdrant-client, openai, cohere, structlog, Langfuse SDK
-- Frontend: React 19, Vite, TypeScript, native EventSource/SSE client, PostHog (product analytics)
+- Go: Gin (HTTP), GORM (Postgres), nats.go, go-redis, OpenTelemetry, zerolog, Sentry; `testcontainers-go` (containerized integration deps)
+- Python: FastAPI, LangGraph, Mem0, BAML, FastMCP, MarkItDown, Crawl4AI, qdrant-client, openai, cohere, structlog, Langfuse SDK; `testcontainers-python` (containerized integration deps)
+- Frontend: React 19, Vite, TypeScript, native EventSource/SSE client, PostHog (product analytics); Vitest (unit/component) + Playwright (cross-browser E2E)
 - Auth provider: Casdoor (`casdoor.Auth` implementation of the kernel `Auth` interface; swappable with `jwt.Auth`/`workos.Auth`)
 - Edge/proxy: Caddy (reverse proxy, automatic TLS, static SPA serving) in front of the BFF
 - Eval stack: Promptfoo + DeepEval (prompt/LLM-output assertions) and Ragas (retrieval/RAG metrics) — Phase 1 wires a minimal subset behind `evals/run.py`; the full suite is Phase 2
@@ -25,7 +25,7 @@ Technical approach: a three-runtime system — a Go BFF/gateway (kernel + agent 
 
 **Storage**: PostgreSQL (primary relational + RLS isolation) · Redis (hot index TTL 30d, credit fast path, LangGraph checkpoints, semantic cache, rate limiting, outbox queue) · Qdrant (2 collections: `personal`, `workspace`; hybrid BM25/SPLADE + dense) · S3 (presigned direct upload)
 
-**Testing**: Go `go test` (+ `-cover`) · Python `pytest` (+ `--cov`) · Frontend `vitest` · `evals/run.py` (Phase 1 minimal eval runner — prompt + golden retrieval set, using a Promptfoo/DeepEval/Ragas subset)
+**Testing**: Go `go test` (+ `-cover`) with **Testcontainers** (`testcontainers-go`) for `//go:build integration` runs against real Postgres/Redis/NATS/Qdrant · Python `pytest` (+ `--cov`) with **Testcontainers** (`testcontainers-python`) for ingestion/agent integration · Frontend `vitest` (unit/component) and **Playwright** (cross-browser E2E of the critical journeys) · `evals/run.py` (Phase 1 minimal eval runner — prompt + golden retrieval set, using a Promptfoo/DeepEval/Ragas subset)
 
 **Target Platform**: Linux server containers (Docker / Docker Compose for local dev; a top-level `Makefile` is the canonical task entrypoint for build/test/lint/run/migrate/eval across all three runtimes); Caddy as the reverse proxy / TLS termination and static SPA host at the edge; browser SPA delivered via CloudFront CDN in production
 
@@ -49,12 +49,12 @@ Constitution v2.1.0 — ten core principles evaluated:
 | **II. Clean Architecture (layered)** | High-level kernel/product split retained; the product tier is organized **feature-first** inside `internal/<feature>/{model,dto,errors,service,infra}` (Go), with mirrored feature folders in Python (`src/<feature>/`) and React (`src/features/<feature>/`). Consumer-defined interfaces; external services (Auth/Bus/Storage) behind kernel interfaces; DI only at the app root via `SetupModule`. | PASS |
 | **III. API-First / Contract-First** | All boundaries are declared as contracts before implementation: OpenAPI-shaped REST, NATS subjects, MCP tools, SSE taxonomy, LLM gateway (see `contracts/`). REST versioned under `/api/v1/`. Unified error envelope. | PASS |
 | **IV. Modular Design & Feature Flags** | Each feature wires itself via `SetupModule(appCtx)`; only `cmd/api/main.go` performs wiring. New user-facing behavior gated behind the kernel `Flags` interface; modules are independently removable. | PASS |
-| **V. Testing Standards** | Layered suite: table-driven + parallel Go unit tests, `//go:build integration` integration tests against containerized deps, contract tests per boundary, E2E for critical journeys. 80% coverage floor per runtime; hard access-filter assertion in the eval seed set (FR-030). | PASS |
+| **V. Testing Standards** | Layered suite: table-driven + parallel Go unit tests, `//go:build integration` integration tests against containerized deps via **Testcontainers** (`testcontainers-go`/`testcontainers-python` spin up real Postgres/Redis/NATS/Qdrant per run), contract tests per boundary, and **Playwright** E2E for critical journeys. 80% coverage floor per runtime; hard access-filter assertion in the eval seed set (FR-030). | PASS |
 | **VI. Test-Driven Development (NON-NEGOTIABLE)** | Red-Green-Refactor mandated; contracts precede handlers/workers; test commits precede/accompany implementation (verifiable in git history). | PASS |
 | **VII. Backend for Frontend (BFF)** | Go BFF shapes responses to SPA view-models, aggregates downstream calls, holds no core business logic. Responses mirror UI structure with consistent field naming, stable list keys, and shared enums for codegen. | PASS |
 | **VIII. UX Consistency** | Shared React design system; SSE event taxonomy is a single typed contract; canonical `{code,message,details}` error schema unified across Go/Python; ISO-8601 UTC timestamps; integer credits. WCAG 2.1 AA applies to all new screens. | PASS |
 | **IX. Performance Requirements** | Performance budgets defined in Technical Context. Hot/cold routing, payload indexes, RLS, Redis fast path, and semantic cache address N+1 / hot-path concerns; `EXPLAIN`-validated queries. Langfuse + OTel provide production measurement. | PASS |
-| **X. Verification Before Completion (NON-NEGOTIABLE)** | Tasks are claimed done only with evidence — the verifying commands (`go test`/`pytest`/`vitest`, lint, build, the Phase 1 eval gate) and their actual output, plus failing→passing runs for bug fixes (Principle VI). Unverified items reported as unverified. | PASS |
+| **X. Verification Before Completion (NON-NEGOTIABLE)** | Tasks are claimed done only with evidence — the verifying commands (`go test`/`pytest`/`vitest`, Testcontainers integration runs, Playwright E2E, lint, build, the Phase 1 eval gate) and their actual output, plus failing→passing runs for bug fixes (Principle VI). Unverified items reported as unverified. | PASS |
 
 **Security/Technology constraints**: OWASP Top 10 — access control enforced at data layer (RLS + payload filter), untrusted-content (prompt-injection) structural defenses ship in Phase 1, secrets from environment only, idempotency on credit-affecting calls. No constitutional violations.
 
@@ -103,7 +103,7 @@ backend-go/                      # Go BFF, gateway, kernel (template-level + pro
 │   ├── query/                   # feature: query transport + SSE relay
 │   └── policy/                  # feature: agent-gateway policy + repo
 ├── migrations/                  # SQL migrations (RLS policies, partitions)
-└── tests/                       # contract, integration (//go:build integration), e2e
+└── tests/                       # contract, integration (//go:build integration, Testcontainers), e2e
 
 backend-python/                  # ML/AI workers, agent, ingestion, MCP server
 ├── src/
@@ -127,7 +127,7 @@ frontend/                        # React 19 + Vite SPA
 │   ├── components/              # shared design-system primitives only
 │   ├── lib/                     # api.ts, sse.ts
 │   └── types/                   # cross-cutting shared types
-└── tests/                       # vitest
+└── tests/                       # vitest (unit/component) + Playwright (e2e/)
 
 deploy/
 ├── docker-compose.yml           # local dev: postgres, redis, qdrant, nats, casdoor, services

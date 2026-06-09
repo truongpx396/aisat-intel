@@ -45,7 +45,7 @@ A new workspace is seeded (via `OnSignup` hook) with a demo document, a 1000-cre
 
 ## Validation scenarios
 
-Each scenario maps to a user story and its success criteria. Run them after bring-up to confirm the feature works end-to-end.
+Each scenario maps to a user story and its success criteria. Run them after bring-up to confirm the feature works end-to-end. These scenarios are automated as a **Playwright** E2E suite (`frontend/tests/e2e/`); the underlying service integration tests provision real Postgres/Redis/NATS/Qdrant via **Testcontainers**, so the same flows are exercised in CI without manual setup.
 
 ### Scenario 1 — Ingest → cited answer (US1 + US2, SC-004)
 1. Sign up (Turnstile required), then upload a PDF via `POST /ingest/presign` → PUT to S3.

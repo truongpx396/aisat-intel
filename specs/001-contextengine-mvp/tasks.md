@@ -8,7 +8,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 **Prerequisites**: [plan.md](./plan.md) (required), [spec.md](./spec.md) (required for user stories), [research.md](./research.md), [data-model.md](./data-model.md), [contracts/](./contracts/)
 
-**Tests**: Test tasks ARE included. The plan declares TDD NON-NEGOTIABLE (Constitution Principle VI), and every contract in `contracts/` carries explicit "Contract test obligations". Contract/integration tests are written first (Red), must fail, then implementation makes them pass (Green).
+**Tests**: Test tasks ARE included. The plan declares TDD NON-NEGOTIABLE (Constitution Principle VI), and every contract in `contracts/` carries explicit "Contract test obligations". Contract/integration tests are written first (Red), must fail, then implementation makes them pass (Green). Integration tests run real backing services via **Testcontainers** (`testcontainers-go` / `testcontainers-python` spin up Postgres/Redis/NATS/Qdrant per run — no shared/mocked infra); critical end-to-end journeys are exercised in the browser via **Playwright**.
 
 **Organization**: Tasks are grouped by user story (US1–US7) to enable independent implementation and testing. Within each story: tests → models → services → endpoints → integration.
 
@@ -32,15 +32,16 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 **Purpose**: Three-runtime project skeleton, infra services, and tooling
 
 - [ ] T001 Create the three-runtime directory structure per plan.md: `backend-go/{cmd/api,kernel,internal,migrations,tests}`, `backend-python/{src,tests,evals,prompts}`, `frontend/{src,tests}`, `deploy/`
-- [ ] T002 [P] Initialize Go module in `backend-go/go.mod` (Go 1.23) with Gin, GORM, nats.go, go-redis, OpenTelemetry, zerolog, Sentry dependencies
-- [ ] T003 [P] Initialize Python project in `backend-python/pyproject.toml` (Python 3.12) with FastAPI, LangGraph, Mem0, BAML, FastMCP, MarkItDown, Crawl4AI, qdrant-client, openai, cohere, structlog, Langfuse SDK
-- [ ] T004 [P] Initialize React SPA in `frontend/package.json` (React 19, Vite, TypeScript 5.x, native EventSource, PostHog)
+- [ ] T002 [P] Initialize Go module in `backend-go/go.mod` (Go 1.23) with Gin, GORM, nats.go, go-redis, OpenTelemetry, zerolog, Sentry, and `testcontainers-go` (integration-test deps) dependencies
+- [ ] T003 [P] Initialize Python project in `backend-python/pyproject.toml` (Python 3.12) with FastAPI, LangGraph, Mem0, BAML, FastMCP, MarkItDown, Crawl4AI, qdrant-client, openai, cohere, structlog, Langfuse SDK, and `testcontainers` (pytest integration deps)
+- [ ] T004 [P] Initialize React SPA in `frontend/package.json` (React 19, Vite, TypeScript 5.x, native EventSource, PostHog) with Vitest (unit/component) and Playwright (cross-browser E2E) test tooling
 - [ ] T005 [P] Create `deploy/docker-compose.yml` with postgres, redis, qdrant, nats, minio (S3), casdoor, and caddy services
 - [ ] T006 [P] Create `deploy/Caddyfile` for reverse proxy, automatic TLS, and static SPA serving in front of the BFF
 - [ ] T007 [P] Create root `Makefile` with `up`, `down`, `migrate`, `dev`, `build`, `test`, `lint`, `eval` targets across all three runtimes
 - [ ] T008 [P] Configure Go linting/formatting in `backend-go/.golangci.yml` including `depguard` to forbid `kernel/` importing `internal/` (Principle I/II)
 - [ ] T009 [P] Configure Python linting/formatting (ruff + black) in `backend-python/pyproject.toml`
 - [ ] T010 [P] Configure frontend linting/formatting (eslint + prettier) in `frontend/.eslintrc.cjs` and `frontend/.prettierrc`
+- [ ] T010a [P] Configure shared test harnesses: Testcontainers bootstrap helpers (`backend-go/tests/containers/` and `backend-python/tests/conftest.py` fixtures spinning up Postgres/Redis/NATS/Qdrant) and a Playwright config + fixtures in `frontend/tests/e2e/playwright.config.ts`
 
 **Checkpoint**: All three runtimes build empty; `make up` brings up infra services.
 
@@ -303,8 +304,9 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 - [ ] T123 [P] Implement the canonical PII scrubber in `backend-python/src/services/pii_scrub.py` (single implementation; the LLM gateway T026 is its only caller, covering both primary and one-hop-fallback calls) applied before any trace/eval write + 30-day raw-body retention via partition `DROP` job in `backend-go/migrations/0015_retention_jobs.sql` (FR-024, Clarification Q5)
 - [ ] T124 [P] Implement generic `audit_log` writer (tamper-evident fingerprint) for workspace/member actions in `backend-go/kernel/audit/audit.go` (FR-023)
 - [ ] T125 Implement Phase 1 eval seed set + runner (`evals/run.py`: ≥20 prompt cases; `prompts/retrieval/eval.py`: ≥30 golden queries) with the hard access-filter assertion (query at level N never returns doc > N) in `backend-python/evals/run.py` and `backend-python/prompts/retrieval/eval.py` (FR-030, SC-002, SC-003)
-- [ ] T126 [P] Wire CI gates into `Makefile`/CI: lint+format (gofmt/golangci-lint, ruff/black, eslint/prettier), ≥80% coverage per runtime, performance/bundle-size checks, security scan, and the Phase 1 eval gate
-- [ ] T127 Execute [quickstart.md](./quickstart.md) validation Scenarios 1–7 end-to-end and record evidence (Principle X)
+- [ ] T126 [P] Wire CI gates into `Makefile`/CI: lint+format (gofmt/golangci-lint, ruff/black, eslint/prettier), ≥80% coverage per runtime, Testcontainers integration runs (`go test -tags=integration` / `pytest -m integration`), Playwright E2E, performance/bundle-size checks, security scan, and the Phase 1 eval gate
+- [ ] T127 [P] Implement Playwright E2E suite for the critical journeys (upload→indexed library; ask→cited streamed answer + debug panel; access-scoped visibility for two clearances; near-limit warning + exhaustion block) in `frontend/tests/e2e/` (SC-004, SC-005, SC-008, SC-010)
+- [ ] T128 Execute [quickstart.md](./quickstart.md) validation Scenarios 1–7 end-to-end and record evidence (Principle X)
 
 ---
 
@@ -402,6 +404,7 @@ Task T051: "Crawl4AI crawler in backend-python/src/services/ingestion/crawler.py
 - [Story] label maps each task to its user story for traceability
 - Access control is enforced at the data layer (Postgres RLS + Qdrant payload pre-filter) in Foundational and every story — never by prompt (SC-001, release blocker)
 - Verify tests fail before implementing (Red→Green→Refactor, Principle VI)
+- Integration tests provision real Postgres/Redis/NATS/Qdrant via Testcontainers; critical journeys are covered by Playwright E2E (never mocked infra for these layers)
 - Claim a task done only with verification evidence (Principle X)
 - Commit after each task or logical group
 - Stop at any checkpoint to validate a story independently
