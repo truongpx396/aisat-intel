@@ -20,21 +20,60 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "a0",
-      "roundness": { "type": 3 },
+      "index": "a5",
+      "roundness": {
+        "type": 3
+      },
       "seed": 1234567890,
       "version": 1,
       "versionNonce": 987654321,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "txt_step1"
+        }
+      ],
       "updated": 1706659200000,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "txt_step1",
+      "type": "text",
+      "x": 467.0,
+      "y": 227.5,
+      "width": 66.0,
+      "height": 25.0,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a6",
+      "roundness": null,
+      "seed": 1542399780,
+      "version": 1,
+      "versionNonce": 1542399781,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1738195200000,
       "link": null,
       "locked": false,
       "text": "Step 1",
       "fontSize": 20,
       "fontFamily": 1,
       "textAlign": "center",
-      "verticalAlign": "middle"
+      "verticalAlign": "middle",
+      "containerId": "step1",
+      "originalText": "Step 1",
+      "autoResize": true,
+      "lineHeight": 1.25
     },
     {
       "id": "arrow1",
@@ -53,8 +92,10 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "a1",
-      "roundness": { "type": 2 },
+      "index": "a7",
+      "roundness": {
+        "type": 2
+      },
       "seed": 1234567891,
       "version": 1,
       "versionNonce": 987654322,
@@ -64,11 +105,20 @@
       "link": null,
       "locked": false,
       "points": [
-        [0, 0],
-        [0, 100]
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          100
+        ]
       ],
       "startBinding": null,
-      "endBinding": null
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "lastCommittedPoint": null
     },
     {
       "id": "step2",
@@ -87,21 +137,60 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "a2",
-      "roundness": { "type": 3 },
+      "index": "a8",
+      "roundness": {
+        "type": 3
+      },
       "seed": 1234567892,
       "version": 1,
       "versionNonce": 987654323,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "txt_step2"
+        }
+      ],
       "updated": 1706659200000,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "txt_step2",
+      "type": "text",
+      "x": 467.0,
+      "y": 407.5,
+      "width": 66.0,
+      "height": 25.0,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a9",
+      "roundness": null,
+      "seed": 1433351466,
+      "version": 1,
+      "versionNonce": 1433351467,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1738195200000,
       "link": null,
       "locked": false,
       "text": "Step 2",
       "fontSize": 20,
       "fontFamily": 1,
       "textAlign": "center",
-      "verticalAlign": "middle"
+      "verticalAlign": "middle",
+      "containerId": "step2",
+      "originalText": "Step 2",
+      "autoResize": true,
+      "lineHeight": 1.25
     },
     {
       "id": "arrow2",
@@ -120,8 +209,10 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "a3",
-      "roundness": { "type": 2 },
+      "index": "aA",
+      "roundness": {
+        "type": 2
+      },
       "seed": 1234567893,
       "version": 1,
       "versionNonce": 987654324,
@@ -131,11 +222,20 @@
       "link": null,
       "locked": false,
       "points": [
-        [0, 0],
-        [0, 100]
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          100
+        ]
       ],
       "startBinding": null,
-      "endBinding": null
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "lastCommittedPoint": null
     },
     {
       "id": "step3",
@@ -154,21 +254,60 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "a4",
-      "roundness": { "type": 3 },
+      "index": "aB",
+      "roundness": {
+        "type": 3
+      },
       "seed": 1234567894,
       "version": 1,
       "versionNonce": 987654325,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "txt_step3"
+        }
+      ],
       "updated": 1706659200000,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "txt_step3",
+      "type": "text",
+      "x": 467.0,
+      "y": 587.5,
+      "width": 66.0,
+      "height": 25.0,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aC",
+      "roundness": null,
+      "seed": 572024054,
+      "version": 1,
+      "versionNonce": 572024055,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1738195200000,
       "link": null,
       "locked": false,
       "text": "Step 3",
       "fontSize": 20,
       "fontFamily": 1,
       "textAlign": "center",
-      "verticalAlign": "middle"
+      "verticalAlign": "middle",
+      "containerId": "step3",
+      "originalText": "Step 3",
+      "autoResize": true,
+      "lineHeight": 1.25
     }
   ],
   "appState": {

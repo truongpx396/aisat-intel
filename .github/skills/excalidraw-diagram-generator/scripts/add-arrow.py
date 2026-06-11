@@ -30,6 +30,43 @@ def generate_unique_id() -> str:
     return str(uuid.uuid4()).replace('-', '')[:16]
 
 
+def _index_to_int(index: str) -> int:
+    """Convert an Excalidraw fractional index string to an integer for comparison."""
+    chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+    base = len(chars)
+    prefix = index[:-1] if len(index) > 1 else ''
+    suffix_char = index[-1]
+    prefix_val = sum((ord(c) - ord('a')) * (base ** (len(prefix) - i - 1))
+                     for i, c in enumerate(prefix)) if prefix else 0
+    return prefix_val * base + chars.index(suffix_char)
+
+
+def make_index_generator(existing_elements: list) -> 'function':
+    """
+    Return a callable that yields unique index strings not already used
+    in existing_elements. Excalidraw uses fractional index strings (e.g. 'a0',
+    'a1', ..., 'a9', 'aA', ..., 'aZ', 'b0', ...) for z-ordering; every
+    element in a file must have a distinct value.
+    """
+    chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+    used = {e.get('index') for e in existing_elements if e.get('index')}
+    counter = [0]
+
+    def _next() -> str:
+        prefix_chars = 'abcdefghijklmnopqrstuvwxyz'
+        while True:
+            n = counter[0]
+            prefix = prefix_chars[n // len(chars)]
+            suffix = chars[n % len(chars)]
+            idx = f'{prefix}{suffix}'
+            counter[0] += 1
+            if idx not in used:
+                used.add(idx)
+                return idx
+
+    return _next
+
+
 def prepare_edit_path(diagram_path: Path, use_edit_suffix: bool) -> tuple[Path, Path | None]:
     """
     Prepare a safe edit path to avoid editor overwrite issues.
@@ -205,20 +242,25 @@ def add_arrow_to_diagram(
         label: Optional text label
     """
     print(f"Creating arrow from ({from_x}, {from_y}) to ({to_x}, {to_y})")
-    arrow_elements = create_arrow(from_x, from_y, to_x, to_y, style, color, label)
-    
-    if label:
-        print(f"  With label: '{label}'")
-    
-    # Load diagram
+
+    # Load diagram first so we can generate non-conflicting indices
     print(f"Loading diagram: {diagram_path}")
     with open(diagram_path, 'r', encoding='utf-8') as f:
         diagram = json.load(f)
-    
-    # Add arrow elements
+
     if 'elements' not in diagram:
         diagram['elements'] = []
-    
+
+    next_index = make_index_generator(diagram['elements'])
+    arrow_elements = create_arrow(from_x, from_y, to_x, to_y, style, color, label)
+
+    # Assign unique indices to every new element
+    for elem in arrow_elements:
+        elem['index'] = next_index()
+
+    if label:
+        print(f"  With label: '{label}'")
+
     original_count = len(diagram['elements'])
     diagram['elements'].extend(arrow_elements)
     print(f"  Added {len(arrow_elements)} elements (total: {original_count} -> {len(diagram['elements'])})")

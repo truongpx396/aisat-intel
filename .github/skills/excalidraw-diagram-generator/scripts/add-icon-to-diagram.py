@@ -33,6 +33,31 @@ def generate_unique_id() -> str:
     return str(uuid.uuid4()).replace('-', '')[:16]
 
 
+def make_index_generator(existing_elements: list):
+    """
+    Return a callable that yields unique index strings not already used
+    in existing_elements. Excalidraw uses fractional index strings (e.g. 'a0',
+    'a1', ..., 'a9', 'aA', ..., 'aZ', 'b0', ...) for z-ordering; every
+    element in a file must have a distinct value.
+    """
+    chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+    used = {e.get('index') for e in existing_elements if e.get('index')}
+    counter = [0]
+
+    def _next() -> str:
+        prefix_chars = 'abcdefghijklmnopqrstuvwxyz'
+        while True:
+            n = counter[0]
+            prefix = prefix_chars[n // len(chars)]
+            suffix = chars[n % len(chars)]
+            idx = f'{prefix}{suffix}'
+            counter[0] += 1
+            if idx not in used:
+                used.add(idx)
+                return idx
+
+    return _next
+
 def calculate_bounding_box(elements: List[Dict[str, Any]]) -> Tuple[float, float, float, float]:
     """Calculate the bounding box (min_x, min_y, max_x, max_y) of icon elements."""
     if not elements:
@@ -310,11 +335,16 @@ def add_icon_to_diagram(
     print(f"Loading diagram: {diagram_path}")
     with open(diagram_path, 'r', encoding='utf-8') as f:
         diagram = json.load(f)
-    
+
     # Add transformed elements
     if 'elements' not in diagram:
         diagram['elements'] = []
-    
+
+    # Assign unique indices so new elements don't conflict with existing ones
+    next_index = make_index_generator(diagram['elements'])
+    for elem in transformed_elements:
+        elem['index'] = next_index()
+
     original_count = len(diagram['elements'])
     diagram['elements'].extend(transformed_elements)
     print(f"  Added {len(transformed_elements)} elements (total: {original_count} -> {len(diagram['elements'])})")

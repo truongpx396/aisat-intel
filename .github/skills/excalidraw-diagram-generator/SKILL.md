@@ -131,10 +131,83 @@ Create the `.excalidraw` file with appropriate elements:
 - **Size**: `width`, `height`
 - **Style**: `strokeColor`, `backgroundColor`, `fillStyle`
 - **Font**: `fontFamily: 5` (Excalifont - **required for all text elements**)
-- **Text**: Embedded text for labels
 - **Connections**: `points` array for arrows
 
-**Important**: All text elements must use `fontFamily: 5` (Excalifont) for consistent visual appearance.
+> ⚠️ **CRITICAL — Text inside shapes (rectangles, ellipses, diamonds):**
+> Do NOT add a `text` property directly on a shape element. Excalidraw ignores it.
+> Instead, create a **separate `text` element** with `containerId` pointing to the shape ID,
+> and add a `boundElements: [{"type": "text", "id": "<text-id>"}]` entry on the shape.
+>
+> ```json
+> // Shape element
+> { "id": "rect1", "type": "rectangle", ..., "boundElements": [{"type": "text", "id": "txt_rect1"}] }
+>
+> // Paired text element (separate entry in elements array)
+> {
+>   "id": "txt_rect1", "type": "text",
+>   "x": <shape_x + (width-text_width)/2>,
+>   "y": <shape_y + (height-text_height)/2>,
+>   "width": <estimated>, "height": <estimated>,
+>   "containerId": "rect1",
+>   "text": "Label text", "fontSize": 18, "fontFamily": 5,
+>   "textAlign": "center", "verticalAlign": "middle",
+>   "originalText": "Label text", "autoResize": true, "lineHeight": 1.25,
+>   "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+>   "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid",
+>   "roughness": 1, "opacity": 100, "groupIds": [], "frameId": null,
+>   "index": "a0", "roundness": null, "seed": 12345, "version": 1,
+>   "versionNonce": 12346, "isDeleted": false, "boundElements": null,
+>   "updated": 1738195200000, "link": null, "locked": false
+> }
+> ```
+
+> ⚠️ **CRITICAL — Arrow `points` array:**
+> The **first point must always be `[0, 0]`** (relative to the arrow's `x`,`y` origin).
+> All subsequent points are relative to the first. Never start with a non-zero first point.
+>
+> ```json
+> // CORRECT
+> { "x": 100, "y": 150, "width": 200, "height": 0,
+>   "points": [[0, 0], [200, 0]] }
+>
+> // WRONG — will break file rendering
+> { "x": 100, "y": 150, "points": [[200, 0], [400, 0]] }
+> ```
+
+> ⚠️ **CRITICAL — `index` field must be unique across ALL elements:**
+> Every element (shapes, text, arrows) needs a distinct `index` string for z-ordering.
+> Bound text elements added alongside shapes must NOT reuse `"a0"` — assign sequential values.
+> Use a simple counter: `"a0"`, `"a1"`, ..., `"a9"`, `"aA"`, ..., `"aZ"`, `"b0"`, `"b1"`, ...
+> Duplicate `index` values will prevent the file from opening in Excalidraw.
+
+> ⚠️ **CRITICAL — Size every box to fit its text (no overflow):**
+> Compute box size from the text BEFORE placing it. For hand-drawn font at `fontSize` `fs`:
+> - `textWidth  ≈ maxLineLength × fs × 0.58`   (longest line, by character count)
+> - `textHeight ≈ lineCount × fs × 1.25`
+> - `boxWidth  = max(minWidth, textWidth + 34)` and `boxHeight = textHeight + 26` (padding)
+>
+> Never hardcode a width like `180` and then put a longer label in it — the text spills
+> outside the box. Always derive width/height from the longest line and line count.
+
+> ⚠️ **CRITICAL — Align to a uniform grid and route arrows through gutters:**
+> Messy diagrams come from misaligned boxes and arrows drawn center-to-center (which cut
+> diagonally across other boxes). To avoid this:
+> 1. **Uniform grid**: pick `pitchX = maxBoxWidth + gapX` and `pitchY = maxBoxHeight + gapY`
+>    (gaps ≥ 70px). Place each box CENTERED on its `(col, row)` cell center:
+>    `cx = x0 + col×pitchX`, `cy = y0 + row×pitchY`. This guarantees boxes in the same row
+>    share a center-Y and the same column share a center-X → arrows between them are straight.
+> 2. **Anchor arrows on box EDGES**, not centers (exit the side facing the target).
+> 3. **Route orthogonally through the empty gutters** between cells (never along a row/column
+>    centerline, which passes through other boxes). For non-adjacent boxes use an L (1 bend),
+>    Z (2 bends), or U (3 bends) path whose segments travel only in the gaps between boxes.
+>    Before finalizing each arrow, check every segment against all OTHER box rectangles and
+>    reroute (try a different exit side / gutter lane) if it intersects one.
+> 4. Keep arrowheads only on the destination end (`endArrowhead: "arrow"`, `startArrowhead: null`).
+>
+> A reference generator implementing all of this (auto-sizing + grid + gutter routing) is in
+> `scripts/` — prefer adapting it over hand-placing coordinates for any diagram with >6 boxes.
+
+**All text elements must use `fontFamily: 5` (Excalifont) for consistent visual appearance.**
 
 ### Step 5: Format the Output
 
@@ -178,17 +251,20 @@ Structure the complete Excalidraw file:
 ### Layout Tips
 
 1. **Start positions**: Center important elements, use consistent spacing
-2. **Spacing**: 
-   - Horizontal gap: 200-300px between elements
-   - Vertical gap: 100-150px between rows
-3. **Colors**: Use consistent color scheme
+2. **Uniform grid (prevents misalignment)**: place boxes on a fixed `pitchX × pitchY` grid,
+   centered on each cell, so rows/columns line up and arrows stay straight.
+3. **Spacing**: gaps BETWEEN boxes of at least:
+   - Horizontal gap: 70-120px (more for wide boxes)
+   - Vertical gap: 70-100px between rows (leaves empty gutters for arrow routing)
+4. **Arrows**: anchor on box edges and route orthogonally through the gutters; never draw
+   center-to-center across other boxes. Verify no segment intersects a non-endpoint box.
+5. **Colors**: Use consistent color scheme
    - Primary elements: Light blue (`#a5d8ff`)
    - Secondary elements: Light green (`#b2f2bb`)
-   - Important/Central: Yellow (`#ffd43b`)
+   - Important/Central: Yellow (`#ffec99`)
    - Alerts/Warnings: Light red (`#ffc9c9`)
-4. **Text sizing**: 16-24px for readability
-5. **Font**: Always use `fontFamily: 5` (Excalifont) for all text elements
-6. **Arrow style**: Use straight arrows for simple flows, curved for complex relationships
+6. **Text sizing**: 15-24px; ALWAYS size the box to fit the text (see CRITICAL rule above)
+7. **Font**: Always use `fontFamily: 5` (Excalifont) for all text elements
 
 ### Complexity Management
 

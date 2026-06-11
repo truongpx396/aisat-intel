@@ -5,13 +5,13 @@ Detailed specifications for each Excalidraw element type with visual examples an
 ## Element Type Overview
 
 | Type | Visual | Primary Use | Text Support |
-|------|--------|-------------|--------------|
-| `rectangle` | □ | Boxes, containers, process steps | ✅ Yes |
-| `ellipse` | ○ | Emphasis, terminals, states | ✅ Yes |
-| `diamond` | ◇ | Decision points, choices | ✅ Yes |
+|------|--------|-------------|----------|
+| `rectangle` | □ | Boxes, containers, process steps | ✅ Via bound text element |
+| `ellipse` | ○ | Emphasis, terminals, states | ✅ Via bound text element |
+| `diamond` | ◇ | Decision points, choices | ✅ Via bound text element |
 | `arrow` | → | Directional flow, relationships | ❌ No (use separate text) |
 | `line` | — | Connections, dividers | ❌ No |
-| `text` | A | Labels, annotations, titles | ✅ (Its purpose) |
+| `text` | A | Labels, annotations, bound labels | ✅ (Its purpose) |
 
 ---
 
@@ -19,16 +19,16 @@ Detailed specifications for each Excalidraw element type with visual examples an
 
 **Best for:** Process steps, entities, data stores, components
 
+> ⚠️ **CRITICAL**: Rectangles do NOT support an inline `text` property. Text MUST be a separate `text` element with `containerId` pointing to this rectangle. See **Bound Text Pattern** section.
+
 ### Properties
 
 ```typescript
 {
   type: "rectangle",
-  roundness: { type: 3 },  // Rounded corners
-  text: "Step Name",       // Optional embedded text
-  fontSize: 20,
-  textAlign: "center",
-  verticalAlign: "middle"
+  roundness: { type: 3 },          // Rounded corners
+  boundElements: [{ type: "text", id: "txt_<rect-id>" }]  // Link to text element
+  // NO text/fontSize/fontFamily/textAlign/verticalAlign here
 }
 ```
 
@@ -53,17 +53,28 @@ Detailed specifications for each Excalidraw element type with visual examples an
 
 ```json
 {
+  "id": "rect1",
   "type": "rectangle",
-  "x": 100,
-  "y": 100,
-  "width": 200,
-  "height": 80,
+  "x": 100, "y": 100, "width": 200, "height": 80,
   "backgroundColor": "#b2f2bb",
+  "roundness": { "type": 3 },
+  "boundElements": [{ "type": "text", "id": "txt_rect1" }]
+}
+```
+
+Paired bound text element:
+
+```json
+{
+  "id": "txt_rect1",
+  "type": "text",
+  "x": 125, "y": 127, "width": 150, "height": 26,
   "text": "Validate Input",
-  "fontSize": 20,
-  "textAlign": "center",
-  "verticalAlign": "middle",
-  "roundness": { "type": 3 }
+  "fontSize": 20, "fontFamily": 5,
+  "textAlign": "center", "verticalAlign": "middle",
+  "containerId": "rect1",
+  "originalText": "Validate Input", "autoResize": true, "lineHeight": 1.25,
+  "boundElements": null
 }
 ```
 
@@ -73,15 +84,15 @@ Detailed specifications for each Excalidraw element type with visual examples an
 
 **Best for:** Start/end points, states, emphasis circles
 
+> ⚠️ **CRITICAL**: Ellipses do NOT support an inline `text` property. Text MUST be a separate `text` element with `containerId`. See **Bound Text Pattern** section.
+
 ### Properties
 
 ```typescript
 {
   type: "ellipse",
-  text: "Start",
-  fontSize: 18,
-  textAlign: "center",
-  verticalAlign: "middle"
+  boundElements: [{ type: "text", id: "txt_<ellipse-id>" }]
+  // NO text/fontSize/fontFamily/textAlign/verticalAlign here
 }
 ```
 
@@ -108,16 +119,27 @@ For circular shapes, use `width === height`:
 
 ```json
 {
+  "id": "ell1",
   "type": "ellipse",
-  "x": 100,
-  "y": 100,
-  "width": 120,
-  "height": 120,
+  "x": 100, "y": 100, "width": 120, "height": 120,
   "backgroundColor": "#d0f0c0",
+  "boundElements": [{ "type": "text", "id": "txt_ell1" }]
+}
+```
+
+Paired bound text element:
+
+```json
+{
+  "id": "txt_ell1",
+  "type": "text",
+  "x": 135, "y": 147, "width": 90, "height": 26,
   "text": "Start",
-  "fontSize": 18,
-  "textAlign": "center",
-  "verticalAlign": "middle"
+  "fontSize": 18, "fontFamily": 5,
+  "textAlign": "center", "verticalAlign": "middle",
+  "containerId": "ell1",
+  "originalText": "Start", "autoResize": true, "lineHeight": 1.25,
+  "boundElements": null
 }
 ```
 
@@ -127,15 +149,15 @@ For circular shapes, use `width === height`:
 
 **Best for:** Decision points, conditional branches
 
+> ⚠️ **CRITICAL**: Diamonds do NOT support an inline `text` property. Text MUST be a separate `text` element with `containerId`. See **Bound Text Pattern** section.
+
 ### Properties
 
 ```typescript
 {
   type: "diamond",
-  text: "Valid?",
-  fontSize: 18,
-  textAlign: "center",
-  verticalAlign": "middle"
+  boundElements: [{ type: "text", id: "txt_<diamond-id>" }]
+  // NO text/fontSize/fontFamily/textAlign/verticalAlign here
 }
 ```
 
@@ -161,18 +183,66 @@ Diamonds need more space than rectangles for the same text:
 
 ```json
 {
+  "id": "dia1",
   "type": "diamond",
-  "x": 100,
-  "y": 100,
-  "width": 150,
-  "height": 150,
+  "x": 100, "y": 100, "width": 150, "height": 150,
   "backgroundColor": "#ffe4a3",
-  "text": "Valid?",
-  "fontSize": 18,
-  "textAlign": "center",
-  "verticalAlign": "middle"
+  "boundElements": [{ "type": "text", "id": "txt_dia1" }]
 }
 ```
+
+Paired bound text element:
+
+```json
+{
+  "id": "txt_dia1",
+  "type": "text",
+  "x": 150, "y": 162, "width": 50, "height": 26,
+  "text": "Valid?",
+  "fontSize": 18, "fontFamily": 5,
+  "textAlign": "center", "verticalAlign": "middle",
+  "containerId": "dia1",
+  "originalText": "Valid?", "autoResize": true, "lineHeight": 1.25,
+  "boundElements": null
+}
+```
+
+---
+
+## Bound Text Pattern
+
+Text inside ANY shape (rectangle, ellipse, diamond) requires this two-element pattern:
+
+```json
+[
+  {
+    "id": "shape1",
+    "type": "rectangle",
+    ... other shape properties ...
+    "boundElements": [{ "type": "text", "id": "txt_shape1" }]
+  },
+  {
+    "id": "txt_shape1",
+    "type": "text",
+    "x": <shape.x + (shape.width - textWidth) / 2>,
+    "y": <shape.y + (shape.height - textHeight) / 2>,
+    "width": <estimated text width>,
+    "height": <estimated text height>,
+    "text": "Label Text",
+    "fontSize": 18,
+    "fontFamily": 5,
+    "textAlign": "center",
+    "verticalAlign": "middle",
+    "containerId": "shape1",
+    "originalText": "Label Text",
+    "autoResize": true,
+    "lineHeight": 1.25,
+    "boundElements": null
+  }
+]
+```
+
+**Index uniqueness:** Every element MUST have a unique `index` string. Assign sequentially: `a0`, `a1`, `a2`, ..., `a9`, `aA`, ..., `aZ`, `b0`, `b1`, ... Never reuse an index value within the same file.
 
 ---
 

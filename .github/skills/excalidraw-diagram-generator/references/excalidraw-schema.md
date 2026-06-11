@@ -46,7 +46,9 @@ interface BaseElement {
   opacity: number;             // 0-100
   groupIds: string[];          // IDs of groups this element belongs to
   frameId: null;               // Usually null
-  index: string;               // Stacking order identifier
+  index: string;               // Stacking order key — MUST be unique across ALL elements in the file
+                               //   Format: "a0","a1",...,"a9","aA",...,"aZ","b0","b1",...
+                               //   Assign sequentially; duplicates prevent the file from opening
   roundness: Roundness | null;
   seed: number;                // Random seed for deterministic rendering
   version: number;             // Element version (increment on edit)
@@ -63,19 +65,18 @@ interface BaseElement {
 
 ### Rectangle
 
+> ⚠️ **CRITICAL**: Shapes do NOT support an inline `text` property. Text inside a shape MUST be a separate `text` element with `containerId` pointing to the shape. See **Bound Text Pattern** below.
+
 ```typescript
 interface RectangleElement extends BaseElement {
   type: "rectangle";
   roundness: { type: 3 };      // 3 = rounded corners
-  text?: string;               // Optional text inside
-  fontSize?: number;           // Font size (16-32 typical)
-  fontFamily?: number;         // 1 = Virgil, 2 = Helvetica, 3 = Cascadia
-  textAlign?: "left" | "center" | "right";
-  verticalAlign?: "top" | "middle" | "bottom";
+  // NO text/fontSize/fontFamily here — use a bound text element instead
+  boundElements: Array<{ type: "text"; id: string }> | null;
 }
 ```
 
-**Example:**
+**Example (shape only — pair with a bound text element):**
 ```json
 {
   "id": "rect1",
@@ -86,38 +87,76 @@ interface RectangleElement extends BaseElement {
   "height": 100,
   "strokeColor": "#1e1e1e",
   "backgroundColor": "#a5d8ff",
-  "text": "My Box",
-  "fontSize": 20,
-  "textAlign": "center",
-  "verticalAlign": "middle",
-  "roundness": { "type": 3 }
+  "roundness": { "type": 3 },
+  "boundElements": [{ "type": "text", "id": "txt_rect1" }]
 }
 ```
 
 ### Ellipse
 
+> ⚠️ **CRITICAL**: Same as Rectangle — NO inline `text`. Use a bound text element.
+
 ```typescript
 interface EllipseElement extends BaseElement {
   type: "ellipse";
-  text?: string;
-  fontSize?: number;
-  fontFamily?: number;
-  textAlign?: "left" | "center" | "right";
-  verticalAlign?: "top" | "middle" | "bottom";
+  // NO text/fontSize/fontFamily here — use a bound text element instead
+  boundElements: Array<{ type: "text"; id: string }> | null;
 }
 ```
 
 ### Diamond
 
+> ⚠️ **CRITICAL**: Same as Rectangle — NO inline `text`. Use a bound text element.
+
 ```typescript
 interface DiamondElement extends BaseElement {
   type: "diamond";
-  text?: string;
-  fontSize?: number;
-  fontFamily?: number;
-  textAlign?: "left" | "center" | "right";
-  verticalAlign?: "top" | "middle" | "bottom";
+  // NO text/fontSize/fontFamily here — use a bound text element instead
+  boundElements: Array<{ type: "text"; id: string }> | null;
 }
+```
+
+### Bound Text Pattern (Required for all shape labels)
+
+To display text inside a rectangle, ellipse, or diamond, you MUST create two elements:
+
+1. The **shape** with `boundElements: [{ type: "text", id: "<text-id>" }]`
+2. A **text element** with `containerId: "<shape-id>"` and `type: "text"`
+
+```json
+[
+  {
+    "id": "rect1",
+    "type": "rectangle",
+    "x": 100, "y": 100, "width": 200, "height": 100,
+    "strokeColor": "#1e1e1e",
+    "backgroundColor": "#a5d8ff",
+    "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid",
+    "roughness": 1, "opacity": 100, "angle": 0,
+    "groupIds": [], "frameId": null, "index": "a0",
+    "roundness": { "type": 3 },
+    "boundElements": [{ "type": "text", "id": "txt_rect1" }],
+    "seed": 12345, "version": 1, "versionNonce": 12346,
+    "isDeleted": false, "updated": 1738195200000, "link": null, "locked": false
+  },
+  {
+    "id": "txt_rect1",
+    "type": "text",
+    "x": 125, "y": 137, "width": 150, "height": 26,
+    "text": "My Box",
+    "fontSize": 20, "fontFamily": 5,
+    "textAlign": "center", "verticalAlign": "middle",
+    "containerId": "rect1",
+    "originalText": "My Box", "autoResize": true, "lineHeight": 1.25,
+    "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+    "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid",
+    "roughness": 1, "opacity": 100, "angle": 0,
+    "groupIds": [], "frameId": null, "index": "a1",
+    "roundness": null, "boundElements": null,
+    "seed": 12347, "version": 1, "versionNonce": 12348,
+    "isDeleted": false, "updated": 1738195200000, "link": null, "locked": false
+  }
+]
 ```
 
 ### Arrow
@@ -176,9 +215,13 @@ interface TextElement extends BaseElement {
   type: "text";
   text: string;
   fontSize: number;
-  fontFamily: number;          // 1-3
+  fontFamily: number;          // 1=Virgil, 2=Helvetica, 3=Cascadia, 5=ExcalidrawHandDrawn
   textAlign: "left" | "center" | "right";
   verticalAlign: "top" | "middle" | "bottom";
+  containerId: string | null;  // ID of parent shape (for bound text), or null for standalone
+  originalText: string;        // Same as text
+  autoResize: boolean;         // true = auto-resize to fit
+  lineHeight: number;          // 1.25 default
   roundness: null;             // Text has no roundness
 }
 ```
