@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <title>AISAT-STUDIO — Library</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: { extend: {
+        colors: { canvas:"#0F172A", surface:"#1E293B", surface2:"#273449", line:"#334155", primary:"#22C55E", info:"#38BDF8", warning:"#FBBF24", danger:"#EF4444", ink:"#F8FAFC", muted:"#94A3B8" },
+        fontFamily: { sans:['"Fira Sans"',"system-ui","sans-serif"], mono:['"Fira Code"',"ui-monospace","monospace"] }
+      } }
+    }
+  </script>
+  <style>body{background:#0F172A}</style>
+</head>
+<body class="font-sans text-ink antialiased">
+  <div class="flex h-screen overflow-hidden">
+
+    <!-- Sidebar -->
+    <aside class="hidden md:flex w-60 shrink-0 flex-col border-r border-line bg-surface">
+      <div class="flex items-center gap-2 px-5 h-16 border-b border-line">
+        <span class="grid place-items-center h-8 w-8 rounded-lg bg-primary text-[#04210F] font-mono font-bold">A</span>
+        <span class="font-mono font-semibold tracking-tight">AISAT<span class="text-primary">·</span>STUDIO</span>
+      </div>
+      <button class="mx-3 mt-3 flex items-center justify-between rounded-lg border border-line bg-canvas px-3 py-2 text-sm hover:border-slate-500 transition">
+        <span class="flex items-center gap-2"><span class="h-5 w-5 grid place-items-center rounded bg-info/20 text-info text-xs font-mono">Q3</span> Acme · Research</span>
+        <svg class="h-4 w-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <nav class="mt-4 flex-1 space-y-1 px-3 text-sm">
+        <a class="relative flex items-center gap-3 rounded-lg bg-surface2 px-3 py-2 font-medium text-ink" href="#">
+          <span class="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-primary"></span>
+          <svg class="h-4 w-4 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> Library</a>
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="chat.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/></svg> Chat</a>
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="workspace.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> Workspace</a>
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="credits.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg> Credits</a>
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="admin.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M12 8v4l3 2"/></svg> Admin</a>
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="agents.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/></svg> Agents</a>
+      </nav>
+    </aside>
+
+    <!-- Main -->
+    <div class="flex flex-1 flex-col min-w-0">
+      <header class="flex h-16 shrink-0 items-center gap-4 border-b border-line bg-canvas/80 px-5 backdrop-blur">
+        <h1 class="text-lg font-semibold">Library</h1>
+        <div class="relative ml-auto max-w-md flex-1 hidden sm:block">
+          <svg class="absolute left-3 top-2.5 h-4 w-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input class="w-full rounded-lg border border-line bg-surface py-2 pl-9 pr-3 text-sm placeholder:text-slate-500 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20" placeholder="Search documents…"/>
+        </div>
+        <div class="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-1.5">
+          <span class="font-mono text-sm">12,480</span><span class="text-xs text-muted">workspace cr remaining</span>
+        </div>
+      </header>
+
+      <div class="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+
+        <!-- Ingest zone -->
+        <section class="grid gap-4 lg:grid-cols-3">
+          <div class="lg:col-span-2 rounded-xl border-2 border-dashed border-line bg-surface/40 p-8 text-center hover:border-primary transition cursor-pointer">
+            <svg class="mx-auto h-9 w-9 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+            <p class="mt-3 text-sm">Drag &amp; drop or <span class="text-primary font-medium">browse files</span></p>
+            <p class="mt-1 text-xs text-muted">PDF · DOCX · Markdown/TXT · Images · max <span class="font-mono">50 MB</span> per file</p>
+            <p class="mt-1 text-xs text-warning">Video &amp; audio are not supported yet.</p>
+          </div>
+          <div class="space-y-3">
+            <button class="flex w-full items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-left text-sm hover:border-slate-500 transition cursor-pointer">
+              <svg class="h-5 w-5 text-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.5-1.5"/></svg>
+              Paste a web link
+            </button>
+            <button class="flex w-full items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-left text-sm hover:border-slate-500 transition cursor-pointer">
+              <svg class="h-5 w-5 text-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+              New note
+            </button>
+            <div class="rounded-xl border border-line bg-surface px-4 py-3 text-xs text-muted space-y-1.5">
+              <p><span class="font-medium text-ink">Sharing rule:</span> the level tag = minimum clearance needed to see your doc.</p>
+              <ul class="ml-3 space-y-0.5">
+                <li><span class="font-mono text-ink">Personal</span> — only you, never shared <span class="text-slate-500">(fully private)</span></li>
+                <li><span class="font-mono text-ink">L1</span> — visible to everyone in the workspace</li>
+                <li><span class="font-mono text-ink">L2</span> — contractors &amp; above</li>
+                <li><span class="font-mono text-ink">L3</span> — full-time team &amp; above <span class="text-slate-500">(your default)</span></li>
+              </ul>
+              <p>New uploads default to your clearance <span class="font-mono text-ink">(L3)</span>. You can lower it to share more widely, or set <span class="font-mono text-ink">Personal</span> to keep it private to yourself only.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Ingestion in progress -->
+        <section class="rounded-xl border border-line bg-surface p-4">
+          <p class="mb-3 text-[11px] uppercase tracking-wider text-muted">Ingesting · live</p>
+          <div class="space-y-3">
+            <div class="flex items-center gap-3">
+              <svg class="h-5 w-5 text-danger shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center justify-between text-sm"><span class="truncate">2026-market-analysis.pdf</span><span class="rounded-full bg-info/15 px-2 py-0.5 font-mono text-[11px] text-info">embedding</span></div>
+                <div class="mt-1.5 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full w-3/4 bg-primary"></span></div>
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <svg class="h-5 w-5 text-info shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center justify-between text-sm"><span class="truncate">architecture-diagram.png</span><span class="rounded-full bg-warning/15 px-2 py-0.5 font-mono text-[11px] text-warning">captioning</span></div>
+                <div class="mt-1.5 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full w-2/5 bg-warning"></span></div>
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <svg class="h-5 w-5 text-muted shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.5-1.5"/></svg>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center justify-between text-sm"><span class="truncate text-muted">https://blog.example.com/scaling-rag</span><span class="rounded-full bg-slate-600/30 px-2 py-0.5 font-mono text-[11px] text-muted">queued</span></div>
+                <div class="mt-1.5 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full w-1/12 bg-muted"></span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Filters -->
+        <div class="flex flex-wrap items-center gap-2 text-sm">
+          <span class="text-muted">Owner:</span>
+          <button class="rounded-full bg-primary/15 px-3 py-1 text-primary font-medium" title="All docs visible to you: your own + other members' shared docs at or below your clearance">All</button>
+          <button class="rounded-full border border-line px-3 py-1 text-muted hover:text-ink" title="Only docs you uploaded (personal or shared)">Mine</button>
+          <button class="rounded-full border border-line px-3 py-1 text-muted hover:text-ink" title="Only shared docs uploaded by other members (excludes your own)">Others</button>
+          <span class="mx-1 text-line">|</span>
+          <span class="text-muted">Type:</span>
+          <button class="rounded-full border border-line px-3 py-1 text-muted hover:text-ink">PDF</button>
+          <button class="rounded-full border border-line px-3 py-1 text-muted hover:text-ink">Docs</button>
+          <button class="rounded-full border border-line px-3 py-1 text-muted hover:text-ink">Images</button>
+          <button class="rounded-full border border-line px-3 py-1 text-muted hover:text-ink">Links</button>
+          <span class="ml-auto text-xs text-muted">142 documents · scoped to your clearance</span>
+        </div>
+
+        <!-- Document grid -->
+        <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <!-- Card -->
+          <article class="rounded-xl border border-line bg-surface p-4 hover:border-slate-500 transition cursor-pointer">
+            <div class="flex items-start justify-between">
+              <svg class="h-6 w-6 text-danger" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+              <span class="rounded bg-info/15 px-1.5 py-0.5 font-mono text-[10px] text-info">L3 · Internal</span>
+            </div>
+            <h3 class="mt-3 truncate text-sm font-medium">Q3-FY26 Board Deck.pdf</h3>
+            <p class="mt-1 line-clamp-2 text-xs text-muted">Quarterly results: ARR, NRR, enterprise expansion, and pricing experiment outcomes for the board.</p>
+            <div class="mt-3 flex flex-wrap gap-1.5">
+              <span class="rounded bg-canvas px-2 py-0.5 text-[11px] text-muted">finance</span>
+              <span class="rounded bg-canvas px-2 py-0.5 text-[11px] text-muted">quarterly</span>
+            </div>
+            <div class="mt-3 flex items-center justify-between text-[11px] text-muted">
+              <span class="flex items-center gap-1.5"><span class="h-5 w-5 grid place-items-center rounded-full bg-surface2 font-mono">TP</span> you</span>
+              <span class="font-mono">2d ago</span>
+            </div>
+          </article>
+
+          <article class="rounded-xl border border-line bg-surface p-4 hover:border-slate-500 transition cursor-pointer">
+            <div class="flex items-start justify-between">
+              <svg class="h-6 w-6 text-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M15 2v5h5"/></svg>
+              <span class="rounded bg-info/15 px-1.5 py-0.5 font-mono text-[10px] text-info">L2 · Restricted</span>
+            </div>
+            <h3 class="mt-3 truncate text-sm font-medium">Pricing-Experiment-Results.docx</h3>
+            <p class="mt-1 line-clamp-2 text-xs text-muted">A/B results for the usage-based tier; net revenue retention moved from 108% to 121%.</p>
+            <div class="mt-3 flex flex-wrap gap-1.5">
+              <span class="rounded bg-canvas px-2 py-0.5 text-[11px] text-muted">pricing</span>
+              <span class="rounded bg-canvas px-2 py-0.5 text-[11px] text-muted">experiment</span>
+            </div>
+            <div class="mt-3 flex items-center justify-between text-[11px] text-muted">
+              <span class="flex items-center gap-1.5"><span class="h-5 w-5 grid place-items-center rounded-full bg-surface2 font-mono">MK</span> Mina K.</span>
+              <span class="font-mono">5d ago</span>
+            </div>
+          </article>
+
+          <article class="rounded-xl border border-line bg-surface p-4 hover:border-slate-500 transition cursor-pointer">
+            <div class="flex items-start justify-between">
+              <svg class="h-6 w-6 text-warning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>
+              <span class="rounded bg-info/15 px-1.5 py-0.5 font-mono text-[10px] text-info">L1 · Public</span>
+            </div>
+            <h3 class="mt-3 truncate text-sm font-medium">architecture-diagram.png</h3>
+            <p class="mt-1 line-clamp-2 text-xs text-muted"><span class="text-primary">Auto-caption:</span> System diagram showing BFF gateway, Python agent tier, and vector store.</p>
+            <div class="mt-3 flex flex-wrap gap-1.5">
+              <span class="rounded bg-canvas px-2 py-0.5 text-[11px] text-muted">architecture</span>
+              <span class="rounded bg-canvas px-2 py-0.5 text-[11px] text-muted">diagram</span>
+            </div>
+            <div class="mt-3 flex items-center justify-between text-[11px] text-muted">
+              <span class="flex items-center gap-1.5"><span class="h-5 w-5 grid place-items-center rounded-full bg-surface2 font-mono">TP</span> you</span>
+              <span class="font-mono">just now</span>
+            </div>
+          </article>
+        </section>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

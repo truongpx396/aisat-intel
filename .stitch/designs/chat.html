@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <title>AISAT-STUDIO — Chat</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            canvas: "#0F172A",
+            surface: "#1E293B",
+            surface2: "#273449",
+            line: "#334155",
+            primary: "#22C55E",
+            info: "#38BDF8",
+            warning: "#FBBF24",
+            danger: "#EF4444",
+            ink: "#F8FAFC",
+            muted: "#94A3B8"
+          },
+          fontFamily: {
+            sans: ['"Fira Sans"', "system-ui", "sans-serif"],
+            mono: ['"Fira Code"', "ui-monospace", "monospace"]
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { background: #0F172A; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+    .caret::after { content:"▍"; color:#22C55E; animation: blink 1s step-end infinite; margin-left:2px; }
+    .score-bar { height:6px; border-radius:9999px; background:#0F172A; overflow:hidden; }
+  </style>
+</head>
+<body class="font-sans text-ink antialiased">
+  <div class="flex h-screen overflow-hidden">
+
+    <!-- Sidebar -->
+    <aside class="hidden md:flex w-60 shrink-0 flex-col border-r border-line bg-surface">
+      <div class="flex items-center gap-2 px-5 h-16 border-b border-line">
+        <span class="grid place-items-center h-8 w-8 rounded-lg bg-primary text-[#04210F] font-mono font-bold">A</span>
+        <span class="font-mono font-semibold tracking-tight">AISAT<span class="text-primary">·</span>STUDIO</span>
+      </div>
+      <!-- Workspace switcher -->
+      <button class="mx-3 mt-3 flex items-center justify-between rounded-lg border border-line bg-canvas px-3 py-2 text-sm hover:border-slate-500 transition">
+        <span class="flex items-center gap-2"><span class="h-5 w-5 grid place-items-center rounded bg-info/20 text-info text-xs font-mono">Q3</span> Acme · Research</span>
+        <svg class="h-4 w-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <nav class="mt-4 flex-1 space-y-1 px-3 text-sm">
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="library.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> Library</a>
+        <a class="relative flex items-center gap-3 rounded-lg bg-surface2 px-3 py-2 font-medium text-ink" href="#">
+          <span class="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-primary"></span>
+          <svg class="h-4 w-4 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/></svg> Chat</a>
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="workspace.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> Workspace</a>
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="credits.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg> Credits</a>
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="admin.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M12 8v4l3 2"/></svg> Admin</a>
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="agents.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/></svg> Agents</a>
+      </nav>
+      <!-- Conversation list -->
+      <div class="border-t border-line px-3 py-3">
+        <p class="px-2 pb-1 text-[11px] uppercase tracking-wider text-muted">Recent</p>
+        <a href="#" class="block truncate rounded-md px-2 py-1.5 text-sm text-primary bg-surface2">Q3 revenue drivers</a>
+        <a href="#" class="block truncate rounded-md px-2 py-1.5 text-sm text-muted hover:text-ink">Onboarding policy summary</a>
+        <a href="#" class="block truncate rounded-md px-2 py-1.5 text-sm text-muted hover:text-ink">Security model overview</a>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <div class="flex flex-1 flex-col min-w-0">
+      <!-- Top bar -->
+      <header class="flex h-16 shrink-0 items-center gap-4 border-b border-line bg-canvas/80 px-5 backdrop-blur">
+        <div class="relative flex-1 max-w-md">
+          <svg class="absolute left-3 top-2.5 h-4 w-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input class="w-full rounded-lg border border-line bg-surface py-2 pl-9 pr-3 text-sm text-ink placeholder:text-slate-500 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20" placeholder="Search knowledge…"/>
+        </div>
+        <!-- Credit meters -->
+        <div class="hidden sm:flex items-center gap-3">
+          <!-- Workspace pool -->
+          <div class="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-1.5" title="Shared workspace balance remaining — all members draw from this pool">
+            <svg class="h-3.5 w-3.5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span class="font-mono text-sm">12,480</span>
+            <span class="text-xs text-muted">ws remaining</span>
+            <span class="h-1.5 w-12 rounded-full bg-canvas overflow-hidden"><span class="block h-full bg-primary" style="width:18%"></span></span>
+          </div>
+          <!-- User daily allowance -->
+          <div class="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-1.5" title="Your personal daily allowance remaining — resets at midnight UTC">
+            <svg class="h-3.5 w-3.5 text-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/></svg>
+            <span class="font-mono text-sm">590</span>
+            <span class="text-xs text-muted">your daily remaining</span>
+            <span class="h-1.5 w-12 rounded-full bg-canvas overflow-hidden"><span class="block h-full bg-info" style="width:59%"></span></span>
+          </div>
+        </div>
+        <button class="grid h-9 w-9 place-items-center rounded-full bg-surface2 font-mono text-sm">TP</button>
+      </header>
+
+      <!-- Body: thread + debug drawer -->
+      <div class="flex flex-1 min-h-0">
+        <!-- Thread -->
+        <main class="flex flex-1 flex-col min-w-0">
+          <div class="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+
+            <!-- User message -->
+            <div class="flex justify-end">
+              <div class="max-w-[75%] rounded-2xl rounded-br-sm bg-surface border border-line px-4 py-3 text-sm">
+                What were the main drivers of our Q3 revenue growth?
+              </div>
+            </div>
+
+            <!-- Assistant message -->
+            <div class="max-w-[80%] space-y-3">
+              <div class="flex items-center gap-2 text-xs text-muted">
+                <span class="grid h-6 w-6 place-items-center rounded-md bg-primary/15 text-primary font-mono">AI</span>
+                <span class="font-mono">smart · gpt-class</span>
+                <span class="rounded-full bg-info/15 px-2 py-0.5 font-mono text-info">cache miss</span>
+              </div>
+              <div class="text-[15px] leading-relaxed text-ink">
+                Q3 revenue grew <span class="font-mono text-primary">+18%</span> QoQ, driven mainly by three factors:
+                expansion within enterprise accounts <a href="#src1" class="align-super text-xs font-mono text-primary hover:underline">[1]</a>,
+                a higher net-retention rate from the new usage-based pricing tier
+                <a href="#src2" class="align-super text-xs font-mono text-primary hover:underline">[2]</a>, and
+                reduced churn following the onboarding revamp
+                <a href="#src3" class="align-super text-xs font-mono text-primary hover:underline">[3]</a>.<span class="caret"></span>
+              </div>
+              <!-- Sources strip -->
+              <div class="space-y-2 pt-1">
+                <p class="text-[11px] uppercase tracking-wider text-muted">Sources</p>
+                <div id="src1" class="flex items-start gap-3 rounded-lg border border-line bg-surface px-3 py-2">
+                  <span class="mt-0.5 font-mono text-xs text-primary">[1]</span>
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate text-sm">Q3-FY26 Board Deck.pdf <span class="ml-1 rounded bg-info/15 px-1.5 py-0.5 font-mono text-[10px] text-info">L3 · Internal</span></p>
+                    <p class="truncate text-xs text-muted">"Enterprise net-new ARR contributed 11pts of the 18% growth…"</p>
+                  </div>
+                </div>
+                <div id="src2" class="flex items-start gap-3 rounded-lg border border-line bg-surface px-3 py-2">
+                  <span class="mt-0.5 font-mono text-xs text-primary">[2]</span>
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate text-sm">Pricing-Experiment-Results.docx <span class="ml-1 rounded bg-info/15 px-1.5 py-0.5 font-mono text-[10px] text-info">L2 · Restricted</span></p>
+                    <p class="truncate text-xs text-muted">"Usage-based tier lifted NRR from 108% to 121%…"</p>
+                  </div>
+                </div>
+                <div id="src3" class="flex items-start gap-3 rounded-lg border border-line bg-surface px-3 py-2">
+                  <span class="mt-0.5 font-mono text-xs text-primary">[3]</span>
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate text-sm">onboarding-revamp-retro.md <span class="ml-1 rounded bg-info/15 px-1.5 py-0.5 font-mono text-[10px] text-info">L2 · Restricted</span></p>
+                    <p class="truncate text-xs text-muted">"30-day churn dropped 2.4pts after the guided setup launch…"</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Composer -->
+          <div class="border-t border-line bg-canvas px-6 py-4">
+            <div class="mx-auto max-w-3xl">
+              <div class="flex items-end gap-2 rounded-2xl border border-line bg-surface p-2 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20 transition">
+                <textarea rows="1" class="flex-1 resize-none bg-transparent px-3 py-2 text-sm text-ink placeholder:text-slate-500 focus:outline-none" placeholder="Ask anything about your workspace knowledge…"></textarea>
+                <button class="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-[#04210F] hover:bg-green-600 transition cursor-pointer">
+                  Send
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></svg>
+                </button>
+              </div>
+              <p class="mt-2 px-2 text-xs text-muted">Scoped to <span class="text-ink">your documents + L1–L3 workspace knowledge</span> · est. <span class="font-mono text-ink">~42</span> credits / query</p>
+            </div>
+          </div>
+        </main>
+
+        <!-- Debug / Inspector drawer -->
+        <aside class="hidden lg:flex w-96 shrink-0 flex-col border-l border-line bg-surface">
+          <div class="flex items-center justify-between border-b border-line px-4 h-12">
+            <span class="flex items-center gap-2 text-sm font-medium"><svg class="h-4 w-4 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></svg> Debug panel</span>
+            <a href="#" class="text-xs font-mono text-info hover:underline">trace ↗</a>
+          </div>
+          <div class="flex-1 overflow-y-auto p-4 space-y-4 text-sm">
+
+            <div class="rounded-lg border border-line bg-canvas p-3">
+              <p class="text-[11px] uppercase tracking-wider text-muted">Intent → Tool</p>
+              <p class="mt-1 font-mono text-xs">analytical_lookup → <span class="text-primary">search_workspace</span></p>
+            </div>
+
+            <div class="rounded-lg border border-line bg-canvas p-3">
+              <p class="text-[11px] uppercase tracking-wider text-muted">Index tier</p>
+              <p class="mt-1 font-mono text-xs">workspace · hybrid (BM25 + dense)</p>
+            </div>
+
+            <div class="rounded-lg border border-warning/40 bg-warning/10 p-3">
+              <p class="text-[11px] uppercase tracking-wider text-warning">Access filter</p>
+              <p class="mt-1 text-xs text-ink"><span class="font-mono">7</span> candidate chunks · <span class="font-mono text-warning">2</span> filtered out above clearance <span class="font-mono">L3</span></p>
+            </div>
+
+            <div class="rounded-lg border border-line bg-canvas p-3">
+              <p class="mb-2 text-[11px] uppercase tracking-wider text-muted">Retrieval + rerank scores</p>
+              <div class="space-y-2">
+                <div>
+                  <div class="flex justify-between font-mono text-xs"><span>board-deck#p12</span><span class="text-primary">0.91</span></div>
+                  <div class="score-bar mt-1"><span class="block h-full bg-primary" style="width:91%"></span></div>
+                </div>
+                <div>
+                  <div class="flex justify-between font-mono text-xs"><span>pricing#t4</span><span class="text-primary">0.87</span></div>
+                  <div class="score-bar mt-1"><span class="block h-full bg-primary" style="width:87%"></span></div>
+                </div>
+                <div>
+                  <div class="flex justify-between font-mono text-xs"><span>onboarding#s3</span><span class="text-info">0.74</span></div>
+                  <div class="score-bar mt-1"><span class="block h-full bg-info" style="width:74%"></span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+              <div class="rounded-lg border border-line bg-canvas p-3">
+                <p class="text-[11px] uppercase tracking-wider text-muted">Chunk expansion</p>
+                <p class="mt-1 font-mono text-xs">3 → 7 neighbors</p>
+              </div>
+              <div class="rounded-lg border border-line bg-canvas p-3">
+                <p class="text-[11px] uppercase tracking-wider text-muted">Injected memory</p>
+                <p class="mt-1 font-mono text-xs">2 turns</p>
+              </div>
+            </div>
+
+            <div class="rounded-lg border border-line bg-canvas p-3">
+              <p class="mb-2 text-[11px] uppercase tracking-wider text-muted">Model · cost</p>
+              <dl class="space-y-1 font-mono text-xs">
+                <div class="flex justify-between"><dt class="text-muted">model</dt><dd>smart (fallback: 0 hops)</dd></div>
+                <div class="flex justify-between"><dt class="text-muted">tokens</dt><dd>1,284 in / 312 out</dd></div>
+                <div class="flex justify-between"><dt class="text-muted">credits</dt><dd class="text-primary">−42</dd></div>
+              </dl>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

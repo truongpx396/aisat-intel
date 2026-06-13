@@ -92,7 +92,11 @@ Two collections: `personal`, `workspace`. Every chunk payload:
 }
 ```
 - Payload indexes: `workspace_id`, `user_id`, `access_level`, `hot`, `tags`.
-- Pre-filter injected before every search: `must = [workspace_id == ctx, access_level <= user_access_level]` (FR-007, SC-001).
+- **Dual-collection search strategy** — every RAG query searches both collections with different pre-filters, then merges results before reranking:
+  - `personal` collection: `must = [workspace_id == ctx, user_id == requester_user_id]` — returns only the requester's own private docs; never any other member's personal docs regardless of clearance level.
+  - `workspace` collection: `must = [workspace_id == ctx, access_level <= user_access_level]` — returns shared docs at or below the requester's clearance.
+  - Merged results are RRF-interleaved, then reranked as a single candidate set (FR-007, SC-001).
+- **Personal doc privacy invariant**: a chunk in the `personal` collection with `user_id != requester_user_id` MUST never appear in any search result, even for an L5 admin. This is enforced by the Qdrant payload filter above — not by prompt instructions.
 - Chunking: child = 200 tokens (stored/searched), parent = 1000 tokens (linked by `parent_doc_id`, sent to LLM).
 
 ## Relationships (high level)

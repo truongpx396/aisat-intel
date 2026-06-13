@@ -77,7 +77,10 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 - [ ] T025 [P] Contract test for LLM gateway (idempotency, one-hop fallback, embed-no-fallback, PII scrub) in `backend-python/tests/contract/test_llm_gateway.py` per [llm-gateway.md](./contracts/llm-gateway.md)
 - [ ] T026 Implement LLM gateway single chokepoint (`LLMRequest`/`LLMResponse`, alias resolution `fast`/`smart`/`embed`/`rerank`, idempotency, budget check, semantic cache, PII scrub via the shared `pii_scrub.py` of T123, trace + `llm_call_log` write) in `backend-python/src/services/llm_gateway.py` (FR-024, FR-029, SC-006)
-- [ ] T027 [P] Implement Qdrant access-control pre-filter helper (`workspace_id == ctx AND access_level <= effective_access_level`) in `backend-python/src/services/retrieval/filter.py` (FR-007, SC-001)
+- [ ] T027 [P] Implement Qdrant access-control pre-filter helper in `backend-python/src/services/retrieval/filter.py` with **two filter builders** (FR-007, SC-001):
+  - `personal_filter(workspace_id, user_id)` → `must = [workspace_id == ctx, user_id == requester_user_id]` (personal collection — owner-only, clearance irrelevant)
+  - `workspace_filter(workspace_id, access_level)` → `must = [workspace_id == ctx, access_level <= effective_access_level]` (workspace collection — shared docs)
+  - Both filters must be tested with a member attempting to retrieve another member's personal doc (must return 0 results)
 - [ ] T028 Implement FastMCP server bootstrap + per-role `allowed_tools` allowlist dispatch guard in `backend-python/src/mcp_server/server.py` (FR-011, FR-012)
 - [ ] T029 [P] Implement FastAPI app entrypoint + NATS subscriber bootstrap in `backend-python/src/main.py`
 - [ ] T030 [P] Implement BAML client scaffold + structlog/Langfuse bootstrap in `backend-python/src/baml_client/__init__.py` and `backend-python/src/observability.py`
@@ -154,7 +157,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 - [ ] T063 [US2] Create `Chat Session` table (`mem0_session_id`, hash-partitioned by `user_id`) and structured Tier 2 tables (`employees`, `projects`, `metrics`) migration in `backend-go/migrations/0011_query_structured.sql` (FR-009, FR-008)
 - [ ] T064 [P] [US2] Implement query schemas (`query.agent` payload, debug trace) in `backend-python/src/schemas/query.py` and `backend-python/src/schemas/agent.py`
-- [ ] T065 [P] [US2] Implement hybrid retrieval (BM25/SPLADE + dense, RRF merge) with the access pre-filter injected in `backend-python/src/services/retrieval/hybrid.py` (FR-007, SC-001)
+- [ ] T065 [P] [US2] Implement hybrid retrieval in `backend-python/src/services/retrieval/hybrid.py` (FR-007, SC-001): run **two parallel Qdrant searches** — `personal` collection with `personal_filter(workspace_id, requester_user_id)` and `workspace` collection with `workspace_filter(workspace_id, user_access_level)` — then RRF-interleave both result sets before reranking. The merged candidate set must never contain chunks from another user's personal docs.
 - [ ] T066 [P] [US2] Implement reranker via LLM gateway `rerank` alias + hot/cold tier routing in `backend-python/src/services/retrieval/reranker.py` and `backend-python/src/services/retrieval/hot_cold.py`
 - [ ] T067 [P] [US2] Implement child→parent chunk expansion in `backend-python/src/services/retrieval/expand.py`
 - [ ] T068 [P] [US2] Implement Mem0 per-user memory injection in `backend-python/src/services/agent/memory.py` (FR-009)

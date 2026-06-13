@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <title>AISAT-STUDIO — Agents</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: { extend: {
+        colors: { canvas:"#0F172A", surface:"#1E293B", surface2:"#273449", line:"#334155", primary:"#22C55E", info:"#38BDF8", warning:"#FBBF24", danger:"#EF4444", ink:"#F8FAFC", muted:"#94A3B8" },
+        fontFamily: { sans:['"Fira Sans"',"system-ui","sans-serif"], mono:['"Fira Code"',"ui-monospace","monospace"] }
+      } }
+    }
+  </script>
+  <style>body{background:#0F172A}</style>
+</head>
+<body class="font-sans text-ink antialiased">
+  <div class="flex h-screen overflow-hidden">
+
+    <!-- Sidebar -->
+    <aside class="hidden md:flex w-60 shrink-0 flex-col border-r border-line bg-surface">
+      <div class="flex items-center gap-2 px-5 h-16 border-b border-line">
+        <span class="grid place-items-center h-8 w-8 rounded-lg bg-primary text-[#04210F] font-mono font-bold">A</span>
+        <span class="font-mono font-semibold tracking-tight">AISAT<span class="text-primary">·</span>STUDIO</span>
+      </div>
+      <button class="mx-3 mt-3 flex items-center justify-between rounded-lg border border-line bg-canvas px-3 py-2 text-sm hover:border-slate-500 transition">
+        <span class="flex items-center gap-2"><span class="h-5 w-5 grid place-items-center rounded bg-info/20 text-info text-xs font-mono">Q3</span> Acme · Research</span>
+        <svg class="h-4 w-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <nav class="mt-4 flex-1 space-y-1 px-3 text-sm">
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="library.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> Library</a>
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="chat.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/></svg> Chat</a>
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="workspace.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> Workspace</a>
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="credits.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg> Credits</a>
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="admin.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M12 8v4l3 2"/></svg> Admin</a>
+        <a class="relative flex items-center gap-3 rounded-lg bg-surface2 px-3 py-2 font-medium text-ink" href="#">
+          <span class="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-primary"></span>
+          <svg class="h-4 w-4 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/></svg> Agents</a>
+      </nav>
+    </aside>
+
+    <!-- Main -->
+    <div class="flex flex-1 flex-col min-w-0">
+      <header class="flex h-16 shrink-0 items-center gap-4 border-b border-line bg-canvas/80 px-5 backdrop-blur">
+        <h1 class="text-lg font-semibold">Agents &amp; Tasks</h1>
+        <button class="ml-auto flex items-center gap-2 rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-[#04210F] hover:bg-green-600 transition cursor-pointer">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="M12 5v14"/></svg> Register agent
+        </button>
+      </header>
+
+      <div class="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+
+        <!-- Additive notice -->
+        <div class="flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3">
+          <svg class="h-5 w-5 text-muted shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+          <p class="text-sm text-muted">Agents are <span class="text-ink font-medium">optional</span>. Every core feature — ingest, query, library, credits, debug — works fully without one. Agents only add long-horizon, multi-step tasks.</p>
+        </div>
+
+        <!-- Registered devices -->
+        <section>
+          <p class="mb-3 text-[11px] uppercase tracking-wider text-muted">Registered devices</p>
+          <div class="grid gap-4 lg:grid-cols-2">
+            <!-- Server-routed -->
+            <div class="rounded-xl border border-line bg-surface p-5">
+              <div class="flex items-start justify-between">
+                <div class="flex items-center gap-3">
+                  <span class="grid h-9 w-9 place-items-center rounded-lg bg-surface2"><svg class="h-5 w-5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg></span>
+                  <div>
+                    <p class="text-sm font-medium">truong-mbp</p>
+                    <p class="font-mono text-xs text-muted">truong@acme-research</p>
+                  </div>
+                </div>
+                <span class="rounded-full bg-primary/15 px-2 py-0.5 font-mono text-[11px] text-primary">connected</span>
+              </div>
+              <div class="mt-4 flex items-center gap-2">
+                <span class="rounded-md bg-primary/15 px-2 py-1 font-mono text-[11px] text-primary">server-routed</span>
+                <span class="text-xs text-muted">metered &amp; audited</span>
+              </div>
+              <div class="mt-4 flex items-center justify-between border-t border-line pt-3 text-xs">
+                <span class="font-mono text-muted">last seen 2m ago</span>
+                <button class="text-danger hover:underline">Revoke credentials</button>
+              </div>
+            </div>
+
+            <!-- BYOK -->
+            <div class="rounded-xl border border-warning/40 bg-surface p-5">
+              <div class="flex items-start justify-between">
+                <div class="flex items-center gap-3">
+                  <span class="grid h-9 w-9 place-items-center rounded-lg bg-surface2"><svg class="h-5 w-5 text-warning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg></span>
+                  <div>
+                    <p class="text-sm font-medium">ci-runner-07</p>
+                    <p class="font-mono text-xs text-muted">mina@acme-research</p>
+                  </div>
+                </div>
+                <span class="rounded-full bg-primary/15 px-2 py-0.5 font-mono text-[11px] text-primary">connected</span>
+              </div>
+              <div class="mt-4 flex items-center gap-2">
+                <span class="rounded-md bg-warning/15 px-2 py-1 font-mono text-[11px] text-warning">bring-your-own-key</span>
+              </div>
+              <p class="mt-2 flex items-start gap-1.5 text-xs text-warning">
+                <svg class="mt-0.5 h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.7 18-9-16a1.5 1.5 0 0 0-2.6 0l-9 16A1.5 1.5 0 0 0 2.4 20h19.2a1.5 1.5 0 0 0 1.3-2z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                Bypasses server token metering &amp; moderation. Tool calls are still server-routed. Admins can disable this mode.
+              </p>
+              <div class="mt-4 flex items-center justify-between border-t border-line pt-3 text-xs">
+                <span class="font-mono text-muted">last seen 40s ago</span>
+                <button class="text-danger hover:underline">Revoke credentials</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Long-horizon tasks -->
+        <section>
+          <p class="mb-3 text-[11px] uppercase tracking-wider text-muted">Long-horizon tasks</p>
+          <div class="space-y-3">
+
+            <!-- Running -->
+            <div class="rounded-xl border border-line bg-surface p-4">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-3">
+                  <span class="rounded-full bg-info/15 px-2 py-0.5 font-mono text-[11px] text-info">running</span>
+                  <p class="text-sm font-medium">Summarize all Q3 reports &amp; draft an email</p>
+                </div>
+                <button class="rounded-lg border border-line px-3 py-1.5 text-xs hover:bg-surface2 transition cursor-pointer">Cancel</button>
+              </div>
+              <div class="mt-3 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <div class="flex justify-between text-xs text-muted"><span>checkpoint</span><span class="font-mono text-ink">step 4 / 6</span></div>
+                  <div class="mt-1.5 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full w-2/3 bg-info"></span></div>
+                </div>
+                <div>
+                  <div class="flex justify-between text-xs text-muted"><span>per-task spend / cap</span><span class="font-mono text-ink">1,840 / 5,000 cr</span></div>
+                  <div class="mt-1.5 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full bg-primary" style="width:37%"></span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Resumed after interruption -->
+            <div class="rounded-xl border border-line bg-surface p-4">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-3">
+                  <span class="rounded-full bg-info/15 px-2 py-0.5 font-mono text-[11px] text-info">resumed</span>
+                  <p class="text-sm font-medium">Reconcile vendor contracts vs invoices</p>
+                </div>
+                <span class="font-mono text-xs text-muted">step 9 / 11</span>
+              </div>
+              <p class="mt-2 flex items-center gap-1.5 text-xs text-info">
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                Worker was interrupted — auto-resumed from last checkpoint (no work lost).
+              </p>
+            </div>
+
+            <!-- Halted at cost cap -->
+            <div class="rounded-xl border border-danger/40 bg-surface p-4">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-3">
+                  <span class="rounded-full bg-danger/15 px-2 py-0.5 font-mono text-[11px] text-danger">halted · cost cap</span>
+                  <p class="text-sm font-medium">Full-corpus competitive analysis</p>
+                </div>
+                <button class="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-[#04210F] hover:bg-green-600 transition cursor-pointer">Raise cap &amp; resume</button>
+              </div>
+              <div class="mt-3">
+                <div class="flex justify-between text-xs text-muted"><span>per-task spend / cap</span><span class="font-mono text-danger">10,000 / 10,000 cr</span></div>
+                <div class="mt-1.5 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full w-full bg-danger"></span></div>
+              </div>
+              <p class="mt-2 text-xs text-muted">Stopped at its per-task cap, independent of the daily budget. You were notified.</p>
+            </div>
+
+            <!-- Completed -->
+            <div class="rounded-xl border border-line bg-surface p-4 opacity-80">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-3">
+                  <span class="rounded-full bg-primary/15 px-2 py-0.5 font-mono text-[11px] text-primary">completed</span>
+                  <p class="text-sm">Tag &amp; summarize onboarding docs</p>
+                </div>
+                <span class="font-mono text-xs text-muted">−620 cr · 3h ago</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

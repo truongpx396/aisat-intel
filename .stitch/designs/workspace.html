@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <title>AISAT-STUDIO — Workspace</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: { extend: {
+        colors: { canvas:"#0F172A", surface:"#1E293B", surface2:"#273449", line:"#334155", primary:"#22C55E", info:"#38BDF8", warning:"#FBBF24", danger:"#EF4444", ink:"#F8FAFC", muted:"#94A3B8" },
+        fontFamily: { sans:['"Fira Sans"',"system-ui","sans-serif"], mono:['"Fira Code"',"ui-monospace","monospace"] }
+      } }
+    }
+  </script>
+  <style>body{background:#0F172A}</style>
+</head>
+<body class="font-sans text-ink antialiased">
+  <div class="flex h-screen overflow-hidden">
+
+    <!-- Sidebar -->
+    <aside class="hidden md:flex w-60 shrink-0 flex-col border-r border-line bg-surface">
+      <div class="flex items-center gap-2 px-5 h-16 border-b border-line">
+        <span class="grid place-items-center h-8 w-8 rounded-lg bg-primary text-[#04210F] font-mono font-bold">A</span>
+        <span class="font-mono font-semibold tracking-tight">AISAT<span class="text-primary">·</span>STUDIO</span>
+      </div>
+      <button class="mx-3 mt-3 flex items-center justify-between rounded-lg border border-line bg-canvas px-3 py-2 text-sm hover:border-slate-500 transition">
+        <span class="flex items-center gap-2"><span class="h-5 w-5 grid place-items-center rounded bg-info/20 text-info text-xs font-mono">Q3</span> Acme · Research</span>
+        <svg class="h-4 w-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <nav class="mt-4 flex-1 space-y-1 px-3 text-sm">
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="library.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> Library</a>
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="chat.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/></svg> Chat</a>
+        <a class="relative flex items-center gap-3 rounded-lg bg-surface2 px-3 py-2 font-medium text-ink" href="#">
+          <span class="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-primary"></span>
+          <svg class="h-4 w-4 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> Workspace</a>
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="credits.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg> Credits</a>
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="admin.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M12 8v4l3 2"/></svg> Admin</a>
+        <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-muted hover:bg-surface2 hover:text-ink transition" href="agents.html">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/></svg> Agents</a>
+      </nav>
+    </aside>
+
+    <!-- Main -->
+    <div class="flex flex-1 flex-col min-w-0">
+      <header class="flex h-16 shrink-0 items-center gap-4 border-b border-line bg-canvas/80 px-5 backdrop-blur">
+        <h1 class="text-lg font-semibold">Workspace</h1>
+        <span class="rounded-md border border-line bg-surface px-2 py-1 font-mono text-xs text-muted">Acme · Research</span>
+        <button class="ml-auto flex items-center gap-2 rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-[#04210F] hover:bg-green-600 transition cursor-pointer">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="M12 5v14"/></svg> Invite member
+        </button>
+      </header>
+
+      <div class="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+
+        <!-- Isolation banner -->
+        <div class="flex items-center gap-3 rounded-xl border border-info/30 bg-info/10 px-4 py-3">
+          <svg class="h-5 w-5 text-info shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <p class="text-sm">Knowledge in this workspace is <span class="font-medium text-info">fully isolated</span> — never visible to other workspaces. Retrieval is scoped to your clearance for <span class="font-medium text-ink">shared</span> documents. <span class="font-medium text-ink">Personal documents are always private to their owner</span> — no one else can read them, regardless of clearance level.</p>
+        </div>
+
+        <section class="grid gap-4 lg:grid-cols-3">
+          <!-- My clearance -->
+          <div class="rounded-xl border border-line bg-surface p-5">
+            <p class="text-[11px] uppercase tracking-wider text-muted">Your access</p>
+            <div class="mt-2 flex items-center gap-2">
+              <span class="rounded-md bg-surface2 px-2 py-1 text-sm">Member</span>
+              <span class="rounded bg-info/15 px-1.5 py-0.5 font-mono text-[11px] text-info">L3</span>
+            </div>
+            <p class="mt-4 mb-2 text-[11px] uppercase tracking-wider text-muted">Clearance ladder</p>
+            <ul class="space-y-1.5 text-sm">
+              <li class="flex items-start justify-between rounded-md bg-canvas px-3 py-2">
+                <div><span class="font-mono text-muted">L5 · Executive</span><p class="mt-0.5 text-[11px] text-muted leading-tight">Board / executive — shared docs tagged L5</p></div>
+                <span class="flex items-center gap-1 text-xs text-muted mt-0.5"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> locked</span>
+              </li>
+              <li class="flex items-start justify-between rounded-md bg-canvas px-3 py-2">
+                <div><span class="font-mono text-muted">L4 · Confidential</span><p class="mt-0.5 text-[11px] text-muted leading-tight">Confidential — shared docs tagged L4</p></div>
+                <span class="flex items-center gap-1 text-xs text-muted mt-0.5"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> locked</span>
+              </li>
+              <li class="flex items-start justify-between rounded-md border border-primary/40 bg-primary/10 px-3 py-2">
+                <div><span class="font-mono text-primary">L3 · Internal</span><p class="mt-0.5 text-[11px] text-primary/70 leading-tight">Internal — shared docs tagged L3 and below</p></div>
+                <span class="text-xs text-primary mt-0.5">your level</span>
+              </li>
+              <li class="flex items-start justify-between rounded-md bg-canvas px-3 py-2">
+                <div><span class="font-mono text-ink">L2 · Restricted</span><p class="mt-0.5 text-[11px] text-muted leading-tight">Restricted — shared docs tagged L2 and below</p></div>
+                <span class="text-xs text-primary mt-0.5">visible</span>
+              </li>
+              <li class="flex items-start justify-between rounded-md bg-canvas px-3 py-2">
+                <div><span class="font-mono text-ink">L1 · Public</span><p class="mt-0.5 text-[11px] text-muted leading-tight">Public — shared docs tagged L1 only</p></div>
+                <span class="text-xs text-primary mt-0.5">visible</span>
+              </li>
+              <div class="mt-2 rounded-md border border-line bg-surface2 px-3 py-2 text-[11px] text-muted leading-relaxed space-y-1.5">
+                <p><span class="font-medium text-ink">How to share a document:</span> when you upload, pick the tag that matches the <span class="text-ink">minimum level</span> you want to require. Tag <span class="font-mono text-ink">L1</span> → everyone sees it. Tag <span class="font-mono text-ink">L3</span> → only L3+ members see it. You can only tag up to your own level.</p>
+                <p><span class="font-medium text-ink">Personal docs are never shared</span> — visible only to you, regardless of anyone else's clearance level.</p>
+              </div>
+            </ul>
+          </div>
+
+          <!-- Knowledge split -->
+          <div class="lg:col-span-2 rounded-xl border border-line bg-surface p-5">
+            <p class="text-[11px] uppercase tracking-wider text-muted">Knowledge you can access</p>
+            <div class="mt-3 grid gap-3 sm:grid-cols-2">
+              <div class="rounded-lg border border-line bg-canvas p-4">
+                <div class="flex items-center gap-2 text-sm"><svg class="h-4 w-4 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/></svg> Personal</div>
+                <p class="mt-2 font-mono text-2xl font-semibold">38</p>
+                <p class="text-xs text-muted">your own documents</p>
+              </div>
+              <div class="rounded-lg border border-line bg-canvas p-4">
+                <div class="flex items-center gap-2 text-sm"><svg class="h-4 w-4 text-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg> Shared (≤ L3)</div>
+                <p class="mt-2 font-mono text-2xl font-semibold">104</p>
+                <p class="text-xs text-muted">team docs at or below your clearance</p>
+              </div>
+            </div>
+            <p class="mt-4 mb-2 text-[11px] uppercase tracking-wider text-muted">Shared by clearance</p>
+            <div class="space-y-2 text-sm">
+              <div><div class="flex justify-between"><span class="font-mono text-muted">L3 · Internal</span><span class="font-mono">41</span></div><div class="mt-1 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full bg-primary" style="width:55%"></span></div></div>
+              <div><div class="flex justify-between"><span class="font-mono text-muted">L2 · Restricted</span><span class="font-mono">38</span></div><div class="mt-1 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full bg-primary" style="width:50%"></span></div></div>
+              <div><div class="flex justify-between"><span class="font-mono text-muted">L1 · Public</span><span class="font-mono">25</span></div><div class="mt-1 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full bg-primary" style="width:33%"></span></div></div>
+              <div class="flex items-center justify-between rounded-md border border-line bg-canvas px-3 py-2 text-xs text-muted"><span class="font-mono">L4–L5</span><span class="flex items-center gap-1"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> hidden — above your clearance</span></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Members -->
+        <section class="rounded-xl border border-line bg-surface">
+          <div class="flex items-center justify-between border-b border-line px-5 py-3">
+            <p class="text-sm font-medium">Members <span class="ml-1 font-mono text-xs text-muted">9</span></p>
+            <input class="rounded-lg border border-line bg-canvas px-3 py-1.5 text-sm placeholder:text-slate-500 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20" placeholder="Find member…"/>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="text-left text-[11px] uppercase tracking-wider text-muted">
+                <tr class="border-b border-line">
+                  <th class="px-5 py-2 font-medium">Member</th>
+                  <th class="px-5 py-2 font-medium">Role</th>
+                  <th class="px-5 py-2 font-medium">Clearance</th>
+                  <th class="px-5 py-2 font-medium">Status</th>
+                  <th class="px-5 py-2 font-medium">Last active</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="border-b border-line/60">
+                  <td class="px-5 py-3"><span class="flex items-center gap-2"><span class="h-6 w-6 grid place-items-center rounded-full bg-surface2 font-mono text-xs">TP</span>Truong P. <span class="text-xs text-muted">(you)</span></span></td>
+                  <td class="px-5 py-3"><span class="rounded-md bg-surface2 px-2 py-0.5 text-xs">Owner</span></td>
+                    <td class="px-5 py-3"><span class="rounded bg-info/15 px-1.5 py-0.5 font-mono text-[10px] text-info">L5 · Executive</span></td>
+                  <td class="px-5 py-3"><span class="rounded-full bg-primary/15 px-2 py-0.5 font-mono text-[11px] text-primary">active</span></td>
+                  <td class="px-5 py-3 font-mono text-xs text-muted">now</td>
+                </tr>
+                <tr class="border-b border-line/60">
+                  <td class="px-5 py-3"><span class="flex items-center gap-2"><span class="h-6 w-6 grid place-items-center rounded-full bg-surface2 font-mono text-xs">MK</span>Mina K.</span></td>
+                  <td class="px-5 py-3"><span class="rounded-md bg-surface2 px-2 py-0.5 text-xs">Admin</span></td>
+                    <td class="px-5 py-3"><span class="rounded bg-info/15 px-1.5 py-0.5 font-mono text-[10px] text-info">L4 · Confidential</span></td>
+                  <td class="px-5 py-3"><span class="rounded-full bg-primary/15 px-2 py-0.5 font-mono text-[11px] text-primary">active</span></td>
+                  <td class="px-5 py-3 font-mono text-xs text-muted">12m ago</td>
+                </tr>
+                <tr class="border-b border-line/60">
+                  <td class="px-5 py-3"><span class="flex items-center gap-2"><span class="h-6 w-6 grid place-items-center rounded-full bg-surface2 font-mono text-xs">RS</span>Rahul S.</span></td>
+                  <td class="px-5 py-3"><span class="rounded-md bg-surface2 px-2 py-0.5 text-xs">Member</span></td>
+                    <td class="px-5 py-3"><span class="rounded bg-info/15 px-1.5 py-0.5 font-mono text-[10px] text-info">L3 · Internal</span></td>
+                  <td class="px-5 py-3"><span class="rounded-full bg-primary/15 px-2 py-0.5 font-mono text-[11px] text-primary">active</span></td>
+                  <td class="px-5 py-3 font-mono text-xs text-muted">1h ago</td>
+                </tr>
+                <tr>
+                  <td class="px-5 py-3"><span class="flex items-center gap-2"><span class="h-6 w-6 grid place-items-center rounded-full bg-surface2 font-mono text-xs">EL</span>elena@partner.co</span></td>
+                  <td class="px-5 py-3"><span class="rounded-md bg-surface2 px-2 py-0.5 text-xs">Member</span></td>
+                    <td class="px-5 py-3"><span class="rounded bg-info/15 px-1.5 py-0.5 font-mono text-[10px] text-info">L2 · Restricted</span></td>
+                  <td class="px-5 py-3"><span class="rounded-full bg-warning/15 px-2 py-0.5 font-mono text-[11px] text-warning">pending</span></td>
+                  <td class="px-5 py-3"><button class="text-xs text-danger hover:underline">Revoke invite</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
