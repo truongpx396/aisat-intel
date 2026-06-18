@@ -70,6 +70,12 @@ All Technical Context items are resolved; the spec carries no remaining `NEEDS C
 - **Rationale**: FR-025–FR-028 + SC-008/SC-009. Optionality keeps the core product independent of agents; the proxy default preserves metering/audit; BYOK is an explicit, admin-gateable trade-off.
 - **Alternatives considered**: Making agents mandatory for any feature — rejected: violates SC-008.
 
+## 12. Context compression (Headroom) — deferred to Phase 2, seam in Phase 1
+
+- **Decision**: Do **not** integrate a context-compression layer ([Headroom](https://github.com/chopratejas/headroom)) in Phase 1. Instead, treat `services/llm_gateway.py` as the single, documented seam where a pre-send compression transform (and post-retrieval chunk compression) could later slot in without changing the gateway's public interface or any caller. Phase 2 evaluates Headroom in **library mode inside the existing gateway** (not proxy mode — the gateway already owns aliases, fallback, budget, and semantic cache; a second proxy would be redundant), behind a kernel `Flags` gate, with `compress` on and the output/effort shaper **off**.
+- **Rationale**: The gateway chokepoint (§4) and per-token credit metering (§3) make token reduction land in exactly one place and map directly to lower spend per answer — a strong fit. But three release-blocking constraints make it a *measured*, not assumed, change: (a) **citations** (SC-002/SC-003) — compressing retrieved chunks before the LLM can degrade citation fidelity, so it must clear the `evals/run.py` gate (recall@k, MRR, citation accuracy) first; (b) **access control = 100% correctness, release blocker** (SC-001) — Headroom's reversible cache (CCR) persists plaintext originals of already-retrieved, access-scoped content locally, a *new* sensitive datastore that would need the same RLS/tenant-isolation guarantees as Postgres/Qdrant or it becomes a leak path (FR-030 access-filter assertion must extend to it); (c) **determinism / refuse-before-spend** (SC-007) — the output shaper mutates model behavior and the system prompt, which fights the deterministic, contract-first posture, so it stays off initially. Operationally it also drags in a Rust toolchain, ONNX runtime, and an HF model download — heavy for the MVP's clean kernel/product split.
+- **Alternatives considered**: (1) Headroom **proxy mode** in front of providers — rejected: duplicates the gateway's existing fallback/cache/metering chokepoint and adds a second moderation/metering surface. (2) Integrating compression in Phase 1 — rejected: unverified citation/access-control impact against release-blocking SCs. (3) Building a bespoke compressor — rejected for Phase 1 scope; revisit only if Headroom's eval results are insufficient.
+
 ## Resolved unknowns summary
 
 | Item | Resolution | Source |
@@ -81,3 +87,4 @@ All Technical Context items are resolved; the spec carries no remaining `NEEDS C
 | Raw prompt/response retention | 30 days, then metadata/aggregates only | Clarification Q5 |
 | Embedding fallback | None per-call; park in DLQ | FR-029 + §1 caveat |
 | Structured data access | Fixed parameterized tools, not Text-to-SQL | FR-008 |
+| Context compression (Headroom) | Deferred to Phase 2; gateway seam only in Phase 1 | §12 |
