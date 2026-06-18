@@ -14,7 +14,25 @@ type SSEEventType =
   | { event: "error";       data: { code: string; message: string } }
   | { event: "done";        data: { usage: { input: number; output: number }; credits_deducted: number } }
   | { event: "suggestions"; data: { questions: string[] } }  // FR-031: 2–3 follow-up chips, only when source_count > 0 and answer was not refused
+  | { event: "notification";  data: Notification }            // FR-034: a new notification for the connected recipient
+  | { event: "unread_count";  data: { unread: number } }      // FR-034: updated bell badge count
 ```
+
+```typescript
+interface Notification {
+  id: string;
+  category:
+    | "ingestion_complete" | "ingestion_failed"
+    | "invite_received" | "invite_accepted" | "invite_revoked"
+    | "credit_warning" | "credit_exhausted" | "task_halted"
+    | "doc_shared" | "clearance_changed" | "member_joined" | "admin_broadcast";
+  priority: "info" | "warning" | "critical";
+  title: string;
+  body: string;
+  payload: Record<string, unknown>;  // deep-link refs, e.g. { doc_id }, { invite_id }, { run_id }
+  read_at: string | null;
+  created_at: string;
+}
 
 ## Streams
 
@@ -27,6 +45,11 @@ type SSEEventType =
 ### Ingestion stream — `GET /ingest/{jobId}/status` (US1)
 - `status.stage` progression: `received` → `converting` → `extracting_metadata` → `chunking` → `embedding` → `indexed`.
 - Terminal error stages via `error.code`: `unsupported_type` (video/audio stub), `oversize`, `dlq_parked`, `failed` — never a silent stall (FR-003).
+
+### Notification stream — `GET /notifications/stream` (US8)
+- Long-lived per-user stream relaying the recipient's notifications from Redis pub/sub (`notify:user:<user_id>`) as SSE.
+- On connect: emits an initial `unread_count`. Thereafter, each new notification emits a `notification` event followed by an updated `unread_count`.
+- Only the authenticated caller's own notifications are emitted; cross-member/cross-workspace delivery is impossible by construction (FR-036, SC-012).
 
 ## Debug trace (companion to the query stream)
 
@@ -56,3 +79,4 @@ interface DebugTrace {
 - Every completed query produces a `DebugTrace` with all fields populated, including `access_filter` (count of docs filtered by clearance) and `credits_deducted` (FR-021, SC-005).
 - A moderation-blocked query emits exactly one `error` event and no `done`/`token` events and zero credit spend (SC-007).
 - An oversize/unsupported ingestion emits a terminal `error` stage, not an indefinite `status` (FR-003, SC-010).
+- The notification stream emits an initial `unread_count` on connect and a `notification` + `unread_count` pair per new event, and never emits another member's or another workspace's notification (FR-034, SC-012).

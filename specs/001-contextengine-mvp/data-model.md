@@ -77,8 +77,14 @@ Workspace-scoped operational data answerable via fixed tools.
 - `metrics` (`id`, `workspace_id`, `project_id`, `metric_name`, `value`, `recorded_at`)
 - Rules: queried only by fixed parameterized tools, never free-form SQL (FR-008).
 
+### Notifications (K)
+Recipient-scoped record of a workspace event, surfaced in-app and optionally by email (US8).
+- `notifications`: `id`, `workspace_id`, `user_id` (recipient), `category` (`ingestion_complete`|`ingestion_failed`|`invite_received`|`invite_accepted`|`invite_revoked`|`credit_warning`|`credit_exhausted`|`task_halted`|`doc_shared`|`clearance_changed`|`member_joined`|`admin_broadcast`), `priority` (`info`|`warning`|`critical`), `title`, `body`, `payload` JSONB (resource refs for deep-linking: `doc_id`/`invite_id`/`run_id`/`job_id`), `read_at` (NULL = unread), `created_at`
+- `notification_preferences`: `id`, `user_id`, `workspace_id`, `category`, `in_app` BOOL, `email` BOOL, `UNIQUE(user_id, workspace_id, category)`
+- Rules: RLS restricts `notifications` to `user_id = current_user` within `workspace_id` — a notification is never visible to any other member or across workspaces, even at L5 (FR-036, SC-012). The notification service applies `notification_preferences` before delivery; an absent preference row uses the category default (in-app on; email on for `credit_warning`, `credit_exhausted`, `invite_received`, `task_halted`, off otherwise) (FR-035). Index on `(user_id, read_at, created_at)` for inbox + unread-count queries.
+
 ### Supporting kernel tables
-- `api_keys` (K), `plans` (K), `subscriptions` (K), `notifications` (K), `feature_flags` (K), `token_usage_daily` (P, per-role daily token counter, partitioned by `usage_date`).
+- `api_keys` (K), `plans` (K), `subscriptions` (K), `feature_flags` (K), `token_usage_daily` (P, per-role daily token counter, partitioned by `usage_date`).
 
 ## Vector store (Qdrant) payload schema
 
@@ -119,6 +125,8 @@ erDiagram
     WORKSPACE ||--o{ EMPLOYEE : "scopes"
     WORKSPACE ||--o{ PROJECT : "scopes"
     PROJECT ||--o{ METRIC : "measures"
+    USER ||--o{ NOTIFICATION : "receives"
+    WORKSPACE ||--o{ NOTIFICATION : "scopes"
 ```
 
 ## Validation & invariants (test targets)
@@ -133,3 +141,4 @@ erDiagram
 | Raw prompt/response purged at 30 days | Clarification Q5, FR-024 | Partition drop + PII scrub-before-write |
 | Long-horizon run never exceeds `credits_cap` | SC-009, FR-028 | Per-step cap check in worker loop |
 | Disallowed/injection input refused before retrieval/spend | SC-007, FR-010 | LangGraph Node 0 moderation gate |
+| A notification is visible only to its recipient, never to other members or across workspaces | SC-012 (blocker), FR-036 | `notifications` RLS (`user_id = current_user` within `workspace_id`) |

@@ -151,6 +151,26 @@ A member optionally connects a local agent to the workspace to run complex, mult
 
 ---
 
+### User Story 8 - Stay informed through notifications (Priority: P3)
+
+Members receive notifications about workspace activity that concerns them — ingestion finishing, invites, credit warnings and exhaustion, a long-horizon task halting at its cost cap, a document being shared with them or their clearance changing, a new member joining (admins), and admin broadcasts. Notifications appear in real time on an in-app bell/inbox and, for categories the member has opted into, are also delivered by email. Each member controls, per category, whether they receive in-app and/or email notifications.
+
+**Why this priority**: Notifications increase engagement and surface actionable events, but the core knowledge loop (US1/US2) and the flows that *produce* the events function without them. It builds on existing ingestion, invite, credit, and agent-run flows.
+
+**Independent Test**: As a recipient, trigger an event (e.g., finish an ingestion), confirm a notification appears in the in-app inbox in real time and increments the unread badge; mark it read and confirm the badge decrements; disable that category's email channel and confirm a subsequent event sends no email while still appearing in-app.
+
+**Acceptance Scenarios**:
+
+1. **Given** a member with default preferences, **When** an event concerning them occurs (e.g., their ingestion completes), **Then** a notification is persisted to their inbox and pushed in real time, incrementing the unread count.
+2. **Given** an unread notification, **When** the member marks it read (individually or via mark-all-read), **Then** its read state persists and the unread count decrements accordingly.
+3. **Given** a member who has disabled the email channel for a category, **When** an event in that category occurs, **Then** no email is sent for it, though the in-app notification is still delivered if the in-app channel remains enabled.
+4. **Given** a member who has disabled both channels for a category, **When** an event in that category occurs, **Then** no notification is delivered to that member for that category.
+5. **Given** two members in different workspaces (or a different recipient in the same workspace), **When** a notification is generated for one, **Then** it is never visible or delivered to the other.
+6. **Given** a workspace admin, **When** they send a broadcast announcement, **Then** every current member of that workspace receives it subject to their own per-channel preferences.
+7. **Given** a transient email-provider failure, **When** an email notification cannot be delivered, **Then** it is retried and, on exhausting retries, parked for later inspection rather than silently dropped, while the in-app notification is unaffected.
+
+---
+
 ### Edge Cases
 
 - **Provider outage**: When a primary AI provider times out, returns a server error, or is rate-limited, the system fails over to a fallback provider (capped at one hop) for generation/captioning; it does not fail over on merely "low-quality" output.
@@ -162,6 +182,8 @@ A member optionally connects a local agent to the workspace to run complex, mult
 - **Oversize upload**: A file exceeding the workspace's per-file size limit (default 50 MB) is rejected at the upload boundary with a clear message before any ingestion or credit spend.
 - **Empty or unanswerable query**: When no authorized documents are relevant, the assistant responds that it has no relevant information rather than fabricating an answer or leaking restricted content.
 - **Bring-your-own-key agents**: Agents using their own provider keys bypass server-side moderation and token metering; members must explicitly accept this gap at registration, and admins can disable this mode per workspace.
+- **Notification recipient scoping**: A notification is delivered only to its intended recipient within the originating workspace; it is never visible to other members or across workspaces, even at higher clearance.
+- **Email-provider outage**: A failed email send is retried with backoff and parked in a dead-letter path on exhaustion; the in-app notification is delivered independently and is never blocked by email failure.
 
 ## Requirements *(mandatory)*
 
@@ -219,6 +241,15 @@ A member optionally connects a local agent to the workspace to run complex, mult
 - **FR-030**: System MUST ship a minimal evaluation seed set (prompt examples and a golden retrieval set) used as a regression tripwire, including a hard assertion that a query never returns a document above the requester's clearance.
 - **FR-031**: After delivering an answer, the system MUST generate 2–3 suggested follow-up questions derived from the answer context and the retrieved sources. Suggestions MUST be scoped to the member's clearance (never hint at inaccessible content), rendered as clickable chips below the answer, and clicking a chip MUST populate and submit the composer with that question. Suggestions MUST NOT be generated when the answer was refused (injection-blocked) or when zero sources were retrieved.
 
+**Notifications**
+
+- **FR-032**: System MUST generate a notification for each of the following recipient-scoped events: ingestion completed, ingestion failed, workspace invite received/accepted/revoked, credit near-limit warning, credit balance exhausted, long-horizon task halted at its cost cap, document shared with the member, member clearance changed, new member joined (admin recipients), and admin broadcast. Each notification MUST carry a category, priority, human-readable title/body, and a payload referencing the originating resource for deep-linking.
+- **FR-033**: System MUST persist notifications in a recipient-scoped inbox, expose an unread count, and let members mark notifications read individually and all-at-once; read state MUST persist durably.
+- **FR-034**: System MUST deliver in-app notifications to the recipient in real time over the existing streaming channel, updating the unread count without a page reload.
+- **FR-035**: System MUST let each member configure delivery per category and per channel (in-app and email) independently; when a category's channel is disabled, the system MUST NOT deliver that category over that channel. Email delivery MUST go through a provider-agnostic interface and MUST retry transient failures, parking exhausted sends in a dead-letter path rather than dropping them silently.
+- **FR-036**: System MUST scope every notification strictly to its intended recipient within the originating workspace, enforced at the data layer; a notification MUST never be visible or delivered to another member or across workspaces, regardless of clearance.
+- **FR-037**: System MUST allow a workspace admin to send a broadcast announcement to all current members of that workspace, subject to each member's per-channel preferences, and MUST record the broadcast in the audit trail.
+
 ### Key Entities *(include if feature involves data)*
 
 - **User**: A person with credentials and, within a workspace, a role and clearance level.
@@ -234,6 +265,8 @@ A member optionally connects a local agent to the workspace to run complex, mult
 - **Connected Device**: A registered local agent with type, billing mode, scope, and revocable credentials.
 - **Long-Horizon Task Run**: A durable record of a multi-step agent task with status, checkpoint state, per-task cost cap, and spend.
 - **Structured Records**: Workspace-scoped operational data (employees, projects, metrics) answerable via fixed tools.
+- **Notification**: A recipient-scoped, persisted record of a workspace event — category, priority, title, body, resource-reference payload, and read state — surfaced in the in-app inbox and optionally by email.
+- **Notification Preference**: A member's per-category, per-channel (in-app / email) delivery choice within a workspace.
 
 ## Success Criteria *(mandatory)*
 
@@ -249,6 +282,8 @@ A member optionally connects a local agent to the workspace to run complex, mult
 - **SC-008**: All core capabilities (ingest, query, library, workspace, credits, debug panel) function with zero local agents connected.
 - **SC-009**: An interrupted long-horizon task resumes and completes (or is cleanly cancelled) without loss, and never exceeds its per-task cost cap.
 - **SC-010**: Near-limit usage produces a member-visible warning at the configured threshold (admin-configurable per workspace, default 80%), and exhaustion produces a clear actionable message rather than a silent failure, in 100% of cases.
+- **SC-011**: A notification for a triggering event reaches the recipient's connected in-app inbox in near real time (target: under 5 seconds at p95), and the unread count reflects it without a page reload.
+- **SC-012**: 100% recipient-scoping correctness — across all generated notifications, a notification is never delivered to or visible by any member other than its intended recipient, nor across workspaces (hard requirement; any violation is a release blocker).
 
 ## Assumptions
 

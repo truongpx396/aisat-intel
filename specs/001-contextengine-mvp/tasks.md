@@ -10,12 +10,12 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 **Tests**: Test tasks ARE included. The plan declares TDD NON-NEGOTIABLE (Constitution Principle VI), and every contract in `contracts/` carries explicit "Contract test obligations". Contract/integration tests are written first (Red), must fail, then implementation makes them pass (Green). Integration tests run real backing services via **Testcontainers** (`testcontainers-go` / `testcontainers-python` spin up Postgres/Redis/NATS/Qdrant per run — no shared/mocked infra); critical end-to-end journeys are exercised in the browser via **Playwright**.
 
-**Organization**: Tasks are grouped by user story (US1–US7) to enable independent implementation and testing. Within each story: tests → models → services → endpoints → integration.
+**Organization**: Tasks are grouped by user story (US1–US8) to enable independent implementation and testing. Within each story: tests → models → services → endpoints → integration.
 
 ## Format: `[ID] [P?] [Story] Description`
 
 - **[P]**: Can run in parallel (different files, no dependencies on incomplete tasks)
-- **[Story]**: Which user story this task belongs to (US1–US7); omitted for Setup / Foundational / Polish
+- **[Story]**: Which user story this task belongs to (US1–US8); omitted for Setup / Foundational / Polish
 - Exact file paths are included in every task
 
 ## Path Conventions (from plan.md)
@@ -66,10 +66,10 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 ### Database schema, RLS & shared layer
 
 - [ ] T018 Create migration framework + base migration in `backend-go/migrations/0001_init.sql` (UUID v7 helpers, `SET LOCAL app.workspace_id` convention)
-- [ ] T019 Create kernel tables migration in `backend-go/migrations/0002_kernel.sql`: `users`, `workspaces`, `workspace_members`, `invites`, `audit_log`, `api_keys`, `plans`, `subscriptions`, `notifications`, `feature_flags`
-- [ ] T020 Create RLS policies migration in `backend-go/migrations/0003_rls.sql` applying `USING (workspace_id = current_setting('app.workspace_id')::uuid)` to every tenant-scoped table (FR-014, SC-001)
+- [ ] T019 Create kernel tables migration in `backend-go/migrations/0002_kernel.sql`: `users`, `workspaces`, `workspace_members`, `invites`, `audit_log`, `api_keys`, `plans`, `subscriptions`, `notifications` (recipient `user_id`, `category`, `priority`, `title`, `body`, `payload` JSONB, `read_at`, index `(user_id, read_at, created_at)`), `notification_preferences` (`user_id`, `workspace_id`, `category`, `in_app`, `email`, `UNIQUE(user_id, workspace_id, category)`), `feature_flags`
+- [ ] T020 Create RLS policies migration in `backend-go/migrations/0003_rls.sql` applying `USING (workspace_id = current_setting('app.workspace_id')::uuid)` to every tenant-scoped table (FR-014, SC-001); for `notifications` additionally restrict to the recipient via `USING (workspace_id = current_setting('app.workspace_id')::uuid AND user_id = current_setting('app.user_id')::uuid)` (FR-036, SC-012)
 - [ ] T021 [P] Implement shared error envelope `{code,message,details}` in `backend-go/internal/shared/errors/errors.go` and DTO helpers in `backend-go/internal/shared/dto/dto.go` (Principle VIII)
-- [ ] T022 [P] Implement Tenant middleware (resolves workspace from JWT/PAT, runs `SET LOCAL app.workspace_id`) in `backend-go/internal/shared/middleware/tenant.go` (FR-004, FR-027)
+- [ ] T022 [P] Implement Tenant middleware (resolves workspace from JWT/PAT, runs `SET LOCAL app.workspace_id` and `SET LOCAL app.user_id`) in `backend-go/internal/shared/middleware/tenant.go` (FR-004, FR-027, FR-036)
 - [ ] T023 [P] Implement Actor/auth + request-id + recovery middleware in `backend-go/internal/shared/middleware/auth.go` and `backend-go/internal/shared/middleware/observability.go`
 - [ ] T024 Implement app root wiring (build `appCtx`, call each feature's `SetupModule`) in `backend-go/cmd/api/main.go` and shared router in `backend-go/cmd/api/routes.go` (Principle IV)
 
@@ -301,7 +301,34 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 ---
 
-## Phase 10: Polish & Cross-Cutting Concerns
+## Phase 10: User Story 8 - Stay informed through notifications (Priority: P3)
+
+**Goal**: Recipient-scoped notifications for ingestion, invites, credit warning/exhaustion, task-halt, doc-shared, clearance-change, member-joined, and admin broadcast — persisted to an in-app inbox, pushed in real time over SSE, and (per opted-in category) delivered by email via a provider-agnostic port. Each member controls delivery per category × per channel.
+
+**Independent Test**: Trigger an event for a recipient, confirm the in-app notification arrives in real time and increments the unread badge; mark read and confirm the badge decrements; disable a category's email channel and confirm a later event sends no email while still appearing in-app; confirm a second member never sees the first member's notifications.
+
+### Tests for User Story 8 ⚠️ (write first, must fail)
+
+- [ ] T129 [P] [US8] Contract test for `/notifications` list (`?unread=`, pagination), `/notifications/unread-count`, `/notifications/{id}/read` (404 for non-recipient), `/notifications/read-all`, `GET/PUT /notifications/preferences`, and `POST /admin/notifications/broadcast` in `backend-go/tests/contract/notifications_test.go` per [bff-rest.md](./contracts/bff-rest.md) (FR-032–FR-037)
+- [ ] T130 [P] [US8] Contract test for `/notifications/stream` SSE taxonomy (initial `unread_count`, then `notification` + `unread_count` per event) in `backend-go/tests/contract/notifications_sse_test.go` per [sse-events.md](./contracts/sse-events.md) (FR-034)
+- [ ] T131 [P] [US8] Integration test for recipient scoping — member A never receives/sees member B's notifications, and no cross-workspace leakage even at L5 (RLS) in `backend-go/tests/integration/notification_scoping_test.go` (FR-036, SC-012)
+- [ ] T132 [P] [US8] Integration test for preference + channel fan-out: disabled email channel publishes no `notify.email.<ws>`; simulated email-provider failure routes to `notify.email.dlq.<ws>` while in-app delivery succeeds in `backend-python/tests/integration/test_notification_email.py` (FR-035)
+
+### Implementation for User Story 8
+
+- [ ] T133 [P] [US8] Implement notification + preference models in `backend-go/internal/notification/model/notification.go` and `preference.go` (categories, priority, payload, read state)
+- [ ] T134 [US8] Implement notification service (consume `notify.<ws>`, resolve recipient prefs with category defaults, persist row, push in-app via Redis pub/sub `notify:user:<id>`, republish enabled emails to `notify.email.<ws>`) in `backend-go/internal/notification/service/notify.go` (FR-032–FR-035)
+- [ ] T135 [P] [US8] Implement inbox + preference repository (list/unread-count/mark-read/mark-all, prefs upsert) in `backend-go/internal/notification/infra/repo/notification_repo.go` (FR-033, FR-035)
+- [ ] T136 [US8] Implement notification HTTP + SSE transport (`/notifications/*`, `/notifications/stream` relaying `notify:user:<id>`, `/admin/notifications/broadcast`) + `SetupModule` in `backend-go/internal/notification/infra/transport/http/handler.go` and `backend-go/internal/notification/module.go` (FR-033, FR-034, FR-037)
+- [ ] T137 [US8] Wire producers to publish `notify.<ws>` events from existing flows (ingestion complete/failed, invite received/accepted/revoked, credit warning/exhausted, agent-run cost-cap halt, doc shared, clearance change, member joined) in their respective services (FR-032)
+- [ ] T138 [P] [US8] Implement Python email worker with provider-agnostic `EmailSender` port (default Resend, env-swappable), template rendering, retry with backoff, and `notify.email.dlq.<ws>` parking in `backend-python/src/services/notification/email_worker.py` (FR-035)
+- [ ] T139 [P] [US8] Implement notification bell + inbox + per-category/per-channel preferences UI (live SSE badge, mark read/all, deep-link via payload) in `frontend/src/features/notification/`
+
+**Checkpoint**: All 8 user stories independently functional; notifications are recipient-scoped, real-time in-app, and email-deliverable per preference.
+
+---
+
+## Phase 11: Polish & Cross-Cutting Concerns
 
 **Purpose**: Reliability, observability, retention, evaluation gate, and final validation across all stories
 
@@ -311,7 +338,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 - [ ] T125 Implement Phase 1 eval seed set + runner (`evals/run.py`: ≥20 prompt cases; `prompts/retrieval/eval.py`: ≥30 golden queries) with the hard access-filter assertion (query at level N never returns doc > N) in `backend-python/evals/run.py` and `backend-python/prompts/retrieval/eval.py` (FR-030, SC-002, SC-003)
 - [ ] T126 [P] Wire CI gates into `Makefile`/CI: lint+format (gofmt/golangci-lint, ruff/black, eslint/prettier), ≥80% coverage per runtime, Testcontainers integration runs (`go test -tags=integration` / `pytest -m integration`), Playwright E2E, performance/bundle-size checks, security scan, and the Phase 1 eval gate
 - [ ] T127 [P] Implement Playwright E2E suite for the critical journeys (upload→indexed library; ask→cited streamed answer + debug panel; access-scoped visibility for two clearances; near-limit warning + exhaustion block) in `frontend/tests/e2e/` (SC-004, SC-005, SC-008, SC-010)
-- [ ] T128 Execute [quickstart.md](./quickstart.md) validation Scenarios 1–7 end-to-end and record evidence (Principle X)
+- [ ] T128 Execute [quickstart.md](./quickstart.md) validation Scenarios 1–8 end-to-end and record evidence (Principle X)
 
 ---
 
@@ -321,10 +348,10 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 - **Setup (Phase 1)**: No dependencies — start immediately
 - **Foundational (Phase 2)**: Depends on Setup — **BLOCKS all user stories**
-- **User Stories (Phases 3–9)**: All depend on Foundational completion
+- **User Stories (Phases 3–10)**: All depend on Foundational completion
   - US1 (P1) and US2 (P1) form the MVP; US2 retrieval/agent depends on US1 ingestion having indexed content for meaningful end-to-end tests, but both can be developed in parallel against fixtures
-  - US3–US7 can proceed in parallel once Foundational is done (if staffed)
-- **Polish (Phase 10)**: Depends on the targeted user stories being complete
+  - US3–US8 can proceed in parallel once Foundational is done (if staffed)
+- **Polish (Phase 11)**: Depends on the targeted user stories being complete
 
 ### User Story Dependencies
 
@@ -335,6 +362,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 - **US5 (P2)**: After US2 (extends the query graph + debug endpoint)
 - **US6 (P3)**: After Foundational — reads `llm_call_log` populated by US2/US4
 - **US7 (P3)**: After Foundational — reuses credits (US4) + MCP tools (US2); core works with zero agents (SC-008)
+- **US8 (P3)**: After Foundational — consumes events produced by US1/US3/US4/US7 flows; independently testable via a directly published `notify.<ws>` event; recipient-scoping is a release blocker (SC-012)
 
 ### Within Each User Story
 
@@ -346,7 +374,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 - All Setup tasks marked [P] run in parallel
 - All Foundational [P] tasks within their subsection run in parallel
-- Once Foundational completes, US1–US7 can be staffed in parallel
+- Once Foundational completes, US1–US8 can be staffed in parallel
 - All [P] test tasks within a story run in parallel (different files)
 - All [P] models within a story run in parallel
 

@@ -14,6 +14,9 @@
 | `ingestion.dlq.<workspace_id>` | Ingestion worker | Retry consumer / janitor | Parked chunks (e.g., embed-provider outage) for retry — never re-embedded with a different model (FR-029) |
 | `query.agent.<workspace_id>` | BFF (`/query`) | LangGraph worker pool | `{ stream_id, query, workspace_id, user_id, effective_access_level, session_id, intent_hint?, idem_key, trace_id }` |
 | `billing.deduct.<workspace_id>` | (Redis outbox drain) | Python billing worker | `{ workspace_id, user_id, cost, operation_type, idem_key, trace_id }` → `INSERT INTO credit_ledger` (idempotent) |
+| `notify.<workspace_id>` | Any producer (ingestion / billing / invite / agent-run / admin BFF) | Notification service (Go kernel) | `{ recipient_user_id, category, priority, title, body, payload, workspace_id, trace_id }` → applies prefs, persists row, pushes in-app, and (if enabled) republishes to `notify.email.<ws>` (FR-032–FR-035) |
+| `notify.email.<workspace_id>` | Notification service | Python email worker | `{ notification_id, recipient_email, category, title, body, workspace_id, trace_id }` → renders + sends via `EmailSender` port (default: Resend, swappable by env) (FR-035) |
+| `notify.email.dlq.<workspace_id>` | Email worker | Retry consumer / janitor | Parked email sends after exhausting provider retries — never silently dropped (FR-035) |
 
 ## Rules
 
@@ -22,6 +25,8 @@
 - **DLQ semantics.** Embedding-provider outages park the chunk in `ingestion.dlq.<ws>` rather than embedding inconsistently; a retry consumer re-attempts with the original model only (FR-029, research §4).
 - **Streaming.** Query workers stream partial results via Redis pub/sub keyed by `stream_id` → Go SSE → browser (see [sse-events.md](./sse-events.md)).
 - **Idempotency.** `billing.deduct` consumers rely on `credit_ledger.idem_key UNIQUE`; duplicate drains are no-ops (SC-006).
+- **Notification fan-out is centralized.** Producers publish a single `notify.<ws>` event with the resolved `recipient_user_id`; only the notification service knows about preferences, persistence, in-app push, and the email channel. `recipient_user_id` and `workspace_id` are authoritative from the publisher, never from untrusted content (FR-036).
+- **Email channel is best-effort and isolated.** In-app delivery is never blocked by email; transient email failures retry and park in `notify.email.dlq.<ws>` (FR-035).
 
 ## Contract test obligations
 
@@ -29,3 +34,5 @@
 - A simulated embed-provider outage routes the chunk to `ingestion.dlq.*`, not into Qdrant (FR-029).
 - A duplicated `billing.deduct` with the same `idem_key` inserts one ledger row (SC-006).
 - A `query.agent.*` run honors `effective_access_level` in its payload pre-filter (SC-001).
+- A `notify.<ws>` event whose recipient disabled a category's email channel produces an in-app notification but no `notify.email.<ws>` publish (FR-035).
+- A simulated email-provider failure routes the send to `notify.email.dlq.<ws>`, and the in-app notification is delivered regardless (FR-035).
