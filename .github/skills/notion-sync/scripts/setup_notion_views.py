@@ -6,7 +6,7 @@ Requires API version 2025-09-03 or later (this script uses 2026-03-11).
 Creates views based on exact settings confirmed from the Notion UI:
 
     Kanban Board  — Board  | Group: Status  | Filter: Sprint (quick filter)
-    Sprint Backlog — Board  | Group: Phase   | Filter: Status (quick filter)
+    Sprint Backlog — Board  | Group: work-bucket (Phase/Stage) | Filter: Status (quick filter)
     Sprint 1      — Table  | Filter: Sprint = "Sprint 1"
     Sprint        — Table  | Quick filter: Sprint (change per sprint as needed)
     By Story      — Board  | Group: Story
@@ -104,6 +104,14 @@ def main() -> None:
     props = get_property_ids(db_props)
     print(f"   Properties found: {list(props.keys())}")
 
+    # Work-bucket column name is configurable: "Phase" (default) or "Stage".
+    # Fall back to whichever variant actually exists in the database.
+    work_bucket = (os.environ.get("NOTION_WORK_BUCKET", "Phase").strip() or "Phase").capitalize()
+    if work_bucket not in ("Phase", "Stage"):
+        work_bucket = "Phase"
+    if work_bucket not in props:
+        work_bucket = "Stage" if "Stage" in props else ("Phase" if "Phase" in props else work_bucket)
+
     try:
         data_source_id = get_data_source_id(db)
         print(f"   Data source ID: {data_source_id[:8]}…")
@@ -113,7 +121,7 @@ def main() -> None:
 
     # ── View definitions (from confirmed Notion UI screenshots) ───────────────
     status_id = props.get("Status", "Status")
-    phase_id  = props.get("Phase",  "Phase")
+    phase_id  = props.get(work_bucket, work_bucket)
     story_id  = props.get("Story",  "Story")
     sprint_id = props.get("Sprint", "Sprint")
 
@@ -121,7 +129,7 @@ def main() -> None:
     all_prop_ids = [
         props.get("Task ID",     "Task ID"),
         props.get("Description", "Description"),
-        props.get("Phase",       "Phase"),
+        props.get(work_bucket,   work_bucket),
         props.get("Sprint",      "Sprint"),
         props.get("Status",      "Status"),
         props.get("Story",       "Story"),
@@ -153,7 +161,7 @@ def main() -> None:
                 "Sprint": {"select": {"equals": "Sprint 1"}},
             },
         },
-        # ── Sprint Backlog: Board grouped by Phase, Status as quick filter ────
+        # ── Sprint Backlog: Board grouped by work-bucket, Status as quick filter ──
         {
             "name": "Sprint Backlog",
             "type": "board",

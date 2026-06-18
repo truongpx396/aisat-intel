@@ -54,17 +54,44 @@ NOTION_DB_ID = os.environ.get("NOTION_DB_ID", "")
 
 TASKS_FILE = os.path.join(REPO_ROOT, "specs/001-contextengine-mvp/tasks.md")
 
+# ── Work-bucket terminology ───────────────────────────────────────────────────
+# The Notion column that groups tasks into ordered buckets can be named either
+# "Phase" or "Stage". Configure via NOTION_WORK_BUCKET in .env (default "Phase").
+# The markdown parser accepts BOTH "## Phase N" and "## Stage N" headers
+# regardless of this setting; this only controls the Notion property name and
+# the option-label prefix used when pushing.
+WORK_BUCKET = (os.environ.get("NOTION_WORK_BUCKET", "Phase").strip() or "Phase").capitalize()
+if WORK_BUCKET not in ("Phase", "Stage"):
+    WORK_BUCKET = "Phase"
+
+# Bucket number → descriptive suffix (prefix is added from WORK_BUCKET).
+BUCKET_SUFFIX = {
+    1: "Setup",
+    2: "Foundation",
+    3: "Ingest (US1)",
+    4: "Ask & Answer (US2)",
+    5: "Team Workspace (US3)",
+    6: "Credit Metering (US4)",
+    7: "Debug Panel (US5)",
+    8: "Admin Dashboard (US6)",
+    9: "Local Agent (US7)",
+    10: "Notifications (US8)",
+    11: "Polish",
+}
+
+
+def bucket_label(num: int) -> str:
+    """Return the full Notion label for a bucket number, e.g. 'Phase 1 – Setup'."""
+    suffix = BUCKET_SUFFIX.get(num)
+    base = f"{WORK_BUCKET} {num}"
+    return f"{base} – {suffix}" if suffix else base
+
+
+# Maps every "Phase N"/"Stage N" header key to the configured Notion label.
 PHASE_MAP = {
-    "Phase 1": "Phase 1 – Setup",
-    "Phase 2": "Phase 2 – Foundation",
-    "Phase 3": "Phase 3 – Ingest (US1)",
-    "Phase 4": "Phase 4 – Ask & Answer (US2)",
-    "Phase 5": "Phase 5 – Team Workspace (US3)",
-    "Phase 6": "Phase 6 – Credit Metering (US4)",
-    "Phase 7": "Phase 7 – Debug Panel (US5)",
-    "Phase 8": "Phase 8 – Admin Dashboard (US6)",
-    "Phase 9": "Phase 9 – Local Agent (US7)",
-    "Phase 10": "Phase 10 – Polish",
+    f"{word} {n}": bucket_label(n)
+    for n in BUCKET_SUFFIX
+    for word in ("Phase", "Stage")
 }
 
 STORY_MAP = {
@@ -76,6 +103,7 @@ STORY_MAP = {
     "US5": "US5 – Debug Panel",
     "US6": "US6 – Admin Dashboard",
     "US7": "US7 – Local Agent",
+    "US8": "US8 – Notifications",
 }
 
 # Status mapping: Notion select name ↔ tasks.md checkbox marker
@@ -88,28 +116,13 @@ CHECKBOX_TO_NOTION = {v: k for k, v in NOTION_TO_CHECKBOX.items()}
 
 RATE_LIMIT_DELAY = 0.35  # ~3 req/s (Notion limit)
 
-# Sprint → Phase mapping: which phases belong to each sprint
+# Sprint → bucket mapping: which buckets belong to each sprint
 SPRINT_PHASE_MAP: dict[str, list[str]] = {
-    "Sprint 1": [
-        "Phase 1 – Setup",
-        "Phase 2 – Foundation",
-    ],
-    "Sprint 2": [
-        "Phase 3 – Ingest (US1)",
-        "Phase 4 – Ask & Answer (US2)",
-    ],
-    "Sprint 3": [
-        "Phase 5 – Team Workspace (US3)",
-        "Phase 6 – Credit Metering (US4)",
-    ],
-    "Sprint 4": [
-        "Phase 7 – Debug Panel (US5)",
-        "Phase 8 – Admin Dashboard (US6)",
-    ],
-    "Sprint 5": [
-        "Phase 9 – Local Agent (US7)",
-        "Phase 10 – Polish",
-    ],
+    "Sprint 1": [bucket_label(1), bucket_label(2)],
+    "Sprint 2": [bucket_label(3), bucket_label(4)],
+    "Sprint 3": [bucket_label(5), bucket_label(6)],
+    "Sprint 4": [bucket_label(7), bucket_label(8)],
+    "Sprint 5": [bucket_label(9), bucket_label(10), bucket_label(11)],
 }
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -125,11 +138,12 @@ def parse_tasks(filepath: str) -> list[dict]:
     current_phase = None
 
     for line_num, line in enumerate(lines):
-        phase_match = re.match(r"^## (Phase \d+)", line)
+        # Accept both "## Phase N" and "## Stage N" headers regardless of the
+        # configured WORK_BUCKET; both resolve to the configured Notion label.
+        phase_match = re.match(r"^## (?:Stage|Phase) (\d+)", line)
         if phase_match:
-            current_phase = PHASE_MAP.get(
-                phase_match.group(1), phase_match.group(1)
-            )
+            key = f"Phase {phase_match.group(1)}"
+            current_phase = PHASE_MAP.get(key, key)
             continue
 
         task_match = re.match(r"^- \[([ x\-])\] (T\w+)\s+(.*)", line.strip())
@@ -154,7 +168,7 @@ def parse_tasks(filepath: str) -> list[dict]:
         tasks.append(
             {
                 "id": task_id,
-                "phase": current_phase or "Phase 1 – Setup",
+                "phase": current_phase or bucket_label(1),
                 "story": story,
                 "parallel": parallel,
                 "desc": rest[:2000],
@@ -215,7 +229,7 @@ def fetch_notion_tasks(token: str, db_id: str) -> dict[str, dict]:
             status_sel = props.get("Status", {}).get("select")
             status = status_sel["name"] if status_sel else "Not Started"
 
-            phase_sel = props.get("Phase", {}).get("select")
+            phase_sel = props.get(WORK_BUCKET, {}).get("select")
             phase = phase_sel["name"] if phase_sel else ""
 
             story_sel = props.get("Story", {}).get("select")
@@ -296,7 +310,7 @@ def push_to_notion(
 
             props = {
                 "Task ID": {"title": [{"text": {"content": task["id"]}}]},
-                "Phase": {"select": {"name": task["phase"]}},
+                WORK_BUCKET: {"select": {"name": task["phase"]}},
                 "Story": {"select": {"name": task["story"]}},
                 "Parallel": {"checkbox": task["parallel"]},
                 "Description": {"rich_text": [{"text": {"content": task["desc"]}}]},
@@ -325,7 +339,7 @@ def push_to_notion(
 
             props = {
                 "Task ID": {"title": [{"text": {"content": task["id"]}}]},
-                "Phase": {"select": {"name": task["phase"]}},
+                WORK_BUCKET: {"select": {"name": task["phase"]}},
                 "Story": {"select": {"name": task["story"]}},
                 "Parallel": {"checkbox": task["parallel"]},
                 "Status": {"select": {"name": notion_status}},
@@ -545,7 +559,7 @@ def assign_sprint(
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-USAGE = """\
+USAGE = f"""\
 Usage: python3 sync_tasks.py <command> [options]
 
 Commands:
@@ -553,18 +567,21 @@ Commands:
   pull              Notion → tasks.md (update checkboxes from Notion status)
   sync              bidirectional      (pull status, then push content + status)
   status            show differences   (read-only, no changes)
-  sprint <N|all>    assign phases to Sprint N (1-5) or all sprints at once
+  sprint <N|all>    assign buckets to Sprint N (1-5) or all sprints at once
 
 Options:
   --push-status   also push checkbox states to Notion (auto-enabled for sync)
   --dry-run       preview changes without writing anything
 
-Sprint → Phase mapping:
-  Sprint 1: Phase 1 (Setup) + Phase 2 (Foundation)
-  Sprint 2: Phase 3 (Ingest US1) + Phase 4 (Ask & Answer US2)
-  Sprint 3: Phase 5 (Team Workspace US3) + Phase 6 (Credit Metering US4)
-  Sprint 4: Phase 7 (Debug Panel US5) + Phase 8 (Admin Dashboard US6)
-  Sprint 5: Phase 9 (Local Agent US7) + Phase 10 (Polish)
+Work-bucket column: {WORK_BUCKET}  (set NOTION_WORK_BUCKET=Phase|Stage in .env)
+Markdown headers "## Phase N" and "## Stage N" are both accepted on parse.
+
+Sprint → {WORK_BUCKET} mapping:
+  Sprint 1: {WORK_BUCKET} 1 (Setup) + {WORK_BUCKET} 2 (Foundation)
+  Sprint 2: {WORK_BUCKET} 3 (Ingest US1) + {WORK_BUCKET} 4 (Ask & Answer US2)
+  Sprint 3: {WORK_BUCKET} 5 (Team Workspace US3) + {WORK_BUCKET} 6 (Credit Metering US4)
+  Sprint 4: {WORK_BUCKET} 7 (Debug Panel US5) + {WORK_BUCKET} 8 (Admin Dashboard US6)
+  Sprint 5: {WORK_BUCKET} 9 (Local Agent US7) + {WORK_BUCKET} 10 (Notifications US8) + {WORK_BUCKET} 11 (Polish)
 
 Typical agent workflow:
   1. Agent implements code & marks task done in tasks.md

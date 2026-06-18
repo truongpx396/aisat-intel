@@ -14,7 +14,7 @@ Requires NOTION_TOKEN and NOTION_DB_ID in .env (or exported as env vars).
 Properties created:
     Task ID     — Title      (renames existing 'Name' column)
     Status      — Select     options: Not Started, In Progress, Done
-    Phase       — Select     options auto-created on push
+    Phase/Stage — Select     name controlled by NOTION_WORK_BUCKET (default Phase)
     Story       — Select     options auto-created on push
     Description — Rich Text
     Parallel    — Checkbox
@@ -80,6 +80,12 @@ def main() -> None:
     existing = list(db.get("properties", {}).keys())
     print(f"   Existing properties: {existing}")
 
+    # Work-bucket column name is configurable: "Phase" (default) or "Stage".
+    work_bucket = (os.environ.get("NOTION_WORK_BUCKET", "Phase").strip() or "Phase").capitalize()
+    if work_bucket not in ("Phase", "Stage"):
+        work_bucket = "Phase"
+    other_bucket = "Stage" if work_bucket == "Phase" else "Phase"
+
     # Build the PATCH payload
     props: dict = {}
 
@@ -87,6 +93,13 @@ def main() -> None:
     if "Name" in existing and "Task ID" not in existing:
         props["Name"] = {"name": "Task ID"}
         print("   → Renaming 'Name' to 'Task ID'")
+
+    # If the other bucket name exists but the desired one doesn't, rename it in
+    # place (preserves options + data + views). Otherwise create it below.
+    renaming_bucket = other_bucket in existing and work_bucket not in existing
+    if renaming_bucket:
+        props[other_bucket] = {"name": work_bucket}
+        print(f"   → Renaming '{other_bucket}' to '{work_bucket}'")
 
     if "Status" not in existing:
         props["Status"] = {
@@ -100,7 +113,10 @@ def main() -> None:
         }
         print("   → Creating 'Status' (Select)")
 
-    for name in ("Phase", "Story", "Sprint"):
+    for name in (work_bucket, "Story", "Sprint"):
+        # Skip the work-bucket column if it is being created via an in-place rename
+        if name == work_bucket and renaming_bucket:
+            continue
         if name not in existing:
             props[name] = {"select": {"options": []}}
             print(f"   → Creating '{name}' (Select)")

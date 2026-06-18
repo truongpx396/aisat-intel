@@ -25,6 +25,8 @@ Keeps `specs/*/tasks.md` and a Notion database in sync via a Python script that 
    ```
    NOTION_TOKEN=secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
    NOTION_DB_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   # Optional — work-bucket column name: "Phase" (default) or "Stage"
+   # NOTION_WORK_BUCKET=Phase
    ```
 4. The Notion integration must be **connected to the target database** (share the DB with the integration in Notion → `•••` → Connections → Add your integration)
 5. The Notion database must have the **required schema** (7 properties). See Step 0 below.
@@ -33,6 +35,9 @@ Keeps `specs/*/tasks.md` and a Notion database in sync via a Python script that 
    ## Phase 1
    - [ ] T001  Task description [US1]
    ```
+   > Both `## Phase N` and `## Stage N` headings are accepted on parse. The
+   > matching Notion column name is controlled by `NOTION_WORK_BUCKET`
+   > (default `Phase`).
 
 > **REPO_ROOT note:** The script resolves paths 4 levels up from its own location
 > (`.github/skills/notion-sync/scripts/` → repo root). Always run commands from
@@ -47,7 +52,7 @@ Keeps `specs/*/tasks.md` and a Notion database in sync via a Python script that 
 | `pull` | Notion → `tasks.md` (update checkboxes from Notion Status) |
 | `sync` | Pull status first, then push content + status (full bidirectional) |
 | `status` | Read-only diff report (no writes) |
-| `sprint <N\|all>` | Assign `Sprint` field in Notion based on phase mapping |
+| `sprint <N\|all>` | Assign `Sprint` field in Notion based on work-bucket mapping |
 | `--dry-run` | Preview any command without writing anything |
 
 ## Step-by-Step Workflows
@@ -61,8 +66,11 @@ setup script **once** to create all required properties:
 python3 .github/skills/notion-sync/scripts/setup_notion_db.py
 ```
 
-This creates: `Task ID` (Title), `Status` (Select w/ options), `Phase` (Select),
+This creates: `Task ID` (Title), `Status` (Select w/ options), the work-bucket
+column (`Phase` by default, or `Stage` if `NOTION_WORK_BUCKET=Stage`) (Select),
 `Story` (Select), `Description` (Rich Text), `Parallel` (Checkbox), `Sprint` (Select).
+If the database already has the *other* variant (e.g. a `Stage` column when the
+configured name is `Phase`), it is renamed in place to preserve options + data + views.
 
 See [Notion Database Schema](./references/workflow.md#notion-database-schema) for the
 full property table, manual setup steps, and troubleshooting.
@@ -141,7 +149,7 @@ This creates all 5 views (idempotent — skips any that already exist):
 | View Name | Layout | Group | Filter / Quick Filter |
 |---|---|---|---|
 | Kanban Board | Board | `Status` | Quick filter: `Sprint` |
-| Sprint Backlog | Board | `Phase` | Quick filter: `Status` |
+| Sprint Backlog | Board | work-bucket (`Phase`/`Stage`) | Quick filter: `Status` |
 | Sprint | Table | — | Quick filter: `Sprint` (change per sprint) |
 | By Story | Board | `Story` | — |
 | Done | Table | — | Filter: `Status` = `Done` |

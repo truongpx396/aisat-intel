@@ -27,7 +27,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 ---
 
-## Phase 1: Setup (Shared Infrastructure)
+## Stage 1: Setup (Shared Infrastructure)
 
 **Purpose**: Three-runtime project skeleton, infra services, and tooling
 
@@ -47,11 +47,11 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 ---
 
-## Phase 2: Foundational (Blocking Prerequisites)
+## Stage 2: Foundational (Blocking Prerequisites)
 
 **Purpose**: Kernel interfaces, platform clients, RLS/migrations, shared middleware, and the LLM/MCP/access-control chokepoints that every user story depends on
 
-**⚠️ CRITICAL**: No user story work can begin until this phase is complete
+**⚠️ CRITICAL**: No user story work can begin until this stage is complete
 
 ### Go kernel interfaces & platform clients
 
@@ -99,7 +99,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 ---
 
-## Phase 3: User Story 1 - Ingest knowledge into a searchable library (Priority: P1) 🎯 MVP
+## Stage 3: User Story 1 - Ingest knowledge into a searchable library (Priority: P1) 🎯 MVP
 
 **Goal**: A member uploads files (PDF/DOCX/MD/image) or pastes a link; the system converts, captions images, auto-tags, summarizes, chunks, embeds, indexes, and streams live progress until the item is browsable in the library.
 
@@ -137,7 +137,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 ---
 
-## Phase 4: User Story 2 - Ask questions and get access-scoped, cited answers (Priority: P1)
+## Stage 4: User Story 2 - Ask questions and get access-scoped, cited answers (Priority: P1)
 
 **Goal**: A member asks a natural-language question; the LangGraph agent moderates, rewrites, retrieves (hybrid + rerank) within clearance scope, expands chunks, injects memory, generates a cited answer, and streams it — never surfacing content above clearance or following injected instructions.
 
@@ -177,7 +177,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 ---
 
-## Phase 5: User Story 3 - Access-controlled team workspace (Priority: P2)
+## Stage 5: User Story 3 - Access-controlled team workspace (Priority: P2)
 
 **Goal**: Members share a workspace combining personal + team knowledge; clearance-scoped retrieval/browsing; owners/admins invite, assign role/clearance, and revoke.
 
@@ -204,7 +204,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 ---
 
-## Phase 6: User Story 4 - Credit-based usage metering and budgets (Priority: P2)
+## Stage 6: User Story 4 - Credit-based usage metering and budgets (Priority: P2)
 
 **Goal**: Every AI operation deducts from a shared workspace balance in real time with three independent ceilings (workspace balance, per-user daily, per-call output cap); near-limit warning, graceful block, exactly-once charging.
 
@@ -231,7 +231,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 ---
 
-## Phase 7: User Story 5 - Observable debug panel (Priority: P2)
+## Stage 7: User Story 5 - Observable debug panel (Priority: P2)
 
 **Goal**: For every answer, a developer-facing panel exposes intent, tool called, index tier, access-filter result, hybrid/RRF/rerank scores, chunk expansion, injected memory, model, token cost, credits deducted, and a Langfuse trace link.
 
@@ -251,7 +251,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 ---
 
-## Phase 8: User Story 6 - Admin usage dashboard (Priority: P3)
+## Stage 8: User Story 6 - Admin usage dashboard (Priority: P3)
 
 **Goal**: A workspace admin views per-user/per-feature AI usage, credit consumption, and cost, and manages member limits.
 
@@ -272,7 +272,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 ---
 
-## Phase 9: User Story 7 - Long-horizon tasks via a local agent (Priority: P3)
+## Stage 9: User Story 7 - Long-horizon tasks via a local agent (Priority: P3)
 
 **Goal**: An optional local agent runs multi-step tasks using workspace-scoped tools, routing AI calls through the server by default (metered/audited); long tasks are durable, cancellable, and bounded by a per-task cost cap. All core features work with zero agents.
 
@@ -301,7 +301,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 ---
 
-## Phase 10: User Story 8 - Stay informed through notifications (Priority: P3)
+## Stage 10: User Story 8 - Stay informed through notifications (Priority: P3)
 
 **Goal**: Recipient-scoped notifications for ingestion, invites, credit warning/exhaustion, task-halt, doc-shared, clearance-change, member-joined, and admin broadcast — persisted to an in-app inbox, pushed in real time over SSE, and (per opted-in category) delivered by email via a provider-agnostic port. Each member controls delivery per category × per channel.
 
@@ -328,7 +328,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 ---
 
-## Phase 11: Polish & Cross-Cutting Concerns
+## Stage 11: Polish & Cross-Cutting Concerns
 
 **Purpose**: Reliability, observability, retention, evaluation gate, and final validation across all stories
 
@@ -344,14 +344,14 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 ## Dependencies & Execution Order
 
-### Phase Dependencies
+### Stage Dependencies
 
-- **Setup (Phase 1)**: No dependencies — start immediately
-- **Foundational (Phase 2)**: Depends on Setup — **BLOCKS all user stories**
-- **User Stories (Phases 3–10)**: All depend on Foundational completion
+- **Setup (Stage 1)**: No dependencies — start immediately
+- **Foundational (Stage 2)**: Depends on Setup — **BLOCKS all user stories**
+- **User Stories (Stages 3–10)**: All depend on Foundational completion
   - US1 (P1) and US2 (P1) form the MVP; US2 retrieval/agent depends on US1 ingestion having indexed content for meaningful end-to-end tests, but both can be developed in parallel against fixtures
   - US3–US8 can proceed in parallel once Foundational is done (if staffed)
-- **Polish (Phase 11)**: Depends on the targeted user stories being complete
+- **Polish (Stage 11)**: Depends on the targeted user stories being complete
 
 ### User Story Dependencies
 
@@ -402,10 +402,10 @@ Task T051: "Crawl4AI crawler in backend-python/src/services/ingestion/crawler.py
 
 ### MVP First (User Stories 1 + 2)
 
-1. Complete Phase 1: Setup
-2. Complete Phase 2: Foundational (CRITICAL — blocks all stories; includes RLS, LLM gateway, MCP server, access filter)
-3. Complete Phase 3: US1 (ingest → library)
-4. Complete Phase 4: US2 (ask → cited, access-scoped answer)
+1. Complete Stage 1: Setup
+2. Complete Stage 2: Foundational (CRITICAL — blocks all stories; includes RLS, LLM gateway, MCP server, access filter)
+3. Complete Stage 3: US1 (ingest → library)
+4. Complete Stage 4: US2 (ask → cited, access-scoped answer)
 5. **STOP and VALIDATE**: quickstart Scenarios 1, 2, 4 (ingest→answer, access scoping, injection refusal)
 6. Deploy/demo the core knowledge loop
 

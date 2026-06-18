@@ -85,6 +85,18 @@ Recipient-scoped record of a workspace event, surfaced in-app and optionally by 
 
 ### Supporting kernel tables
 - `api_keys` (K), `plans` (K), `subscriptions` (K), `feature_flags` (K), `token_usage_daily` (P, per-role daily token counter, partitioned by `usage_date`).
+- The `plans` and `subscriptions` rows above are Phase 1 stubs (status/entitlement only).
+
+### Billing & payments (Phase 2, US4-ext)
+
+> Out of Phase 1 scope (see [spec.md](./spec.md) "Out of Scope"); full schema in [billing-payments-design.md](./billing-payments-design.md). **Additive** to the credit backbone — `workspace_credits`, `credit_ledger`, and the consumption hot path are unchanged. A provider only converts fiat → credits (one-time top-up) or grants a recurring allotment (subscription), then appends a `credit_ledger` grant row keyed by `idem_key` (reuses the SC-006 double-debit guard). Money is integer minor units (`BIGINT` + ISO-4217 `currency`), never floats.
+
+- `plans` (K) — **supersedes the stub above**: purchasable credit pack or subscription tier (`code`, `kind`, `price_minor`, `currency`, `credit_allotment`, `billing_interval`, `is_active`).
+- `plan_provider_prices` (K) — maps one logical plan to each provider's external price/product ID (`stripe`|`polar`|`paypal`).
+- `billing_customers` (K) — links a `workspace_id` to a provider customer record (workspace is the unit of billing).
+- `subscriptions` (K) — **supersedes the stub above**: active recurring entitlement with webhook-driven `status`, period bounds, and `cancel_at_period_end`.
+- `payments` (K) — fiat transaction record (top-up or subscription invoice) for receipts/refunds/reconciliation; 1:1 with a `credit_ledger` grant via `idem_key`.
+- `payment_events` (K) — verified provider webhook dedup + audit (`UNIQUE (provider, provider_event_id)`, AP4).
 
 ## Vector store (Qdrant) payload schema
 

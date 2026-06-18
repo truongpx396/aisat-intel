@@ -76,11 +76,11 @@ You **MUST** consider the user input before proceeding (if not empty).
 
 4. **Generate tasks.md**: Read the tasks template from TASKS_TEMPLATE (from the JSON output above) and use it as structure. If TASKS_TEMPLATE is empty, fall back to `.specify/templates/tasks-template.md`. Fill with:
    - Correct feature name from plan.md
-   - Phase 1: Setup tasks (project initialization)
-   - Phase 2: Foundational tasks (blocking prerequisites for all user stories)
-   - Phase 3+: One phase per user story (in priority order from spec.md)
-   - Each phase includes: story goal, independent test criteria, tests (if requested), implementation tasks
-   - Final Phase: Polish & cross-cutting concerns
+   - Stage 1: Setup tasks (project initialization)
+   - Stage 2: Foundational tasks (blocking prerequisites for all user stories)
+   - Stage 3+: One stage per user story (in priority order from spec.md)
+   - Each stage includes: story goal, independent test criteria, tests (if requested), implementation tasks
+   - Final Stage: Polish & cross-cutting concerns
    - All tasks must follow the strict checklist format (see Task Generation Rules below)
    - Clear file paths for each task
    - Dependencies section showing story completion order
@@ -153,12 +153,12 @@ Every task MUST strictly follow this format:
 1. **Checkbox**: ALWAYS start with `- [ ]` (markdown checkbox)
 2. **Task ID**: Sequential number (T001, T002, T003...) in execution order
 3. **[P] marker**: Include ONLY if task is parallelizable (different files, no dependencies on incomplete tasks)
-4. **[Story] label**: REQUIRED for user story phase tasks only
+4. **[Story] label**: REQUIRED for user story stage tasks only
    - Format: [US1], [US2], [US3], etc. (maps to user stories from spec.md)
-   - Setup phase: NO story label
-   - Foundational phase: NO story label  
-   - User Story phases: MUST have story label
-   - Polish phase: NO story label
+   - Setup stage: NO story label
+   - Foundational stage: NO story label  
+   - User Story stages: MUST have story label
+   - Polish stage: NO story label
 5. **Description**: Clear action with exact file path
 
 **Examples**:
@@ -175,7 +175,7 @@ Every task MUST strictly follow this format:
 ### Task Organization
 
 1. **From User Stories (spec.md)** - PRIMARY ORGANIZATION:
-   - Each user story (P1, P2, P3...) gets its own phase
+   - Each user story (P1, P2, P3...) gets its own stage
    - Map all related components to their story:
      - Models needed for that story
      - Services needed for that story
@@ -185,29 +185,29 @@ Every task MUST strictly follow this format:
 
 2. **From Contracts**:
    - Map each interface contract → to the user story it serves
-   - If tests requested: Each interface contract → contract test task [P] before implementation in that story's phase
+   - If tests requested: Each interface contract → contract test task [P] before implementation in that story's stage
 
 3. **From Data Model**:
    - Map each entity to the user story(ies) that need it
-   - If entity serves multiple stories: Put in earliest story or Setup phase
-   - Relationships → service layer tasks in appropriate story phase
+   - If entity serves multiple stories: Put in earliest story or Setup stage
+   - Relationships → service layer tasks in appropriate story stage
 
 4. **From Setup/Infrastructure**:
-   - Shared infrastructure → Setup phase (Phase 1)
-   - Foundational/blocking tasks → Foundational phase (Phase 2)
-   - Story-specific setup → within that story's phase
+   - Shared infrastructure → Setup stage (Stage 1)
+   - Foundational/blocking tasks → Foundational stage (Stage 2)
+   - Story-specific setup → within that story's stage
 
-### Phase Structure
+### Stage Structure
 
-- **Phase 1**: Setup (project initialization)
-- **Phase 2**: Foundational (blocking prerequisites - MUST complete before user stories)
-- **Phase 3+**: User Stories in priority order (P1, P2, P3...)
+- **Stage 1**: Setup (project initialization)
+- **Stage 2**: Foundational (blocking prerequisites - MUST complete before user stories)
+- **Stage 3+**: User Stories in priority order (P1, P2, P3...)
   - Within each story: Tests (if requested) → Models → Services → Endpoints → Integration
-  - Each phase should be a complete, independently testable increment
-- **Final Phase**: Polish & Cross-Cutting Concerns
+  - Each stage should be a complete, independently testable increment
+- **Final Stage**: Polish & Cross-Cutting Concerns
 
 ## Done When
 
-- [ ] tasks.md generated with all phases, task IDs, and file paths
+- [ ] tasks.md generated with all stages, task IDs, and file paths
 - [ ] Extension hooks dispatched or skipped according to the rules in Mandatory Post-Execution Hooks above
 - [ ] Completion reported to user with task count, story breakdown, and MVP scope

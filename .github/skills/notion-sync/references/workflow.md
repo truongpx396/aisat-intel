@@ -8,12 +8,15 @@
 |---|---|---|
 | `NOTION_TOKEN` | Notion integration secret (Internal Integration Token) | `.env` or shell environment |
 | `NOTION_DB_ID` | The Notion database ID to sync against | `.env` or shell environment |
+| `NOTION_WORK_BUCKET` | *(optional)* Work-bucket column name: `Phase` (default) or `Stage` | `.env` or shell environment |
 
 Place both in the repo-root `.env` file (auto-loaded by the script):
 
 ```
 NOTION_TOKEN=secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 NOTION_DB_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# Optional — defaults to "Phase" when unset
+# NOTION_WORK_BUCKET=Phase
 ```
 
 ### Prerequisites Check
@@ -44,7 +47,7 @@ With `--push-status`: also writes checkbox states (`[ ]`, `[-]`, `[x]`) to Notio
 python3 .github/skills/notion-sync/scripts/sync_tasks.py push --push-status
 ```
 
-**Fields pushed:** Task ID, Phase, Story, Parallel flag, Description, (optionally) Status.
+**Fields pushed:** Task ID, work-bucket (`Phase`/`Stage`), Story, Parallel flag, Description, (optionally) Status.
 
 ---
 
@@ -101,22 +104,22 @@ Output includes:
 
 ### `sprint <N|all>` — Assign Sprint Tags
 
-Assigns the Notion `Sprint` select property for all tasks whose `Phase` belongs to the given sprint. Uses the mapping below.
+Assigns the Notion `Sprint` select property for all tasks whose work-bucket (`Phase`/`Stage`) belongs to the given sprint. Uses the mapping below.
 
 ```bash
 python3 .github/skills/notion-sync/scripts/sync_tasks.py sprint 1
 python3 .github/skills/notion-sync/scripts/sync_tasks.py sprint all
 ```
 
-**Sprint → Phase Mapping:**
+**Sprint → Work-bucket Mapping** (labels below use the default `Phase`; with `NOTION_WORK_BUCKET=Stage` the word becomes `Stage`):
 
-| Sprint | Phases |
+| Sprint | Buckets |
 |---|---|
 | Sprint 1 | Phase 1 – Setup, Phase 2 – Foundation |
 | Sprint 2 | Phase 3 – Ingest (US1), Phase 4 – Ask & Answer (US2) |
 | Sprint 3 | Phase 5 – Team Workspace (US3), Phase 6 – Credit Metering (US4) |
 | Sprint 4 | Phase 7 – Debug Panel (US5), Phase 8 – Admin Dashboard (US6) |
-| Sprint 5 | Phase 9 – Local Agent (US7), Phase 10 – Polish |
+| Sprint 5 | Phase 9 – Local Agent (US7), Phase 10 – Notifications (US8), Phase 11 – Polish |
 
 ---
 
@@ -158,7 +161,7 @@ python3 .github/skills/notion-sync/scripts/sync_tasks.py pull
 
 ## tasks.md Task Format
 
-The script parses tasks under `## Phase N` headings:
+The script parses tasks under `## Phase N` headings (`## Stage N` headings are also accepted):
 
 ```markdown
 ## Phase 1
@@ -172,7 +175,7 @@ The script parses tasks under `## Phase N` headings:
 - `[P]` — Parallel task (Notion `Parallel` checkbox = true)
 - `[USN]` — Story tag (e.g. `[US1]` → `US1 – Ingest Knowledge`)
 
-Tasks not under a `## Phase N` heading are assigned `Phase 1 – Setup` by default.
+Tasks not under a `## Phase N` / `## Stage N` heading are assigned bucket 1 (e.g. `Phase 1 – Setup`) by default. The bucket word written to Notion is controlled by `NOTION_WORK_BUCKET` (default `Phase`), regardless of which heading word the source file uses.
 
 ---
 
@@ -184,7 +187,7 @@ The target Notion database must have these properties:
 |---|---|---|
 | `Task ID` | Title | e.g. `T001` — rename the default `Name` column |
 | `Status` | Select | Options: `Not Started` (gray), `In Progress` (yellow), `Done` (green) |
-| `Phase` | Select | e.g. `Phase 1 – Setup` — options auto-created on push |
+| `Phase` *(or `Stage`)* | Select | e.g. `Phase 1 – Setup` — column name set by `NOTION_WORK_BUCKET` (default `Phase`); options auto-created on push |
 | `Story` | Select | e.g. `US1 – Ingest Knowledge` — options auto-created on push |
 | `Description` | Rich Text | Task description (up to 2000 chars) |
 | `Parallel` | Checkbox | Whether task can run in parallel |
@@ -200,10 +203,10 @@ python3 .github/skills/notion-sync/scripts/setup_notion_db.py
 ```
 
 This script:
-1. Reads `NOTION_TOKEN` and `NOTION_DB_ID` from `.env`
+1. Reads `NOTION_TOKEN`, `NOTION_DB_ID`, and optional `NOTION_WORK_BUCKET` from `.env`
 2. Renames the existing `Name` (Title) column to `Task ID`
 3. Creates `Status` (Select) with preset options: `Not Started`, `In Progress`, `Done`
-4. Creates `Phase`, `Story`, `Sprint` as empty Select properties
+4. Creates the work-bucket column (`Phase` by default, or `Stage`), `Story`, `Sprint` as empty Select properties. If the *other* variant already exists (e.g. a `Stage` column when the configured name is `Phase`), it is renamed in place to preserve options + data + views
 5. Creates `Description` as Rich Text
 6. Creates `Parallel` as Checkbox
 7. Prints the final list of properties on success
@@ -216,7 +219,7 @@ Alternatively, create each property manually in the Notion database:
 1. Open the database → click `+` to add a property
 2. Rename `Name` → `Task ID` (keep as **Title** type)
 3. Add `Status` as **Select** → add options: `Not Started`, `In Progress`, `Done`
-4. Add `Phase` as **Select** (leave options empty — auto-filled on push)
+4. Add `Phase` (or `Stage`, to match `NOTION_WORK_BUCKET`) as **Select** (leave options empty — auto-filled on push)
 5. Add `Story` as **Select** (leave options empty — auto-filled on push)
 6. Add `Description` as **Text (Rich Text)**
 7. Add `Parallel` as **Checkbox**
@@ -235,7 +238,7 @@ Alternatively, create each property manually in the Notion database:
 | `404` on DB query | Wrong `NOTION_DB_ID` or integration not connected to DB | Share DB with the integration in Notion |
 | `Task ID is not a property that exists` | Notion DB missing required columns | Run `setup_notion_db.py` (see Schema Setup above) |
 | `Could not find database with ID` | Integration not connected to DB | In Notion: open the DB → `•••` → Connections → Add your integration |
-| Tasks parsed as 0 | Malformed `tasks.md` (missing `## Phase N` or wrong checkbox format) | Ensure tasks follow `- [x] TYYY description` format |
+| Tasks parsed as 0 | Malformed `tasks.md` (missing `## Phase N` / `## Stage N` or wrong checkbox format) | Ensure tasks follow `- [x] TYYY description` format |
 | Rate limit errors | Too many rapid requests | Script enforces 0.35s delay; if still hitting limits, run again |
 | `REPO_ROOT` resolves incorrectly | Script run from inside `.github/` subtree | Always run from the repo root (the folder containing `specs/` and `.env`) |
 | `Group-by property "X" not found` | `group_by.property_id` requires internal ID, not name | The script uses `2022-06-28` to fetch property IDs — this is expected behavior |
@@ -293,11 +296,11 @@ Setup: `+ Add a view` → name `Kanban Board` → Board → Group: `Status`
 | Setting | Value |
 |---|---|
 | **Layout** | Board |
-| **Group** | `Phase` |
+| **Group** | work-bucket (`Phase`/`Stage`) |
 | **Filter** | `Status` *(e.g. filter to `Not Started` + `In Progress`)* |
 | **Sub-group** | *(none)* |
 
-Setup: `+ Add a view` → name `Sprint Backlog` → Board → Group: `Phase`
+Setup: `+ Add a view` → name `Sprint Backlog` → Board → Group: the work-bucket column (`Phase` by default, or `Stage`)
 
 ---
 
@@ -343,7 +346,7 @@ Setup: `+ Add a view` → name `Done` → Table → Filter: `Status` = `Done`
 |---|---|---|---|
 | Default view | Table | *(none)* | *(none)* |
 | Kanban Board | Board | `Status` | Quick filter: `Sprint` |
-| Sprint Backlog | Board | `Phase` | Quick filter: `Status` |
+| Sprint Backlog | Board | work-bucket (`Phase`/`Stage`) | Quick filter: `Status` |
 | Sprint | Table | *(none)* | Quick filter: `Sprint` (change to see each sprint) |
 | By Story | Board | `Story` | *(none)* |
 | Done | Table | *(none)* | Filter: `Status` = `Done` |
