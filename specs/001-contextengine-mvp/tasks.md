@@ -80,6 +80,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 - [ ] T027 [P] Implement Qdrant access-control pre-filter helper in `backend-python/src/services/retrieval/filter.py` with **two filter builders** (FR-007, SC-001):
   - `personal_filter(workspace_id, user_id)` → `must = [workspace_id == ctx, user_id == requester_user_id]` (personal collection — owner-only, clearance irrelevant)
   - `workspace_filter(workspace_id, access_level)` → `must = [workspace_id == ctx, access_level <= effective_access_level]` (workspace collection — shared docs)
+  - **Deny-by-default guard**: any search invocation reaching Qdrant without a `workspace_id` filter (and, for the workspace collection, an `access_level` bound) MUST raise rather than execute — converting a missing-filter bug into a loud failure instead of a silent cross-tenant leak (SC-001)
   - Both filters must be tested with a member attempting to retrieve another member's personal doc (must return 0 results)
 - [ ] T028 Implement FastMCP server bootstrap + per-role `allowed_tools` allowlist dispatch guard in `backend-python/src/mcp_server/server.py` (FR-011, FR-012)
 - [ ] T029 [P] Implement FastAPI app entrypoint + NATS subscriber bootstrap in `backend-python/src/main.py`
@@ -151,6 +152,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 - [ ] T060 [P] [US2] Integration test for LangGraph graph happy path (moderate→rewrite→retrieve→rerank→memory→generate→cite) in `backend-python/tests/integration/test_agent_graph.py`
 - [ ] T060a [P] [US2] Integration test for empty/unanswerable query (no authorized documents relevant → grounded "no relevant information" refusal, no fabrication, no cross-clearance leak) in `backend-python/tests/integration/test_unanswerable_query.py` (FR-006, FR-007, SC-001)
 - [ ] T061 [P] [US2] Integration test for prompt-injection defenses (delimited retrieved doc with "ignore previous instructions" is treated as data; injected tool call does not escalate) in `backend-python/tests/integration/test_injection_defense.py` (FR-010, FR-011, SC-007)
+- [ ] T061a [P] [US2] Integration test for memory clearance scoping — write a memory from an L4 answer (with a unique sentinel fact), demote the member to L2, then ask a question that would surface it and assert the L4-derived memory is **not** injected at Node 5 and the sentinel never appears in the L2 answer (FR-009, SC-001, research §13)
 - [ ] T062 [P] [US2] Integration test for structured-data Tier 2 answer via fixed `query_employees/projects/metrics` tools in `backend-python/tests/integration/test_structured_query.py` (FR-008)
 
 ### Implementation for User Story 2
@@ -160,7 +162,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 - [ ] T065 [P] [US2] Implement hybrid retrieval in `backend-python/src/services/retrieval/hybrid.py` (FR-007, SC-001): run **two parallel Qdrant searches** — `personal` collection with `personal_filter(workspace_id, requester_user_id)` and `workspace` collection with `workspace_filter(workspace_id, user_access_level)` — then RRF-interleave both result sets before reranking. The merged candidate set must never contain chunks from another user's personal docs.
 - [ ] T066 [P] [US2] Implement reranker via LLM gateway `rerank` alias + hot/cold tier routing in `backend-python/src/services/retrieval/reranker.py` and `backend-python/src/services/retrieval/hot_cold.py`
 - [ ] T067 [P] [US2] Implement child→parent chunk expansion in `backend-python/src/services/retrieval/expand.py`
-- [ ] T068 [P] [US2] Implement Mem0 per-user memory injection in `backend-python/src/services/agent/memory.py` (FR-009)
+- [ ] T068 [P] [US2] Implement Mem0 per-user memory injection in `backend-python/src/services/agent/memory.py` (FR-009, SC-001, research §13): on **write**, stamp each memory with `workspace_id`, `user_id`, and `access_level` = the highest `access_level` among contributing chunks/answer; on **read** (Node 5), inject only memories satisfying `workspace_id == ctx AND user_id == ctx AND access_level <= effective_access_level` against the requester's **current** clearance — a memory above current clearance (e.g., post L4→L2 demotion) is never injected
 - [ ] T069 [P] [US2] Implement semantic + exact answer cache keyed by `workspace+user+access_level+model+query` with `cacheable_scope` in `backend-python/src/services/agent/cache.py` (FR-007, SC-001, research §2)
 - [ ] T070 [US2] Implement MCP knowledge tools (`search_personal_knowledge`, `search_workspace_knowledge`, `get_document_by_id`, `list_documents`) in `backend-python/src/mcp_server/tools/knowledge.py` (FR-006, FR-007)
 - [ ] T071 [P] [US2] Implement MCP structured tools (`query_employees`, `query_projects`, `query_metrics`, parameterized SQL only) in `backend-python/src/mcp_server/tools/structured.py` (FR-008)
@@ -339,6 +341,16 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 - [ ] T126 [P] Wire CI gates into `Makefile`/CI: lint+format (gofmt/golangci-lint, ruff/black, eslint/prettier), ≥80% coverage per runtime, Testcontainers integration runs (`go test -tags=integration` / `pytest -m integration`), Playwright E2E, performance/bundle-size checks, security scan, and the Phase 1 eval gate
 - [ ] T127 [P] Implement Playwright E2E suite for the critical journeys (upload→indexed library; ask→cited streamed answer + debug panel; access-scoped visibility for two clearances; near-limit warning + exhaustion block) in `frontend/tests/e2e/` (SC-004, SC-005, SC-008, SC-010)
 - [ ] T128 Execute [quickstart.md](./quickstart.md) validation Scenarios 1–8 end-to-end and record evidence (Principle X)
+
+### Access-control adversarial hardening (SC-001, release blocker)
+
+> SC-001 is a release blocker at "100%". Functional happy-path tests are insufficient — these property-based and adversarial tests cover **every** surface that touches authorized content: Qdrant retrieval, semantic cache, Mem0 memory, and Postgres RLS. The two non-negotiable gates are the deny-by-default filter guard (T140) and the zero-above-clearance eval assertion (T125).
+
+- [ ] T140 [P] Property-based retrieval filter tests in `backend-python/tests/security/test_retrieval_filter_property.py` (Hypothesis): across randomized corpora over all 5 levels × both collections, assert no returned chunk has `access_level > requester_clearance` or a foreign `workspace_id`; assert a member B query never returns member A's personal-collection chunk even at L5; assert the **deny-by-default guard** (T027) raises when a search is attempted with no `workspace_id`/`access_level` filter (FR-007, SC-001)
+- [ ] T141 [P] Cross-clearance semantic-cache adversarial tests in `backend-python/tests/security/test_cache_cross_clearance.py`: same normalized query at L4 then L2 → L4 populates, L2 is a **miss** and never receives L4 bytes; same clearance but different `user_id` for personal-scoped answers → also a miss; inject a unique sentinel into the L4 answer and assert it never appears in any L2 response across N runs (FR-007, SC-001, research §2)
+- [ ] T142 [P] Memory temporal/adversarial tests in `backend-python/tests/security/test_memory_clearance.py`: extends T061a into a property test over write-clearance × read-clearance pairs — assert a memory is injected at Node 5 iff its stamped `access_level` ≤ the requester's current clearance, and a sentinel L4 fact is never surfaced after demotion (FR-009, SC-001, research §13)
+- [ ] T143 [P] RLS negative tests in `backend-go/tests/security/rls_negative_test.go`: a tenant query executed without `SET LOCAL app.workspace_id` returns 0 rows / errors (never the full table); a forged `workspace_id` in the request body is ignored (resolved server-side) and RLS blocks cross-workspace reads (FR-014, SC-001)
+- [ ] T144 Extend the Phase 1 eval gate (T125) with the **hard zero-above-clearance assertion** as a blocking CI check: across the full golden query set, no above-clearance labeled doc ID appears in any answer's citations or retrieved set; non-zero violations fail the build (FR-030, SC-001)
 
 ---
 

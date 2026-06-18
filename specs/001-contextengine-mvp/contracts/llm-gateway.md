@@ -49,7 +49,7 @@ async def embed(texts: list[str], workspace_id: str) -> list[list[float]]: ...
 
 `alias resolution → idempotency check → budget check → cache check → provider call → trace write → llm_call_log write → idempotency record`
 
-- **Idempotency**: `idem_key = req.idem_key or sha256(workspace_id | model | messages | json_schema)`. `GETSET llm:idem:{idem_key}` (TTL 24h): hit → return stored response without calling provider or deducting credits; miss → proceed and store. The credit deduction is bound to the same `idem_key` (FR-019, SC-006).
+- **Idempotency**: `idem_key = req.idem_key` when the caller supplies one (the only reliable retry signal); otherwise it falls back to `sha256(workspace_id | model | messages | json_schema)` scoped to a **short** window (`TTL 60s`, not 24h) so a genuine re-ask of the same question minutes later is **not** silently served the stale answer or skipped for billing. `GETSET llm:idem:{idem_key}`: hit → return stored response without calling provider or deducting credits; miss → proceed and store. The credit deduction is bound to the same `idem_key` (FR-019, SC-006). Dedup-for-latency on legitimate repeat questions is the semantic cache's job (below), keyed independently; the idempotency layer exists only to make a *retry* a no-op.
 - **Budget check**: per-role daily token budget (Redis) + workspace balance; over-budget short-circuits before the provider call (FR-016/FR-017).
 - **Semantic cache**: key = `sha256(workspace_id | user_id | effective_access_level | model | normalize(query))`; personal-knowledge answers per-user, workspace-only answers MAY share per `(workspace_id, access_level)` via `cacheable_scope` (research §2, SC-001).
 - **PII scrub before write**: prompts/responses are PII-scrubbed before any Langfuse/eval write; raw bodies retained 30 days then purged (FR-024, Clarification Q5).
@@ -72,7 +72,7 @@ Configuring only `/llm/proxy` without the MCP server gives governance and meteri
 
 ## Contract test obligations
 
-- A repeated `chat` with identical inputs (same derived `idem_key`) calls the provider once and deducts credits once (SC-006).
+- A repeated `chat` carrying the same explicit `idem_key` (a retry) calls the provider once and deducts credits once (SC-006); a genuine re-ask of an identical question after the 60s content-hash window is treated as a fresh call (provider invoked, credits deducted), not silently deduplicated.
 - A primary-provider timeout fails over exactly once and increments `llm.fallback.count`; a low-quality (but successful) response does **not** fail over (FR-029).
 - `embed` never silently substitutes the fallback model for a live call; the affected item is parked in DLQ (FR-029).
 - A prompt containing an email/token is PII-scrubbed before it appears in any trace/eval store (FR-024).
