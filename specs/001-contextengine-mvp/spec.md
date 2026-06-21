@@ -304,3 +304,4 @@ Members receive notifications about workspace activity that concerns them — in
 - Infographic and mind-map generation
 - Agent actions that modify files or send messages
 - Full evaluation tooling and automated security red-team scanning
+- High-concurrency scale-out & resilience hardening (worker autoscaling, SSE connection ceilings, connection pooling, Qdrant/Redis HA, load testing) — deferred to **Phase 4**; see [phase-4-scalability-hardening.md](./phase-4-scalability-hardening.md)

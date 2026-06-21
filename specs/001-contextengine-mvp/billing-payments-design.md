@@ -106,11 +106,11 @@ To append to [contracts/nats-subjects.md](./contracts/nats-subjects.md):
 
 | Subject | Publisher | Consumer | Payload (key fields) |
 |---------|-----------|----------|----------------------|
-| `billing.grant.<workspace_id>` | BFF (webhook handler, post-verify) | Python billing worker | `{ workspace_id, plan_id, credits, operation_type, payment_id, idem_key, trace_id }` → `INSERT INTO credit_ledger` (positive delta) + `UPDATE workspace_credits` + Redis `INCRBY` (idempotent) |
+| `billing.grant.<workspace_id>` | BFF (webhook handler, post-verify) | **Go kernel billing worker** | `{ workspace_id, plan_id, credits, operation_type, payment_id, idem_key, trace_id }` → `INSERT INTO credit_ledger` (positive delta) + `UPDATE workspace_credits` + Redis `INCRBY` (idempotent). The Go kernel is the sole `credit_ledger` writer. |
 | `notify.<workspace_id>` (reuse) | BFF (webhook handler) | Notification service | New categories: `payment_succeeded`, `payment_failed`, `subscription_renewed`, `subscription_canceled` (extend the `notifications.category` enum) |
 
 Rules:
-- **Grant idempotency.** `billing.grant` consumers rely on `credit_ledger.idem_key UNIQUE`; a replayed webhook that re-publishes the same `idem_key` inserts one ledger row and performs one Redis `INCRBY` (guarded by `SET NX billing:applied:{idem_key}`, mirroring research §3).
+- **Grant idempotency.** The **Go** `billing.grant` consumer relies on `credit_ledger.idem_key UNIQUE`; a replayed webhook that re-publishes the same `idem_key` inserts one ledger row and performs one Redis `INCRBY` (guarded by `SET NX billing:applied:{idem_key}`, mirroring research §3).
 - **Order independence.** A `subscription_grant` for invoice N is keyed by the invoice ID, so out-of-order or duplicated provider deliveries converge to the correct balance.
 
 ## Webhook processing flow (per provider)

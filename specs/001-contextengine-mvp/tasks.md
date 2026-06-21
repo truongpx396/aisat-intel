@@ -215,7 +215,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 ### Tests for User Story 4 ⚠️ (write first, must fail)
 
 - [ ] T089 [P] [US4] Contract test for `GET /credits` (`balance`, `warning_threshold_pct`, `near_limit`), `402 payment_required`, `429 limit_reached` in `backend-go/tests/contract/credits_test.go` per [bff-rest.md](./contracts/bff-rest.md)
-- [ ] T090 [P] [US4] Contract test for `billing.deduct` idempotency (duplicate `idem_key` → one ledger row) in `backend-python/tests/contract/test_billing_subject.py` per [nats-subjects.md](./contracts/nats-subjects.md) (SC-006)
+- [ ] T090 [P] [US4] Contract test for `billing.deduct` idempotency (duplicate `idem_key` → exactly one ledger row written by the **Go** billing worker; Python never writes the ledger) in `backend-go/tests/contract/billing_deduct_test.go` per [nats-subjects.md](./contracts/nats-subjects.md) (SC-006)
 - [ ] T091 [P] [US4] Integration test for credit lifecycle (deduct → warn at threshold → block at exhaustion → reconcile Redis↔ledger) in `backend-go/tests/integration/credits_lifecycle_test.go` (FR-016–FR-019, SC-006, SC-010)
 
 ### Implementation for User Story 4
@@ -223,10 +223,10 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 - [ ] T092 [US4] Create `workspace_credits` + `credit_ledger` migration (append-only, partitioned, `UNIQUE (idem_key) WHERE idem_key IS NOT NULL`) and `token_usage_daily` in `backend-go/migrations/0012_credits.sql` (FR-019, SC-006)
 - [ ] T093 [P] [US4] Implement credit models (`WorkspaceCredits`, `CreditLedger`) in `backend-go/internal/credits/model/credit.go`
 - [ ] T094 [US4] Implement credit fast-path service (Redis `DECRBY` atomic deduction, idempotency `SET NX billing:applied:{idem_key}`, near-limit detection, `402`/`429` blocking) in `backend-go/internal/credits/service/credits.go` (FR-016, FR-017, FR-018)
-- [ ] T095 [US4] Implement Redis-outbox → ledger drain + cold-start rehydration + hourly reconciliation in `backend-go/kernel/billing/reconcile.go` (FR-019, SC-006)
+- [ ] T095 [US4] Implement the Go kernel billing worker as the **sole `credit_ledger` writer**: consume `billing.deduct.<ws>` spend events + Redis-outbox → ledger drain + cold-start rehydration + hourly reconciliation in `backend-go/kernel/billing/reconcile.go` (FR-019, SC-006)
 - [ ] T096 [P] [US4] Implement new-account/per-IP cumulative ceilings (relaxed only after `email_verified_at`) in `backend-go/internal/credits/service/abuse_guard.go` (FR-020)
 - [ ] T097 [US4] Implement credits HTTP transport (`GET /credits`) + `SetupModule` in `backend-go/internal/credits/infra/transport/http/handler.go` and `backend-go/internal/credits/module.go`
-- [ ] T098 [P] [US4] Implement Python billing worker (consume `billing.deduct.<ws>` → idempotent `INSERT INTO credit_ledger`) in `backend-python/src/mcp_server/billing/ledger.py`
+- [ ] T098 [P] [US4] Implement the Python spend-event emitter (query/ingest/agent workers publish `billing.deduct.<ws>` with the cost computed by the LLM gateway; **never** writes `credit_ledger` or the Redis balance) in `backend-python/src/services/billing/emitter.py`
 - [ ] T099 [P] [US4] Implement credit balance UI + near-limit warning banner with upgrade CTA in `frontend/src/features/chat/components/CreditBalance.tsx`
 
 **Checkpoint**: US1–US4 work; credit accounting is exact, observable, and abuse-guarded.

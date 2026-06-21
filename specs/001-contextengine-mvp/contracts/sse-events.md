@@ -2,6 +2,10 @@
 
 **Plan**: [../plan.md](../plan.md) | The streaming contract between the Go BFF and the React SPA (`frontend/src/lib/sse.ts`). The BFF relays Python worker output (via Redis pub/sub keyed by `stream_id`) as Server-Sent Events.
 
+> **Relay is a separable tier (locked in Phase 1, research §14).** The SSE relay subscribes to Redis pub/sub by `stream_id` and forwards only — it holds no request-handling logic. Phase 1 MAY co-deploy it with the request-handling BFF, but the clean boundary lets Phase 4 split it into an independently connection-scaled tier without touching handlers.
+
+> **Why Redis pub/sub, not JetStream, for the streaming hop.** Work dispatch (BFF→worker) uses JetStream because a job must be durable, redeliverable, and lag-measurable. The live-token hop (worker→relay→browser) is ephemeral fan-out to an already-connected client, so it uses Redis pub/sub keyed by `stream_id`: lowest latency, trivial per-stream fan-out, fire-and-forget. A dropped token is cosmetic — credits, audit, and the final answer/citations are authoritative in Postgres, not the stream. JetStream here would add per-token persistence and per-query consumer churn for no benefit. Replay-on-reconnect (not a Phase 1 requirement) would be a **Redis Stream** (`XADD`/`XREAD`), still not JetStream.
+
 ## Event types
 
 ```typescript
