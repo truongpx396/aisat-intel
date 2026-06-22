@@ -15,11 +15,13 @@ mechanisms that were intentionally deferred or left unspecified for the MVP.
 None of these are required to demonstrate the Phase 1 product; all are required
 before high-concurrency production load.
 
-> **Prerequisite already satisfied:** the four *rework-risk* architectural seams
+> **Prerequisite already satisfied:** the five *rework-risk* architectural seams
 > that must exist before this phase is purely additive are **locked in Phase 1**
 > — JetStream durability, a separable SSE-relay tier, a workspace-partitionable
-> credit outbox, and a documented Qdrant re-shard trigger (see
-> [research.md §14](./research.md) and [plan.md](./plan.md) "Scale/Scope"). Phase 4
+> credit outbox, a documented Qdrant re-shard trigger, and single-owner scheduled
+> work in a dedicated `cmd/worker` role (external CronJob → NATS tick → queue group,
+> idempotent atomic claims — so autoscaling never double-fires a timer; see
+> [research.md §14–§15](./research.md) and [plan.md](./plan.md) "Scale/Scope"). Phase 4
 > is therefore provisioning + HA + load validation, not redesign.
 
 > Phase map: Phase 1 = Core App · Phase 2 = Evaluation Suite (+ Headroom eval) ·

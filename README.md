@@ -154,14 +154,15 @@ The `ingest` / `query` / `crawl` / `email` workers in the diagram are **not** se
 
 📐 Full architecture diagram: [system-architecture.excalidraw](specs/001-contextengine-mvp/diagrams/system-architecture.excalidraw)
 
-#### One Go image, two deployable roles (`api` / `sse-relay`)
+#### One Go image, three deployable roles (`api` / `sse-relay` / `worker`)
 
-The Go BFF follows the **same one-image / many-roles** model as the Python tier — the split is at the **deployment layer, not the code layer**. A single `backend-go/` image ships **two entrypoints** that share all `internal/` code, auth, the Redis pub/sub client, and the SSE event contract:
+The Go BFF follows the **same one-image / many-roles** model as the Python tier — the split is at the **deployment layer, not the code layer**. A single `backend-go/` image ships **three entrypoints** that share all `internal/` code, auth, the Redis pub/sub client, and the SSE event contract:
 
 | Entrypoint | Role | Handles | Scales on |
 |---|---|---|---|
 | `cmd/api/main.go` | **`api`** | REST aggregation + **stream creation** (`POST /query` → publishes to JetStream, returns `stream_id`) | RPS / CPU |
 | `cmd/relay/main.go` | **`sse-relay`** | The long-lived streaming `GET`s (`/query/{streamId}`, `/ingest/{jobId}/status`, `/notifications/stream`) | **active connection count** |
+| `cmd/worker/main.go` | **`worker`** | Background/scheduled work — outbox drain, reconcile, DLQ sweeps, matview refresh — consumed from JetStream queue groups, triggered by external `*.tick`/`*.refresh` (no in-process timers) | consumer lag |
 
 ```text
                         ┌──────────────────────────────┐
@@ -181,6 +182,21 @@ The Go BFF follows the **same one-image / many-roles** model as the Python tier 
 ```
 
 > **Why this works with zero stickiness:** the relay subscribes to **Redis pub/sub keyed by `stream_id`** — not in-process worker output — so **any `sse-relay` replica can serve any stream**. Phase 1 MAY co-deploy both roles as one process (`ROLE=all`); Phase 4 deploys them as **independently-scaled** services without touching handler code (locked seam — see [research §14](specs/001-contextengine-mvp/research.md)).
+
+> **Why scheduled work lives in `worker`, not `api`:** background loops embedded in a request-serving tier multiply with replicas — a “single hourly reconcile” silently becomes N concurrent reconcilers once `api` autoscales. Instead, a pluggable scheduler (k8s `CronJob`, DigitalOcean App Platform scheduled component, a plain `cron`/systemd timer, or a single internal ticker in the one-replica `worker`) emits a JetStream tick (`billing.reconcile.tick`, `agent.janitor.tick`, `usage.matview.refresh`); a **durable queue group delivers each to exactly one `worker`**, and every handler is an **idempotent atomic claim** (conditional `UPDATE` / `SET NX` / atomic pop), so a duplicate delivery or replica overlap produces no duplicate effect — correctness never depends on leader election (locked seam — see [research §15](specs/001-contextengine-mvp/research.md)).
+
+> **Concurrency terms used above** — how two racing workers (or a redelivered event) never produce a duplicate effect:
+> - **Atomic claim** — one indivisible step that only a single worker can win, replacing fragile *check-then-act* (two workers can both pass a separate `SELECT` and then both act). The claim *is* the lock.
+> - **Idempotent atomic claim** — that claim is also *safe to repeat*: running it again does nothing extra. So 2 racers → one wins, one no-ops; a redelivered event → no-op the second time.
+> - **`SET NX`** — Redis "set if not exists": writes a lock key only if absent, so exactly one worker wins the gate. Used by the **reconcile** job (a multi-step scan with no single row to flip) to avoid running the *whole* job twice — `key reconcile:lock:{shard}:{hour}`. It's a throughput gate; `credit_ledger.idem_key UNIQUE` is the final correctness backstop.
+> - **`LPOP`** — Redis atomic "pop from list head": only one worker can take a given outbox item, so the credit-outbox drain never double-processes a spend (paired with `idem_key UNIQUE`).
+> - **Conditional `UPDATE`** — the **janitor**'s self-gating claim: `UPDATE agent_run SET status='queued' WHERE status='running' AND last_heartbeat_at < $` — only the racer that actually flips `running→queued` re-queues the run; no separate lock needed.
+
+> **The guarantee hierarchy (why this is correct, not just fast):** these mechanisms are deliberately layered, and the ordering is the whole point:
+>
+> > **Data-layer idempotency (`idem_key UNIQUE`) is the _only_ correctness guarantee. Leases, queue groups, and `SET NX` are throughput optimizations.**
+>
+> A lot of systems mistakenly treat a distributed lock or a leader election as their correctness boundary — then get burned when a lock TTL expires mid-operation, a GC pause outlives the lease, or a network partition elects two leaders. Here those primitives are explicitly demoted to **performance** (they stop most duplicate work *before* it hits the database), while the actual money-correctness lives in a **database constraint** that physically cannot admit a second row. So even in the worst case — two "leaders", an expired lock, a redelivered tick — the duplicate write is rejected by the ledger itself, not by a timing assumption. Correctness never depends on a clock or a quorum being healthy.
 
 #### SSE streaming flow
 
@@ -330,6 +346,21 @@ These are aligned with **OWASP Top 10 (2025)** — see the repo-wide [security &
 - **Abuse controls** — stricter new-account / per-IP cumulative ceilings to prevent free-credit farming.
 - **Resilience** — Redis loss is rebuilt from the durable ledger before serving; hourly reconciliation corrects drift.
 
+> **The Redis-outbox pattern (why a deduction is never lost or double-charged):** a charge must touch two stores — drop the Redis balance *and* append a Postgres ledger row — but they can't share one transaction. So the hot path does both **Redis** steps atomically (`DECRBY` the balance **+** `LPUSH` a spend intent onto `outbox:{shard}`) and returns immediately, never blocking on Postgres. The single-owner `cmd/worker` then atomically `LPOP`s each intent and writes the durable `credit_ledger` row. Delivery is at-least-once (a crash after `LPOP` just redelivers), and `credit_ledger.idem_key UNIQUE` collapses any retry to **exactly one** row — so enforcement stays sub-ms while accounting stays durable and exactly-once. The `{shard}` key lets Phase 4 run N parallel drainers without double-apply.
+
+```text
+HOT PATH (api · per request, sub-ms)          ASYNC DRAIN (cmd/worker · sole ledger writer)
+┌─ atomic in Redis ─────────────────┐
+│ DECRBY balance:{ws}  cost         │          LPOP outbox:{shard}        ← atomic claim
+│ LPUSH  outbox:{shard} {…idem_key} │  ───▶    INSERT INTO credit_ledger  ← idem_key UNIQUE = exactly once
+└───────────────────────────────────┘          (crash before INSERT → redelivered, still one row)
+        returns now (no Postgres wait)          hourly reconcile = drift backstop
+```
+
+> **Why reconciliation is still needed (the outbox isn't enough):** the outbox keeps the **ledger** exactly-once, but the **Redis balance is a fast, mutable, non-durable *copy*** of that ledger — and any live-updated copy eventually drifts from its source: a Redis failover can lose the last few seconds of `DECRBY`s, a compensating `INCR`-back on `402`/`429` can be imperfect, and the async drain means Redis and the ledger are momentarily out of step by design. Cold-start rehydration fixes Redis *at boot*; **hourly reconciliation** keeps it honest *at runtime* — it recomputes `expected = SUM(credit_ledger) + grants`, compares to the live Redis balance, and writes a `reconcile` row to heal any drift. SC-006 requires this: users *see* the fast Redis number but are *billed* from the ledger, so the two must provably stay within tolerance.
+
+
+
 > **Phase 1 ships credit *metering*, not payments.** Credits are the single internal unit and the consumption hot path (Redis `DECRBY` + outbox + ledger) is fully implemented now. The fiat **payment/provider layer** — Stripe / Polar / PayPal adapters, checkout, webhooks-as-source-of-truth, subscriptions — is an **additive Phase 2** layer that only converts money → credits; it never changes consumption. `plans` / `subscriptions` exist as stubs in Phase 1. See [billing-payments-design.md](specs/001-contextengine-mvp/billing-payments-design.md) (Phase 2 design draft).
 
 📄 Billing & payments design (Phase 2): [billing-payments-design.md](specs/001-contextengine-mvp/billing-payments-design.md) · 📐 [credit-metering-swimlane](specs/001-contextengine-mvp/diagrams/credit-metering-swimlane.excalidraw) · [billing-payment-flow](specs/001-contextengine-mvp/diagrams/addition/billing-payment-flow.excalidraw)
@@ -405,6 +436,8 @@ aisat-studio/
 │
 ├── backend-go/                        # 🐹 Go BFF · gateway · kernel
 │   ├── cmd/api/                       #   main.go (wires platform clients + each feature's SetupModule)
+│   ├── cmd/relay/                     #   main.go (SSE-relay role — streaming GETs over Redis pub/sub)
+│   ├── cmd/worker/                    #   main.go (background/scheduled role — queue-group consumers, no timers)
 │   ├── kernel/                        #   template-level — never imports product (depguard-enforced)
 │   │   ├── auth.go bus.go storage.go meter.go flags.go cache.go …
 │   │   └── identity/ tenancy/ billing/ notifications/ audit/ files/ observability/ admin/

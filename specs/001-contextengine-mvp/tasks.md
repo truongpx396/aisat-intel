@@ -71,7 +71,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 - [ ] T021 [P] Implement shared error envelope `{code,message,details}` in `backend-go/internal/shared/errors/errors.go` and DTO helpers in `backend-go/internal/shared/dto/dto.go` (Principle VIII)
 - [ ] T022 [P] Implement Tenant middleware (resolves workspace from JWT/PAT, runs `SET LOCAL app.workspace_id` and `SET LOCAL app.user_id`) in `backend-go/internal/shared/middleware/tenant.go` (FR-004, FR-027, FR-036)
 - [ ] T023 [P] Implement Actor/auth + request-id + recovery middleware in `backend-go/internal/shared/middleware/auth.go` and `backend-go/internal/shared/middleware/observability.go`
-- [ ] T024 Implement app root wiring (build `appCtx`, call each feature's `SetupModule`) in `backend-go/cmd/api/main.go` and shared router in `backend-go/cmd/api/routes.go` (Principle IV)
+- [ ] T024 Implement app root wiring (build `appCtx`, call each feature's `SetupModule`) in `backend-go/cmd/api/main.go` and shared router in `backend-go/cmd/api/routes.go`; scaffold `backend-go/cmd/relay/main.go` (SSE streaming role) and `backend-go/cmd/worker/main.go` (background/scheduled role — consumes `*.tick`/`*.refresh` + outbox + DLQ via JetStream queue groups, no in-process timers) sharing the same image (Principle IV, research §14, §15)
 
 ### Python tier chokepoints (LLM gateway, MCP server, access filter)
 
@@ -223,7 +223,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 - [ ] T092 [US4] Create `workspace_credits` + `credit_ledger` migration (append-only, partitioned, `UNIQUE (idem_key) WHERE idem_key IS NOT NULL`) and `token_usage_daily` in `backend-go/migrations/0012_credits.sql` (FR-019, SC-006)
 - [ ] T093 [P] [US4] Implement credit models (`WorkspaceCredits`, `CreditLedger`) in `backend-go/internal/credits/model/credit.go`
 - [ ] T094 [US4] Implement credit fast-path service (Redis `DECRBY` atomic deduction, idempotency `SET NX billing:applied:{idem_key}`, near-limit detection, `402`/`429` blocking) in `backend-go/internal/credits/service/credits.go` (FR-016, FR-017, FR-018)
-- [ ] T095 [US4] Implement the Go kernel billing worker as the **sole `credit_ledger` writer**: consume `billing.deduct.<ws>` spend events + Redis-outbox → ledger drain + cold-start rehydration + hourly reconciliation in `backend-go/kernel/billing/reconcile.go` (FR-019, SC-006)
+- [ ] T095 [US4] Implement the Go kernel billing worker as the **sole `credit_ledger` writer**, running in the `cmd/worker` role (not `cmd/api`): consume `billing.deduct.<ws>` spend events + **atomic** Redis-outbox pop (`LPOP`/Stream consumer-group) → ledger drain + cold-start rehydration (per-workspace lock); hourly reconciliation triggered by the external `billing.reconcile.tick` (pluggable: k8s `CronJob` / DO scheduled component / cron / single-owner `worker` ticker) and guarded by `SET NX reconcile:lock:{shard}:{hour_bucket}` so duplicate/concurrent ticks run once — in `backend-go/kernel/billing/reconcile.go` (FR-019, SC-006, research §15)
 - [ ] T096 [P] [US4] Implement new-account/per-IP cumulative ceilings (relaxed only after `email_verified_at`) in `backend-go/internal/credits/service/abuse_guard.go` (FR-020)
 - [ ] T097 [US4] Implement credits HTTP transport (`GET /credits`) + `SetupModule` in `backend-go/internal/credits/infra/transport/http/handler.go` and `backend-go/internal/credits/module.go`
 - [ ] T098 [P] [US4] Implement the Python spend-event emitter (query/ingest/agent workers publish `billing.deduct.<ws>` with the cost computed by the LLM gateway; **never** writes `credit_ledger` or the Redis balance) in `backend-python/src/services/billing/emitter.py`
@@ -265,7 +265,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 
 ### Implementation for User Story 6
 
-- [ ] T105 [US6] Create `llm_call_log` table + `llm_cost_daily` materialized view migration in `backend-go/migrations/0013_llm_usage.sql` (FR-022, FR-024)
+- [ ] T105 [US6] Create `llm_call_log` table + `llm_cost_daily` materialized view migration (add the UNIQUE index required for `REFRESH MATERIALIZED VIEW CONCURRENTLY`; refreshed single-owner in `cmd/worker` via the `usage.matview.refresh` tick, research §15) in `backend-go/migrations/0013_llm_usage.sql` (FR-022, FR-024)
 - [ ] T106 [US6] Implement admin usage service (aggregate per-user/per-feature from `llm_cost_daily`, enforce member-limit updates) in `backend-go/kernel/admin/usage.go` (FR-022)
 - [ ] T107 [US6] Implement admin HTTP transport (`GET /admin/usage`, member-limit PATCH) + `SetupModule` in `backend-go/kernel/admin/transport/http/handler.go`
 - [ ] T108 [P] [US6] Implement admin dashboard UI (per-user/per-feature usage + cost, member-limit controls) in `frontend/src/features/admin/`
@@ -296,7 +296,7 @@ description: "Task list for AISAT-STUDIO MVP (Phase 1) implementation"
 - [ ] T117 [US7] Implement agent-run service (cancel propagation, per-step `credits_cap` check independent of daily budget) in `backend-go/internal/policy/service/agent_run.go` (FR-028, SC-009)
 - [ ] T118 [P] [US7] Implement policy repository + `agent_audit_log` writer (`tool_called`, `token_cost`, `result_hash`, `trace_id`) in `backend-go/internal/policy/infra/repo/policy_repo.go` (FR-023)
 - [ ] T119 [US7] Implement policy HTTP transport (`/devices/*`, `/llm/proxy`, `/agent-runs/*`) + `SetupModule` in `backend-go/internal/policy/infra/transport/http/handler.go` and `backend-go/internal/policy/module.go`
-- [ ] T120 [US7] Implement Python long-horizon worker (durable LangGraph checkpoints to Redis AOF, heartbeat every 10s, janitor re-queue on stale heartbeat, cancel handling, per-run cap halt) in `backend-python/src/services/agent/long_horizon.py` (FR-028, SC-009)
+- [ ] T120 [US7] Implement Python long-horizon worker (durable LangGraph checkpoints to Redis AOF, heartbeat every 10s, cancel handling, per-run cap halt) in `backend-python/src/services/agent/long_horizon.py`; the stale-heartbeat re-queue runs in a **single-owner janitor role** triggered by the external `agent.janitor.tick` (not an in-process timer per pod) and re-queues via a conditional `UPDATE agent_run SET status='queued' WHERE id=$1 AND status='running' AND last_heartbeat_at < $2 RETURNING id` so concurrent janitors re-queue each run once (FR-028, SC-009, research §15)
 - [ ] T121 [P] [US7] Implement device-management + agent-run UI (register/revoke device, run list, cancel) in `frontend/src/features/admin/components/Devices.tsx` and `AgentRuns.tsx`
 
 **Checkpoint**: All 7 user stories independently functional; local agents are additive and fully metered/audited.

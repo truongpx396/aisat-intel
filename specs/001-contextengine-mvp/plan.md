@@ -35,7 +35,7 @@ Technical approach: a three-runtime system — a Go BFF/gateway (kernel + agent 
 
 **Constraints**: 100% access-control correctness (SC-001, release blocker); injection/disallowed inputs refused before retrieval/spend (SC-007); exact credit accounting, no double-charge (SC-006); per-file upload size limit admin-configurable per workspace, default 50 MB; raw prompt/response retention 30 days; near-limit warning at admin-configurable threshold (default 80%); one-hop provider fallback only
 
-**Scale/Scope**: Phase 1 capacity — Go BFF 2 replicas, 3 Python worker pods per NATS subject, single Qdrant/NATS cluster, Postgres primary + 1 read replica; 7 user stories, ~30 functional requirements, 12+ key entities, 9 MCP tools. **Scale-forward seams locked in Phase 1 (rework-risk, research §14):** NATS runs in **JetStream** mode (durable pull consumers + per-subject queue groups); the SSE relay is a logically separable tier from the request-handling BFF; the Redis credit outbox is workspace-partitionable; Qdrant stays payload-isolated with a documented re-shard/replication trigger. Horizontal-scale *provisioning* (KEDA autoscaling, PgBouncer, Redis/Qdrant HA, SSE connection ceilings, load testing) is deferred to **Phase 4** ([phase-4-scalability-hardening.md](./phase-4-scalability-hardening.md)).
+**Scale/Scope**: Phase 1 capacity — Go BFF 2 replicas, 3 Python worker pods per NATS subject, single Qdrant/NATS cluster, Postgres primary + 1 read replica; 7 user stories, ~30 functional requirements, 12+ key entities, 9 MCP tools. **Scale-forward seams locked in Phase 1 (rework-risk, research §14–§15):** NATS runs in **JetStream** mode (durable pull consumers + per-subject queue groups); the SSE relay is a logically separable tier from the request-handling BFF; the Redis credit outbox is workspace-partitionable; Qdrant stays payload-isolated with a documented re-shard/replication trigger; scheduled/background work runs single-owner in a dedicated `cmd/worker` role (external CronJob → NATS tick → queue group, idempotent atomic claims — no in-process timers). Horizontal-scale *provisioning* (KEDA autoscaling, PgBouncer, Redis/Qdrant HA, SSE connection ceilings, load testing) is deferred to **Phase 4** ([phase-4-scalability-hardening.md](./phase-4-scalability-hardening.md)).
 
 ## Constitution Check
 
@@ -93,6 +93,9 @@ backend-go/                      # Go BFF, gateway, kernel (template-level + pro
 ├── cmd/relay/
 │   └── main.go                  # SSE-relay entrypoint — same image, mounts only the streaming GET routes;
 │                                #   subscribes to Redis pub/sub by stream_id and forwards (research §14)
+├── cmd/worker/
+│   └── main.go                  # background/scheduled role — same image; consumes *.tick/*.refresh + outbox + DLQ
+│                                #   via JetStream queue groups; idempotent atomic claims, no in-process timers (research §15)
 ├── kernel/                      # template-level; never imports product (depguard-enforced)
 │   ├── auth.go bus.go storage.go mailer.go meter.go flags.go cache.go actor.go
 │   └── identity/ tenancy/ billing/ notifications/ audit/ flags/ files/ observability/ admin/
@@ -117,7 +120,7 @@ backend-python/                  # ML/AI workers, agent, ingestion, MCP server
 │   │   ├── ingestion/           # pipeline, chunker, captioner, markitdown, crawler, tagger
 │   │   ├── retrieval/           # hybrid, reranker, hot_cold, filter
 │   │   ├── notification/        # email worker: EmailSender port (default Resend), renders + sends, DLQ on exhaustion (US8)
-│   │   └── agent/               # graph (8 nodes: 7 RAG + Node 7 suggestions), memory (Mem0), cache (semantic), suggestions (FR-031)
+│   │   └── agent/               # graph (8 nodes: 7 RAG + Node 7 suggestions), memory (Mem0), cache (semantic), suggestions (FR-031); long-horizon worker + stale-heartbeat janitor (deployed as a single-owner janitor role, research §15)
 │   ├── mcp_server/              # server.py + tools/{knowledge,structured,utility}; spend emitted via services/billing (Go kernel is the sole credit_ledger writer)
 │   ├── baml_client/             # generated BAML client
 │   └── schemas/                 # ingest, query, agent, billing
