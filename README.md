@@ -27,6 +27,7 @@ Access control is enforced at the **data layer**, never by prompt. Every AI oper
 - [The RAG Agent — 7+1 Node LangGraph](#-the-rag-agent--71-node-langgraph)
 - [Security & Access Control](#-security--access-control)
 - [Credit Metering & Billing](#-credit-metering--billing)
+- [Notification System](#-notification-system)
 - [Observability](#-observability)
 - [Technology Stack](#-technology-stack)
 - [Architecture Principles](#-architecture-principles)
@@ -409,7 +410,42 @@ Redis is far more than a cache here: it is the **low-latency control plane** for
 
 ---
 
-## 🔭 Observability
+## � Notification System
+
+A fully **event-driven, multi-channel** notification subsystem (US8): any backend event — ingestion done/failed, invite received/accepted/revoked, credit near-limit / exhausted, long-horizon task halted, document shared, clearance changed, new member joined, admin broadcast — fans out to an **in-app inbox** (real-time over SSE) and an **opt-in email** channel, gated by each member's per-category, per-channel preferences. It is designed for the same production properties as the billing path: **exactly-once, recipient-scoped, async, and durable**.
+
+| Property | How it's enforced |
+|---|---|
+| 🔒 **Recipient-scoped (no leaks)** | Every notification is bound to `(workspace_id, user_id)` and enforced at the **data layer** (RLS: `user_id = current_setting('app.user_id')`). Never visible/delivered to another member or across workspaces, regardless of clearance — a release blocker (FR-036, **SC-012**). |
+| 🎯 **Exactly-once delivery** | Each triggering event carries a deterministic `idem_key` derived from the originating resource + event. Redelivery/producer retry yields **at most one** persisted row, one in-app push, one email (FR-032, **SC-013**). |
+| ⚡ **Real-time in-app** | The service pushes via Redis pub/sub `notify:user:<id>`; the **`cmd/relay`** SSE tier streams it to the browser and updates the unread count with no reload (FR-034). |
+| 📨 **Compliant email** | Provider-agnostic `kernel/mailer.go` port (default Resend, env-swappable) with retry + **DLQ** for exhausted sends; every non-essential email carries an unsubscribe link, and provider **bounce/complaint** webhooks suppress further email to that address (FR-035). |
+| 📣 **Async broadcast** | Admin broadcast fan-out runs **off the request path** so delivery to a large membership never blocks or times out the admin's request; recorded in the audit trail (FR-037). |
+| 🌊 **Storm coalescing** | High-volume same-category bursts (e.g., many ingests finishing at once) collapse into a digest / rate-limited summary instead of one push + email per event (FR-038). |
+| 🗄️ **Bounded growth** | Read notifications past the retention window (default 90d) are purged/archived via a scheduled `notify.retention.tick`, range-partitioned by `created_at`, so inbox + unread-count queries stay fast (FR-039). |
+
+> **Where it runs (independent scale-out).** The fan-out consumer (`notify.<ws>`) and the Go **email worker** (`notify.email.<ws>`) are **JetStream queue-group consumers hosted in `cmd/worker`** — N idempotent replicas that scale per-subject on consumer lag, fully independent of the request-serving `api`/`relay` tiers *and* of the single-owner scheduled jobs (`*.tick`/`*.refresh`). The email worker is plain Go (no AI/ML), so it lives in the Go tier on the same `kernel/mailer.go` port the rest of the kernel uses — not in the Python ML tier.
+
+> **Why exactly-once needs two guards (the same defense-in-depth as billing).** The notify handler does more than insert a row — it also pushes in-app (Redis pub/sub) and re-enqueues email, and those side-effects are **not** transactional with the DB write. So a cheap `SET NX notify:applied:{idem_key}` short-circuits the *entire* duplicate handler before any work, while the durable `UNIQUE (user_id, idem_key)` constraint is the permanent backstop that guarantees at-most-one row even if Redis evicted/expired the guard or two replicas raced. Redis = fast early-exit (ephemeral); Postgres UNIQUE = durable proof of SC-013.
+
+```text
+PRODUCERS (ingest · billing · invite · agent · admin)
+        │  publish notify.<ws> { recipient, category, idem_key, … }
+        ▼
+notify.<ws> queue group ── cmd/worker (N replicas, idempotent) ──┐
+   SET NX notify:applied:{idem_key}   ← fast dup gate            │
+   INSERT … UNIQUE(user_id, idem_key) ← durable backstop (SC-013)│
+        ├── in-app:  PUBLISH notify:user:<id> ──▶ cmd/relay ──▶ browser (SSE, live unread count)
+        └── email?   if pref enabled → notify.email.<ws> ──▶ Go email worker (cmd/worker)
+                                                              kernel/mailer.go (Resend) · retry · DLQ
+                                                              suppression-list check (bounce/complaint/unsubscribe)
+```
+
+📐 Flow diagram: [notification-flow.excalidraw](specs/001-contextengine-mvp/diagrams/addition/notification-flow.excalidraw) · 📄 Subjects: [nats-subjects.md](specs/001-contextengine-mvp/contracts/nats-subjects.md) · UI: [notifications.md](design-system/aisat-studio/pages/notifications.md)
+
+---
+
+## �🔭 Observability
 
 Every answer is fully traceable. The **debug panel** (US5) surfaces, per query: detected intent, tool called, whether a semantic-cache hit served the answer, access-filter summary (how many docs filtered out by clearance), hybrid/rerank scores, chunk expansion, injected memory, model used, token cost, credits deducted — plus a link to the full **Langfuse + OpenTelemetry** trace. LLM call logs (`llm_call_log`) drive the admin cost dashboard; raw prompt/response bodies are retained 30 days, then purged to PII-scrubbed metadata.
 
@@ -479,7 +515,6 @@ aisat-studio/
 │   │   │   ├── llm_gateway.py         #     single LLM chokepoint (aliases · fallback · budget · trace)
 │   │   │   ├── ingestion/             #     pipeline · chunker · captioner · markitdown · crawler · tagger
 │   │   │   ├── retrieval/             #     hybrid · reranker · hot_cold · filter
-│   │   │   ├── notification/          #     email worker (EmailSender port · DLQ)
 │   │   │   └── agent/                 #     graph (7+1 nodes) · memory (Mem0) · semantic cache · suggestions
 │   │   ├── mcp_server/                #   server.py + tools/{knowledge,structured,utility} · billing/ledger.py
 │   │   ├── baml_client/               #   generated BAML client

@@ -60,6 +60,7 @@ interface Notification {
 ### Notification stream — `GET /notifications/stream` (US8)
 - Long-lived per-user stream relaying the recipient's notifications from Redis pub/sub (`notify:user:<user_id>`) as SSE.
 - On connect: emits an initial `unread_count`. Thereafter, each new notification emits a `notification` event followed by an updated `unread_count`.
+- De-duplication happens server-side via the notification's `idem_key` before persistence/push (FR-032, SC-013), so a redelivered upstream event never produces a duplicate `notification` event on the wire; `idem_key` itself is internal and not serialized to the client.
 - Only the authenticated caller's own notifications are emitted; cross-member/cross-workspace delivery is impossible by construction (FR-036, SC-012).
 
 ## Debug trace (companion to the query stream)

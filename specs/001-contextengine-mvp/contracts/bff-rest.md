@@ -109,7 +109,9 @@ Billing responses:
 | GET | `/notifications/preferences` | List caller's per-category channel prefs | Missing rows return category defaults (FR-035) |
 | PUT | `/notifications/preferences` | Upsert caller's prefs | Body: `{ category, in_app, email }[]` (FR-035) |
 | GET | `/notifications/stream` (SSE) | Real-time push of new notifications + unread count | Events per [sse-events.md](./sse-events.md): `notification`, `unread_count` (FR-034) |
-| POST | `/admin/notifications/broadcast` | Send announcement to all workspace members (admin) | Body: `{ title, body, priority? }`; fans out per recipient prefs; audited (FR-037) |
+| POST | `/admin/notifications/broadcast` | Send announcement to all workspace members (admin) | Body: `{ title, body, priority? }`; enqueues an **async** fan-out job that delivers per recipient prefs off the request path; returns promptly; audited (FR-037) |
+| GET | `/notifications/unsubscribe` | One-click email unsubscribe for a category | Signed token (`?token=`) maps to recipient+category; disables that category's `email` channel; no auth cookie required (FR-035) |
+| POST | `/webhooks/email/{provider}` | Email-provider bounce/complaint callback | Verifies provider signature; upserts `email_suppressions`; never trusts unsigned bodies (FR-035) |
 
 ## Contract test obligations
 
@@ -121,3 +123,6 @@ Billing responses:
 - Notification scoping: a member's `/notifications` list and `/notifications/stream` never include another member's or another workspace's notifications (SC-012, hard).
 - Mark-read: `POST /notifications/{id}/read` for a notification the caller does not own returns `404`, not the notification (FR-036).
 - Preferences honored: with a category's `email` channel disabled, an event in that category yields an in-app notification but no `notify.email.<ws>` publish (FR-035).
+- Idempotent delivery: the same triggering event delivered twice yields one entry in `/notifications` and one unread increment, not two (SC-013, FR-032).
+- Async broadcast: `POST /admin/notifications/broadcast` returns promptly (does not block on per-recipient delivery) and is recorded in the audit trail (FR-037).
+- Email suppression/unsubscribe: a provider bounce/complaint to `POST /webhooks/email/{provider}` (signature-verified) suppresses further email to that address; `GET /notifications/unsubscribe` with a valid token disables the category's email channel (FR-035).
