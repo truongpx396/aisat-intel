@@ -44,7 +44,7 @@ Access control is enforced at the **data layer**, never by prompt. Every AI oper
 
 > A shared AI-powered second brain — upload files, paste links, add notes; query across personal + team knowledge; **only ever see what you're allowed to see.**
 
-The product is intentionally built as a **developer / architecture showcase**: every advanced pattern — hybrid retrieval, cross-encoder reranking, parent-child chunking, metadata pre-filtering, two-tier tools, visual captioning, and Redis semantic answer-caching — is **named, observable, and visible in a debug panel**.
+The product is intentionally built as a **developer / architecture showcase**: every advanced pattern — hybrid retrieval, cross-encoder reranking, structure-aware **parent-child + contextual-retrieval chunking**, metadata pre-filtering, two-tier tools, visual captioning, and Redis semantic answer-caching — is **named, observable, and visible in a debug panel**.
 
 📄 Full specification: [specs/001-contextengine-mvp/spec.md](specs/001-contextengine-mvp/spec.md)
 
@@ -299,9 +299,32 @@ flowchart LR
     N8 --> A["Cited answer + debug trace (SSE)"]
 ```
 
-Patterns shipped: **hybrid search**, **cross-encoder reranking**, **parent-child chunking**, **metadata pre-filtering**, **two-tier tools** (knowledge + structured), **visual captioning** for images/diagrams, and a **Redis semantic answer-cache**. Retrieval is served directly from Qdrant — fast enough under load that a separate hot/cold chunk tier is unnecessary; the real latency/cost win comes from caching whole *answers* (see below), not from tiering the vector store. Cross-clearance cache safety is guaranteed by keying any cached answer on `workspace + requester clearance + authorized document set`.
+Patterns shipped: **hybrid search**, **cross-encoder reranking**, **structure-aware parent-child + contextual-retrieval chunking**, **metadata pre-filtering**, **two-tier tools** (knowledge + structured), **visual captioning** for images/diagrams, and a **Redis semantic answer-cache**. Retrieval is served directly from Qdrant — fast enough under load that a separate hot/cold chunk tier is unnecessary; the real latency/cost win comes from caching whole *answers* (see below), not from tiering the vector store. Cross-clearance cache safety is guaranteed by keying any cached answer on `workspace + requester clearance + authorized document set`.
 
 📐 Agent diagram: [langgraph-rag-agent.excalidraw](specs/001-contextengine-mvp/diagrams/langgraph-rag-agent.excalidraw) · Query DFD: [query-path-dfd.excalidraw](specs/001-contextengine-mvp/diagrams/query-path-dfd.excalidraw)
+
+### Production RAG design patterns (and where each lives)
+
+These are the patterns mature AI teams converge on for enterprise RAG — each is a deliberate, observable choice here, not an accident:
+
+| Pattern | Industry practice it mirrors | Where it lives |
+|---|---|---|
+| **Hybrid retrieval** (sparse + dense) | BM25/SPLADE fused with dense vectors (Glean, Vespa, Azure AI Search) | `retrieval/hybrid.py` — two clearance-scoped Qdrant searches, **RRF**-fused |
+| **Retrieve → rerank cascade** | Cheap recall stage + cross-encoder precision stage | `rerank` alias (Cohere → BGE); budgets `recall@10 ≥ 0.85` → `recall@5 ≥ 0.80` post-rerank |
+| **Query rewriting** | Rewrite-retrieve-read / multi-query | Node 2 (`smart` alias) before any retrieval |
+| **Structure-aware chunking** | Split on document structure, never mid-sentence | `ingestion/chunker.py` — headings/paragraph/sentence boundaries |
+| **Parent-child ("small-to-big")** | Embed a precise unit, expand to a complete one for generation | child 200 tok (searched) → parent 1000 tok (sent to LLM) via `parent_doc_id` |
+| **Contextual retrieval** | Anthropic-style per-chunk situating prefix to lift recall | flag-gated `chunking.contextual_prefix` (`fast` alias, per-doc summary reused) |
+| **Metadata pre-filtering** | Filter *before* vector scoring, not after | Qdrant payload filter on `workspace_id`/`user_id`/`access_level` (also the SC-001 guard) |
+| **Semantic router** | Intent classification → cheapest correct path | Node 1 routes `semantic` / `structured` / `long_horizon` |
+| **Parameterized tools over Text-to-SQL** | Hand-written scoped queries, never free-form SQL | Tier-2 MCP tools (`query_employees`/`query_projects`/`query_metrics`) |
+| **Conversational memory** | Per-user memory layer with recall scoping | Mem0 at Node 5 (clearance-stamped, demotion-safe) |
+| **Semantic answer-cache** | Cache whole answers, not just chunks | Redis, keyed by `workspace + clearance + authorized doc set` |
+| **Grounded generation + citations** | Eval-gated faithfulness (MRR/recall/citation accuracy) | Node 7 + `evals/run.py` gate (Ragas/DeepEval/Promptfoo) |
+| **Stateful, durable orchestration** | Checkpointed graph that survives interruption | LangGraph + Redis checkpoints (long-horizon `agent_run`) |
+| **Full LLMOps observability** | Trace every step, score, token, credit | Langfuse + OpenTelemetry + per-answer debug panel |
+
+> **Planned (Phase 2) — answer groundedness & self-correction.** The Phase-1 graph is deterministic and linear by design (a release-blocking posture for access-control + refuse-before-spend). A **CRAG-style** ("Corrective RAG") groundedness node — grade retrieval relevance, then re-retrieve / route to `web_search` (per-search HITL) / **abstain** rather than answer from weak context — plus an optional Self-RAG faithfulness check, slot in as a **single additive node** between rerank/expand and generate. The graph and the `web_search` seam are built in Phase 1 so this is no refactor (research §17).
 
 ### Intent routing (the semantic router)
 
@@ -557,7 +580,7 @@ A dark-first developer/observability aesthetic — *"code dark + run green"* (sl
 | Phase | Scope |
 |---|---|
 | **Phase 1 — Core App** *(current)* | Ingestion, 7-pattern RAG, agent layer, access control, credits, debug panel, notifications — plus structural prompt-injection defenses and a minimal eval seed set. |
-| **Phase 2 — Evaluation Suite & Billing** | Full Promptfoo + DeepEval + Ragas, context compression (Headroom seam), audio ingestion (Whisper), and the **billing & payments** layer (Stripe / Polar / PayPal adapters, checkout, webhooks, subscriptions — see [billing-payments-design.md](specs/001-contextengine-mvp/billing-payments-design.md)). |
+| **Phase 2 — Evaluation Suite & Billing** | Full Promptfoo + DeepEval + Ragas, **answer-groundedness self-correction** (CRAG/Self-RAG node — grade → re-retrieve / `web_search` / abstain, see [research §17](specs/001-contextengine-mvp/research.md)), agent `web_search` (per-search HITL), context compression (Headroom seam), audio ingestion (Whisper), and the **billing & payments** layer (Stripe / Polar / PayPal adapters, checkout, webhooks, subscriptions — see [billing-payments-design.md](specs/001-contextengine-mvp/billing-payments-design.md)). |
 | **Phase 3 — Security Hardening** | Automated red-teaming (NVIDIA Garak), expanded abuse controls. |
 
 ---
