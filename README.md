@@ -420,6 +420,7 @@ A fully **event-driven, multi-channel** notification subsystem (US8): any backen
 | 🎯 **Exactly-once delivery** | Each triggering event carries a deterministic `idem_key` derived from the originating resource + event. Redelivery/producer retry yields **at most one** persisted row, one in-app push, one email (FR-032, **SC-013**). |
 | ⚡ **Real-time in-app** | The service pushes via Redis pub/sub `notify:user:<id>`; the **`cmd/relay`** SSE tier streams it to the browser and updates the unread count with no reload (FR-034). |
 | 📨 **Compliant email** | Provider-agnostic `kernel/mailer.go` port (default Resend, env-swappable) with retry + **DLQ** for exhausted sends; every non-essential email carries an unsubscribe link, and provider **bounce/complaint** webhooks suppress further email to that address (FR-035). |
+| ♻️ **DLQ drain + poison cap** | A single-owner `dlq.sweep.tick` job in `cmd/worker` re-drives parked DLQ messages (`ingestion.dlq`, `notify.email.dlq`) back to their owning subject under a backoff; after `MAX_DLQ_ATTEMPTS` a poison message lands in a durable `dead_letters` table with a `dlq.dead.count` alert — *never dropped, never retried forever* (research §18). |
 | 📣 **Async broadcast** | Admin broadcast fan-out runs **off the request path** so delivery to a large membership never blocks or times out the admin's request; recorded in the audit trail (FR-037). |
 | 🌊 **Storm coalescing** | High-volume same-category bursts (e.g., many ingests finishing at once) collapse into a digest / rate-limited summary instead of one push + email per event (FR-038). |
 | 🗄️ **Bounded growth** | Read notifications past the retention window (default 90d) are purged/archived via a scheduled `notify.retention.tick`, range-partitioned by `created_at`, so inbox + unread-count queries stay fast (FR-039). |
@@ -439,6 +440,11 @@ notify.<ws> queue group ── cmd/worker (N replicas, idempotent) ──┐
         └── email?   if pref enabled → notify.email.<ws> ──▶ Go email worker (cmd/worker)
                                                               kernel/mailer.go (Resend) · retry · DLQ
                                                               suppression-list check (bounce/complaint/unsubscribe)
+
+DLQ DRAIN (dlq.sweep.tick · single-owner cmd/worker)
+  for each msg in *.dlq.<ws>:
+     dlq_attempts < MAX ?  ──yes─▶ re-publish to owning subject (dlq_attempts+1, backoff) ─▶ owning worker reprocesses idempotently
+                          └─no─▶ INSERT dead_letters + emit dlq.dead.count (terminal, admin-replayable)
 ```
 
 📐 Flow diagram: [notification-flow.excalidraw](specs/001-contextengine-mvp/diagrams/addition/notification-flow.excalidraw) · 📄 Subjects: [nats-subjects.md](specs/001-contextengine-mvp/contracts/nats-subjects.md) · UI: [notifications.md](design-system/aisat-studio/pages/notifications.md)
