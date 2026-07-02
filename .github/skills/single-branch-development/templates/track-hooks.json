@@ -1,11 +1,17 @@
 {
   "version": 1,
   "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "./.github/hooks/track-reconcile.sh",
+        "timeoutSec": 6
+      }
+    ],
     "preToolUse": [
       {
         "type": "command",
         "bash": "./.github/hooks/track-guard.sh",
-        "powershell": "pwsh -File ./.github/hooks/track-guard.ps1",
         "timeoutSec": 5
       }
     ],

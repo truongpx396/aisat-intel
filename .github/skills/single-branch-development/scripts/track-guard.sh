@@ -5,8 +5,9 @@
 #   1. Deny-by-default file ownership (per worktree) + frozen entrypoints.
 #   2. Worker push/merge lockout — workers stop at `gh pr create --draft`.
 #
-# Wiring: copy this file + track-guard.json into the repo's .github/hooks/
-# directory (the JSON points VS Code / Copilot CLI / cloud agent at this script).
+# Wiring: copy this file + the bundled track-hooks.json into the repo's
+# .github/hooks/ directory (the JSON points VS Code / Copilot CLI / cloud agent
+# at this script).
 # Requires: jq. Keep runtime < 5s — hooks block the agent synchronously.
 #
 # Per-worktree scope (export BEFORE launching each worker):
