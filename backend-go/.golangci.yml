@@ -1,0 +1,20 @@
+linters:
+  enable:
+    - gofmt
+    - govet
+    - staticcheck
+    - errcheck
+    - depguard
+
+linters-settings:
+  depguard:
+    rules:
+      kernel-isolation:
+        files:
+          - "**/kernel/**"
+        deny:
+          - pkg: github.com/truongpx396/aisat-studio/backend-go/internal
+            desc: kernel packages must not import internal
+
+issues:
+  exclude-use-default: true

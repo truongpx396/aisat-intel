@@ -242,3 +242,6 @@ secrets/
 credentials/
 
 draft-idea.md
+runs/
+backend-go/api
+backend-go/cmd/api/api
