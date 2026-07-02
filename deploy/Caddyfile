@@ -1,0 +1,20 @@
+:80 {
+	# API proxy to BFF
+	handle /api/* {
+		reverse_proxy bff:8080
+	}
+
+	# SPA fallback
+	handle {
+		try_files {path} /index.html
+		file_server {
+			root /app
+		}
+	}
+}
+
+# Uncomment for production TLS:
+# app.example.com {
+#   reverse_proxy /api/* bff:8080
+#   file_server { root /app }
+# }

@@ -9,6 +9,7 @@ These contracts define the external/internal interfaces the system exposes. They
 | Contract | Surface | Consumers |
 |----------|---------|-----------|
 | [bff-rest.md](./bff-rest.md) | Go BFF public REST + SSE endpoints | React SPA, local agents |
+| [auth-flow.md](./auth-flow.md) | Browser OIDC (PKCE) + device PAT auth sequences | React SPA, local agents |
 | [nats-subjects.md](./nats-subjects.md) | NATS subject schema | Go BFF ↔ Python workers |
 | [mcp-tools.md](./mcp-tools.md) | 9 MCP tools across 3 categories | LangGraph agent, local agents |
 | [llm-gateway.md](./llm-gateway.md) | Python LLM gateway interface | All Python LLM call sites |
@@ -16,7 +17,7 @@ These contracts define the external/internal interfaces the system exposes. They
 
 ## Conventions
 
-- **Auth**: every BFF request carries a JWT (browser) or device PAT (local agent). `workspace_id` and `Actor` are resolved server-side; never trusted from the request body.
+- **Auth**: browser sessions use **OIDC Authorization Code + PKCE** (Casdoor behind the kernel `Auth` interface), carried as an **opaque reference token** in an HttpOnly cookie and looked up in Redis (no claims on the wire, instantly revocable); local agents use a scoped device **PAT**. `workspace_id` and `Actor` are resolved server-side from the session; never trusted from the request body. Full flow: [auth-flow.md](./auth-flow.md).
 - **Tenancy**: the Tenant middleware sets `SET LOCAL app.workspace_id` so RLS applies to every query in the request transaction.
 - **Errors**: unified JSON error envelope `{ "error": { "code": string, "message": string, "details"?: object } }`. Codes are stable strings (e.g., `payment_required`, `limit_reached`, `unsupported_type`, `oversize`, `forbidden`, `not_found`, `injection_blocked`). Cross-clearance/cross-workspace resource lookups return `not_found` (never `forbidden`) so a higher-clearance resource's existence is not probeable (SC-001).
 - **Idempotency**: any credit-affecting call accepts an `Idempotency-Key` header (or derives one); replays are no-ops (FR-019).

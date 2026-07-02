@@ -27,6 +27,7 @@ Access control is enforced at the **data layer**, never by prompt. Every AI oper
 - [The RAG Agent — 7+1 Node LangGraph](#-the-rag-agent--71-node-langgraph)
 - [Security & Access Control](#-security--access-control)
 - [Credit Metering & Billing](#-credit-metering--billing)
+- [Notification System](#-notification-system)
 - [Observability](#-observability)
 - [Technology Stack](#-technology-stack)
 - [Architecture Principles](#-architecture-principles)
@@ -44,7 +45,7 @@ Access control is enforced at the **data layer**, never by prompt. Every AI oper
 
 > A shared AI-powered second brain — upload files, paste links, add notes; query across personal + team knowledge; **only ever see what you're allowed to see.**
 
-The product is intentionally built as a **developer / architecture showcase**: every advanced pattern — hybrid retrieval, cross-encoder reranking, parent-child chunking, metadata pre-filtering, two-tier tools, visual captioning, and Redis semantic answer-caching — is **named, observable, and visible in a debug panel**.
+The product is intentionally built as a **developer / architecture showcase**: every advanced pattern — hybrid retrieval, cross-encoder reranking, structure-aware **parent-child + contextual-retrieval chunking**, metadata pre-filtering, two-tier tools, visual captioning, and Redis semantic answer-caching — is **named, observable, and visible in a debug panel**.
 
 📄 Full specification: [specs/001-contextengine-mvp/spec.md](specs/001-contextengine-mvp/spec.md)
 
@@ -197,6 +198,8 @@ The Go BFF follows the **same one-image / many-roles** model as the Python tier 
 > > **Data-layer idempotency (`idem_key UNIQUE`) is the _only_ correctness guarantee. Leases, queue groups, and `SET NX` are throughput optimizations.**
 >
 > A lot of systems mistakenly treat a distributed lock or a leader election as their correctness boundary — then get burned when a lock TTL expires mid-operation, a GC pause outlives the lease, or a network partition elects two leaders. Here those primitives are explicitly demoted to **performance** (they stop most duplicate work *before* it hits the database), while the actual money-correctness lives in a **database constraint** that physically cannot admit a second row. So even in the worst case — two "leaders", an expired lock, a redelivered tick — the duplicate write is rejected by the ledger itself, not by a timing assumption. Correctness never depends on a clock or a quorum being healthy.
+>
+> This is exactly why scaling Redis to Sentinel/Cluster doesn't threaten correctness: a `SET NX` lock is **never safe under async-replication failover** (a primary can ACK the lock, die before replicating, and a promoted replica hands the same lock out twice), so the design **never trusts the lock — it puts the invariant in a DB constraint / conditional write (a fencing token)**. A two-leader window from a Redis failover therefore produces **zero** duplicate effects.
 
 #### SSE streaming flow
 
@@ -299,9 +302,32 @@ flowchart LR
     N8 --> A["Cited answer + debug trace (SSE)"]
 ```
 
-Patterns shipped: **hybrid search**, **cross-encoder reranking**, **parent-child chunking**, **metadata pre-filtering**, **two-tier tools** (knowledge + structured), **visual captioning** for images/diagrams, and a **Redis semantic answer-cache**. Retrieval is served directly from Qdrant — fast enough under load that a separate hot/cold chunk tier is unnecessary; the real latency/cost win comes from caching whole *answers* (see below), not from tiering the vector store. Cross-clearance cache safety is guaranteed by keying any cached answer on `workspace + requester clearance + authorized document set`.
+Patterns shipped: **hybrid search**, **cross-encoder reranking**, **structure-aware parent-child + contextual-retrieval chunking**, **metadata pre-filtering**, **two-tier tools** (knowledge + structured), **visual captioning** for images/diagrams, and a **Redis semantic answer-cache**. Retrieval is served directly from Qdrant — fast enough under load that a separate hot/cold chunk tier is unnecessary; the real latency/cost win comes from caching whole *answers* (see below), not from tiering the vector store. Cross-clearance cache safety is guaranteed by keying any cached answer on `workspace + requester clearance + authorized document set`.
 
 📐 Agent diagram: [langgraph-rag-agent.excalidraw](specs/001-contextengine-mvp/diagrams/langgraph-rag-agent.excalidraw) · Query DFD: [query-path-dfd.excalidraw](specs/001-contextengine-mvp/diagrams/query-path-dfd.excalidraw)
+
+### Production RAG design patterns (and where each lives)
+
+These are the patterns mature AI teams converge on for enterprise RAG — each is a deliberate, observable choice here, not an accident:
+
+| Pattern | Industry practice it mirrors | Where it lives |
+|---|---|---|
+| **Hybrid retrieval** (sparse + dense) | BM25/SPLADE fused with dense vectors (Glean, Vespa, Azure AI Search) | `retrieval/hybrid.py` — two clearance-scoped Qdrant searches, **RRF**-fused |
+| **Retrieve → rerank cascade** | Cheap recall stage + cross-encoder precision stage | `rerank` alias (Cohere → BGE); budgets `recall@10 ≥ 0.85` → `recall@5 ≥ 0.80` post-rerank |
+| **Query rewriting** | Rewrite-retrieve-read / multi-query | Node 2 (`smart` alias) before any retrieval |
+| **Structure-aware chunking** | Split on document structure, never mid-sentence | `ingestion/chunker.py` — headings/paragraph/sentence boundaries |
+| **Parent-child ("small-to-big")** | Embed a precise unit, expand to a complete one for generation | child 200 tok (searched) → parent 1000 tok (sent to LLM) via `parent_doc_id` |
+| **Contextual retrieval** | Anthropic-style per-chunk situating prefix to lift recall | flag-gated `chunking.contextual_prefix` (`fast` alias, per-doc summary reused) |
+| **Metadata pre-filtering** | Filter *before* vector scoring, not after | Qdrant payload filter on `workspace_id`/`user_id`/`access_level` (also the SC-001 guard) |
+| **Semantic router** | Intent classification → cheapest correct path | Node 1 routes `semantic` / `structured` / `long_horizon` |
+| **Parameterized tools over Text-to-SQL** | Hand-written scoped queries, never free-form SQL | Tier-2 MCP tools (`query_employees`/`query_projects`/`query_metrics`) |
+| **Conversational memory** | Per-user memory layer with recall scoping | Mem0 at Node 5 (clearance-stamped, demotion-safe) |
+| **Semantic answer-cache** | Cache whole answers, not just chunks | Redis, keyed by `workspace + clearance + authorized doc set` |
+| **Grounded generation + citations** | Eval-gated faithfulness (MRR/recall/citation accuracy) | Node 7 + `evals/run.py` gate (Ragas/DeepEval/Promptfoo) |
+| **Stateful, durable orchestration** | Checkpointed graph that survives interruption | LangGraph + Redis checkpoints (long-horizon `agent_run`) |
+| **Full LLMOps observability** | Trace every step, score, token, credit | Langfuse + OpenTelemetry + per-answer debug panel |
+
+> **Planned (Phase 2) — answer groundedness & self-correction.** The Phase-1 graph is deterministic and linear by design (a release-blocking posture for access-control + refuse-before-spend). A **CRAG-style** ("Corrective RAG") groundedness node — grade retrieval relevance, then re-retrieve / route to `web_search` (per-search HITL) / **abstain** rather than answer from weak context — plus an optional Self-RAG faithfulness check, slot in as a **single additive node** between rerank/expand and generate. The graph and the `web_search` seam are built in Phase 1 so this is no refactor (research §17).
 
 ### Intent routing (the semantic router)
 
@@ -333,6 +359,47 @@ Access control is **structural**, enforced at multiple layers — not by trustin
 - **Prompt-injection defense** — disallowed/injection inputs are refused *before* retrieval or credit spend; retrieved documents are treated as inert reference material.
 
 These are aligned with **OWASP Top 10 (2025)** — see the repo-wide [security & OWASP instructions](.github/instructions/security-and-owasp.instructions.md).
+
+#### Authentication flow (OIDC + PKCE)
+
+Browser auth is **OIDC Authorization Code + PKCE (S256)** against **Casdoor**, which sits behind the swappable kernel `Auth` interface (interchangeable with `jwt.Auth` / `workos.Auth`). The BFF verifies the `id_token` via JWKS (`iss`/`aud`/`exp`, pinned algorithm), then issues its **own opaque session token** — a high-entropy random ID in an **HttpOnly · Secure · SameSite** cookie, backed by a **Redis** session record. The cookie carries **no claims** (never the provider token, never `localStorage`), is **revoked instantly** on logout/clearance-change by deleting the Redis key, and forces every request to re-read current role/clearance (so a demotion takes effect immediately). Each request resolves the Actor server-side and pushes tenant + identity into Postgres so **RLS** is the real access boundary:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Browser (SPA)
+    participant BFF as Go BFF<br/>/auth · middleware
+    participant CD as Casdoor<br/>(OIDC provider)
+    participant PG as Postgres (RLS)
+    participant RD as Redis<br/>state · session
+
+    Note over U,RD: Login — Authorization Code + PKCE, state = CSRF guard
+    U->>BFF: GET /auth/login (start)
+    BFF->>RD: store state + PKCE code_verifier
+    BFF-->>U: 302 → Casdoor /authorize (state, code_challenge=S256)
+    U->>CD: authenticate (pwd / MFA / SSO)
+    CD-->>U: 302 → /auth/callback?code&state
+    U->>BFF: GET /auth/callback?code&state
+    BFF->>RD: validate state (CSRF) · load code_verifier
+    BFF->>CD: POST /access_token (code, code_verifier)
+    CD-->>BFF: id_token + access_token
+    BFF->>BFF: verify id_token via JWKS · iss / aud / exp
+    BFF->>PG: upsert User · resolve Member (role, clearance)
+    BFF->>RD: create session record (user, workspace, role, clearance, csrf)
+    BFF-->>U: 302 → app · Set-Cookie opaque session_id (HttpOnly·Secure·SameSite)
+
+    Note over U,PG: Authenticated request — RLS resolution
+    U->>BFF: GET /documents · Cookie: session_id (opaque)
+    BFF->>RD: GET session:{hash(session_id)} → Actor
+    BFF->>PG: SET LOCAL app.workspace_id / app.user_id (RLS)
+    PG-->>BFF: rows the Actor is authorized to see
+    BFF-->>U: 200 { data }
+```
+
+- **Sign-up** requires a Cloudflare **Turnstile** token and fires `OnSignup` (seed demo doc + 1000-credit grant).
+- **Local agents** authenticate with a scoped device **PAT** (user+workspace, 90d, revocable) issued via `POST /devices/authorize`; `workspace_id` comes from the PAT, never the request body (FR-027).
+
+📐 Auth contract + sequences: [contracts/auth-flow.md](specs/001-contextengine-mvp/contracts/auth-flow.md) · OIDC sequence: [auth-oidc-sequence.excalidraw](specs/001-contextengine-mvp/diagrams/addition/auth-oidc-sequence.excalidraw) · device/PAT: [local-agent-flow.excalidraw](specs/001-contextengine-mvp/diagrams/addition/local-agent-flow.excalidraw)
 
 📐 Diagrams: [access-control-isolation](specs/001-contextengine-mvp/diagrams/addition/access-control-isolation.excalidraw) · [mcp-tool-allowlist](specs/001-contextengine-mvp/diagrams/addition/mcp-tool-allowlist.excalidraw) · [llm-gateway-chokepoint](specs/001-contextengine-mvp/diagrams/addition/llm-gateway-chokepoint.excalidraw)
 
@@ -386,7 +453,48 @@ Redis is far more than a cache here: it is the **low-latency control plane** for
 
 ---
 
-## 🔭 Observability
+## � Notification System
+
+A fully **event-driven, multi-channel** notification subsystem (US8): any backend event — ingestion done/failed, invite received/accepted/revoked, credit near-limit / exhausted, long-horizon task halted, document shared, clearance changed, new member joined, admin broadcast — fans out to an **in-app inbox** (real-time over SSE) and an **opt-in email** channel, gated by each member's per-category, per-channel preferences. It is designed for the same production properties as the billing path: **exactly-once, recipient-scoped, async, and durable**.
+
+| Property | How it's enforced |
+|---|---|
+| 🔒 **Recipient-scoped (no leaks)** | Every notification is bound to `(workspace_id, user_id)` and enforced at the **data layer** (RLS: `user_id = current_setting('app.user_id')`). Never visible/delivered to another member or across workspaces, regardless of clearance — a release blocker (FR-036, **SC-012**). |
+| 🎯 **Exactly-once delivery** | Each triggering event carries a deterministic `idem_key` derived from the originating resource + event. Redelivery/producer retry yields **at most one** persisted row, one in-app push, one email (FR-032, **SC-013**). |
+| ⚡ **Real-time in-app** | The service pushes via Redis pub/sub `notify:user:<id>`; the **`cmd/relay`** SSE tier streams it to the browser and updates the unread count with no reload (FR-034). |
+| 📨 **Compliant email** | Provider-agnostic `kernel/mailer.go` port (default Resend, env-swappable) with retry + **DLQ** for exhausted sends; every non-essential email carries an unsubscribe link, and provider **bounce/complaint** webhooks suppress further email to that address (FR-035). |
+| ♻️ **DLQ drain + poison cap** | A single-owner `dlq.sweep.tick` job in `cmd/worker` re-drives parked DLQ messages (`ingestion.dlq`, `notify.email.dlq`) back to their owning subject under a backoff; after `MAX_DLQ_ATTEMPTS` a poison message lands in a durable `dead_letters` table with a `dlq.dead.count` alert — *never dropped, never retried forever* (research §18). |
+| 📣 **Async broadcast** | Admin broadcast fan-out runs **off the request path** so delivery to a large membership never blocks or times out the admin's request; recorded in the audit trail (FR-037). |
+| 🌊 **Storm coalescing** | High-volume same-category bursts (e.g., many ingests finishing at once) collapse into a digest / rate-limited summary instead of one push + email per event (FR-038). |
+| 🗄️ **Bounded growth** | Read notifications past the retention window (default 90d) are purged/archived via a scheduled `notify.retention.tick`, range-partitioned by `created_at`, so inbox + unread-count queries stay fast (FR-039). |
+
+> **Where it runs (independent scale-out).** The fan-out consumer (`notify.<ws>`) and the Go **email worker** (`notify.email.<ws>`) are **JetStream queue-group consumers hosted in `cmd/worker`** — N idempotent replicas that scale per-subject on consumer lag, fully independent of the request-serving `api`/`relay` tiers *and* of the single-owner scheduled jobs (`*.tick`/`*.refresh`). The email worker is plain Go (no AI/ML), so it lives in the Go tier on the same `kernel/mailer.go` port the rest of the kernel uses — not in the Python ML tier.
+
+> **Why exactly-once needs two guards (the same defense-in-depth as billing).** The notify handler does more than insert a row — it also pushes in-app (Redis pub/sub) and re-enqueues email, and those side-effects are **not** transactional with the DB write. So a cheap `SET NX notify:applied:{idem_key}` short-circuits the *entire* duplicate handler before any work, while the durable `UNIQUE (user_id, idem_key)` constraint is the permanent backstop that guarantees at-most-one row even if Redis evicted/expired the guard or two replicas raced. Redis = fast early-exit (ephemeral); Postgres UNIQUE = durable proof of SC-013.
+
+```text
+PRODUCERS (ingest · billing · invite · agent · admin)
+        │  publish notify.<ws> { recipient, category, idem_key, … }
+        ▼
+notify.<ws> queue group ── cmd/worker (N replicas, idempotent) ──┐
+   SET NX notify:applied:{idem_key}   ← fast dup gate            │
+   INSERT … UNIQUE(user_id, idem_key) ← durable backstop (SC-013)│
+        ├── in-app:  PUBLISH notify:user:<id> ──▶ cmd/relay ──▶ browser (SSE, live unread count)
+        └── email?   if pref enabled → notify.email.<ws> ──▶ Go email worker (cmd/worker)
+                                                              kernel/mailer.go (Resend) · retry · DLQ
+                                                              suppression-list check (bounce/complaint/unsubscribe)
+
+DLQ DRAIN (dlq.sweep.tick · single-owner cmd/worker)
+  for each msg in *.dlq.<ws>:
+     dlq_attempts < MAX ?  ──yes─▶ re-publish to owning subject (dlq_attempts+1, backoff) ─▶ owning worker reprocesses idempotently
+                          └─no─▶ INSERT dead_letters + emit dlq.dead.count (terminal, admin-replayable)
+```
+
+📐 Flow diagram: [notification-flow.excalidraw](specs/001-contextengine-mvp/diagrams/addition/notification-flow.excalidraw) · 📄 Subjects: [nats-subjects.md](specs/001-contextengine-mvp/contracts/nats-subjects.md) · UI: [notifications.md](design-system/aisat-studio/pages/notifications.md)
+
+---
+
+## �🔭 Observability
 
 Every answer is fully traceable. The **debug panel** (US5) surfaces, per query: detected intent, tool called, whether a semantic-cache hit served the answer, access-filter summary (how many docs filtered out by clearance), hybrid/rerank scores, chunk expansion, injected memory, model used, token cost, credits deducted — plus a link to the full **Langfuse + OpenTelemetry** trace. LLM call logs (`llm_call_log`) drive the admin cost dashboard; raw prompt/response bodies are retained 30 days, then purged to PII-scrubbed metadata.
 
@@ -456,7 +564,6 @@ aisat-studio/
 │   │   │   ├── llm_gateway.py         #     single LLM chokepoint (aliases · fallback · budget · trace)
 │   │   │   ├── ingestion/             #     pipeline · chunker · captioner · markitdown · crawler · tagger
 │   │   │   ├── retrieval/             #     hybrid · reranker · hot_cold · filter
-│   │   │   ├── notification/          #     email worker (EmailSender port · DLQ)
 │   │   │   └── agent/                 #     graph (7+1 nodes) · memory (Mem0) · semantic cache · suggestions
 │   │   ├── mcp_server/                #   server.py + tools/{knowledge,structured,utility} · billing/ledger.py
 │   │   ├── baml_client/               #   generated BAML client
@@ -539,7 +646,7 @@ Open `.excalidraw` files at [excalidraw.com](https://excalidraw.com) or with the
 - [data-model-er](specs/001-contextengine-mvp/diagrams/data-model-er.excalidraw) — entity-relationship model
 
 **Deep dives** ([diagrams/addition/](specs/001-contextengine-mvp/diagrams/addition/))
-- access-control-isolation · mcp-tool-allowlist · llm-gateway-chokepoint · billing-payment-flow · sse-streaming-sequence · nats-subject-topology · notification-flow · local-agent-flow
+- access-control-isolation · mcp-tool-allowlist · llm-gateway-chokepoint · auth-oidc-sequence · billing-payment-flow · sse-streaming-sequence · nats-subject-topology · notification-flow · local-agent-flow
 
 ---
 
@@ -557,7 +664,7 @@ A dark-first developer/observability aesthetic — *"code dark + run green"* (sl
 | Phase | Scope |
 |---|---|
 | **Phase 1 — Core App** *(current)* | Ingestion, 7-pattern RAG, agent layer, access control, credits, debug panel, notifications — plus structural prompt-injection defenses and a minimal eval seed set. |
-| **Phase 2 — Evaluation Suite & Billing** | Full Promptfoo + DeepEval + Ragas, context compression (Headroom seam), audio ingestion (Whisper), and the **billing & payments** layer (Stripe / Polar / PayPal adapters, checkout, webhooks, subscriptions — see [billing-payments-design.md](specs/001-contextengine-mvp/billing-payments-design.md)). |
+| **Phase 2 — Evaluation Suite & Billing** | Full Promptfoo + DeepEval + Ragas, **answer-groundedness self-correction** (CRAG/Self-RAG node — grade → re-retrieve / `web_search` / abstain, see [research §17](specs/001-contextengine-mvp/research.md)), agent `web_search` (per-search HITL), context compression (Headroom seam), audio ingestion (Whisper), and the **billing & payments** layer (Stripe / Polar / PayPal adapters, checkout, webhooks, subscriptions — see [billing-payments-design.md](specs/001-contextengine-mvp/billing-payments-design.md)). |
 | **Phase 3 — Security Hardening** | Automated red-teaming (NVIDIA Garak), expanded abuse controls. |
 
 ---

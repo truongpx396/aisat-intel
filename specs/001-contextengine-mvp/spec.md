@@ -28,20 +28,22 @@ This specification covers **Phase 1 (Core App)** only. The Evaluation Suite (Pha
 
 ### User Story 1 - Ingest knowledge into a searchable library (Priority: P1)
 
-A team member uploads documents (PDF, DOCX, markdown/plain text, images) or pastes a web link. The system converts, organizes, auto-tags, and indexes the content, then shows real-time ingestion progress. Once complete, the content is queryable and browsable in the library.
+A team member uploads documents (PDF, DOCX, markdown/plain text, images) or writes a note, optionally attaching web links. For a note with links, the member can request enrichment: the system crawls the links, distills each page aligned to the note's intent, and proposes a draft the member reviews and accepts. The system converts, organizes, auto-tags, and indexes the content, then shows real-time progress. Once complete, the content is queryable and browsable in the library.
 
 **Why this priority**: Nothing else in the product delivers value without knowledge in the system. Ingestion is the foundational entry point and the first thing a new user does.
 
-**Independent Test**: Upload a PDF and paste a URL, observe progress to completion, and confirm both items appear in the library with auto-generated tags and a summary — without using any query or team features.
+**Independent Test**: Upload a PDF and create a note with an attached URL, run Enrich, accept the proposed draft, and confirm both items appear in the library with auto-generated tags and a summary — without using any query or team features.
 
 **Acceptance Scenarios**:
 
 1. **Given** an authenticated member with available credits, **When** they upload a supported file (PDF/DOCX/markdown/image), **Then** the system ingests it, assigns auto-taxonomy tags and a summary, and reports completion via live status.
-2. **Given** an authenticated member, **When** they paste a web link, **Then** the system crawls the page, converts it to text, ingests it, and surfaces it in the library.
-3. **Given** an uploaded image or diagram, **When** ingestion runs, **Then** a text caption describing the image is generated and stored alongside it.
-4. **Given** an unsupported source type (e.g., video/audio in Phase 1), **When** a member attempts to ingest it, **Then** the system clearly indicates the type is not yet supported rather than failing silently.
-5. **Given** a file larger than the workspace's per-file size limit (default 50 MB), **When** a member attempts to upload it, **Then** the system rejects it at the boundary with a clear over-size message rather than failing silently.
-6. **Given** an upload, **When** the member chooses an access level no higher than their own clearance, **Then** the document is stored at that level; absent a choice, the document defaults to the uploader's own clearance level.
+2. **Given** a note with one or more attached web links, **When** the member clicks **Enrich**, **Then** the system crawls the links, distills each page aligned to the note's intent, and streams a **draft suggestion**; the note body and index are unchanged until the member **accepts** the draft, at which point only the accepted note body is indexed and the crawled sources are stored as citation metadata.
+3. **Given** a member who finds an enrichment draft unsatisfactory, **When** they click **Enrich** again, **Then** the system re-runs enrichment and proposes a fresh draft, with no residual state from the discarded one.
+4. **Given** a pasted bare URL with no note body, **When** the member submits it, **Then** the system creates a note whose draft body is the page summary, subject to the same accept gate.
+5. **Given** an uploaded image or diagram, **When** ingestion runs, **Then** a text caption describing the image is generated and stored alongside it.
+6. **Given** an unsupported source type (e.g., video/audio in Phase 1), **When** a member attempts to ingest it, **Then** the system clearly indicates the type is not yet supported rather than failing silently.
+7. **Given** a file larger than the workspace's per-file size limit (default 50 MB), **When** a member attempts to upload it, **Then** the system rejects it at the boundary with a clear over-size message rather than failing silently.
+8. **Given** an upload or note, **When** the member chooses an access level no higher than their own clearance, **Then** the document is stored at that level; absent a choice, it defaults to the member's own clearance level.
 
 ---
 
@@ -168,6 +170,8 @@ Members receive notifications about workspace activity that concerns them — in
 5. **Given** two members in different workspaces (or a different recipient in the same workspace), **When** a notification is generated for one, **Then** it is never visible or delivered to the other.
 6. **Given** a workspace admin, **When** they send a broadcast announcement, **Then** every current member of that workspace receives it subject to their own per-channel preferences.
 7. **Given** a transient email-provider failure, **When** an email notification cannot be delivered, **Then** it is retried and, on exhausting retries, parked for later inspection rather than silently dropped, while the in-app notification is unaffected.
+8. **Given** the same triggering event delivered more than once (e.g., a redelivered or retried message), **When** the notification system processes it, **Then** the recipient still sees exactly one notification, receives one in-app push, and is emailed at most once.
+9. **Given** a bulk operation that produces many same-category events in a short window (e.g., a batch of ingestions completing), **When** they are delivered, **Then** the recipient receives a coalesced digest or rate-limited summary rather than one in-app push and one email per event.
 
 ---
 
@@ -184,6 +188,10 @@ Members receive notifications about workspace activity that concerns them — in
 - **Bring-your-own-key agents**: Agents using their own provider keys bypass server-side moderation and token metering; members must explicitly accept this gap at registration, and admins can disable this mode per workspace.
 - **Notification recipient scoping**: A notification is delivered only to its intended recipient within the originating workspace; it is never visible to other members or across workspaces, even at higher clearance.
 - **Email-provider outage**: A failed email send is retried with backoff and parked in a dead-letter path on exhaustion; the in-app notification is delivered independently and is never blocked by email failure.
+- **Duplicate notification event**: A redelivered or retried triggering event (at-least-once transport, producer retry) is de-duplicated by its idempotency key so the recipient never sees a duplicate notification, in-app push, or email.
+- **Notification storm**: A burst of same-category events for one recipient (e.g., a batch of ingestions completing) is coalesced into a digest or rate-limited summary rather than flooding the inbox and the email provider.
+- **Large broadcast**: An admin broadcast to a large membership fans out asynchronously off the request path, so the admin's request returns promptly and per-recipient delivery (subject to preferences) proceeds in the background.
+- **Email bounce/complaint**: A hard bounce or spam complaint suppresses further email to that address rather than retrying indefinitely; in-app delivery is unaffected, and non-essential emails carry an unsubscribe affordance that disables that category's email channel.
 
 ## Requirements *(mandatory)*
 
@@ -191,7 +199,7 @@ Members receive notifications about workspace activity that concerns them — in
 
 **Ingestion**
 
-- **FR-001**: System MUST allow authenticated members to ingest PDF, DOCX, markdown/plain-text, and image files, and to ingest web pages from pasted links.
+- **FR-001**: System MUST allow authenticated members to ingest PDF, DOCX, markdown/plain-text, and image files, and to create notes. A note carries user-authored body text and optional attached web links. On explicit request (**Enrich**, re-runnable), the system MUST crawl the attached links, distill each page aligned to the note's intent, and present a draft suggestion the member reviews; only the member-accepted note body is indexed, with the crawled sources retained as citation metadata (not separately embedded). Pasting a bare URL with no body MUST create a note whose draft body is the page summary, subject to the same accept gate.
 - **FR-002**: System MUST automatically convert ingested content to a searchable form, generate descriptive captions for images/diagrams, and assign auto-taxonomy tags and a summary to each document.
 - **FR-003**: System MUST report ingestion progress to the member in real time and clearly indicate when an unsupported source type (e.g., video/audio in Phase 1) cannot be processed. System MUST enforce a per-file size limit that is admin-configurable per workspace (default 50 MB) and reject oversize files at the upload boundary with a clear message before any ingestion or credit spend.
 - **FR-004**: System MUST assign each document's security attributes (workspace, owner, tenant, access level) from the authenticated upload context, never from model-inferred content, MUST prevent an uploader from assigning an access level above their own clearance, and MUST default a document's access level to the uploader's own clearance level when none is explicitly chosen. Clearance is a fixed ladder of 5 ordered levels (1–5).
@@ -205,7 +213,7 @@ Members receive notifications about workspace activity that concerns them — in
 - **FR-009**: System MUST retain conversational session context so follow-up questions are answered coherently.
 - **FR-010**: System MUST screen each user input and short-circuit disallowed content or obvious prompt-injection attempts before performing retrieval or consuming credits, recording the event.
 - **FR-011**: System MUST treat all retrieved document content and tool output as untrusted data, never as instructions, and MUST NOT allow injected text to trigger additional tool calls or escalate tool access.
-- **FR-012**: In Phase 1, the system MUST expose only read-only tools (search, lookup, structured queries, utilities); the sole exception is a crawl utility that fetches an external page and enqueues it for ingestion into the caller's own workspace (no mutation of existing knowledge, no outbound message), which MUST be role-gated. Any future state-changing or message-sending action MUST require explicit human confirmation.
+- **FR-012**: In Phase 1, the system MUST expose only read-only agent tools (search, lookup, structured queries, utilities). Web crawling is NOT an autonomous agent action: it runs only as the internal fetch step of member-initiated note enrichment, and crawled output enters the knowledge base only after the member accepts the proposed draft (human-in-the-loop), so no external content mutates the index without explicit approval. A future agent-initiated web-search tool (Phase 2, available to `user` and `admin` roles) MUST require explicit per-search human confirmation before each fetch. Any other future state-changing or message-sending action MUST likewise require explicit human confirmation.
 
 **Workspace & Access Control**
 
@@ -243,12 +251,14 @@ Members receive notifications about workspace activity that concerns them — in
 
 **Notifications**
 
-- **FR-032**: System MUST generate a notification for each of the following recipient-scoped events: ingestion completed, ingestion failed, workspace invite received/accepted/revoked, credit near-limit warning, credit balance exhausted, long-horizon task halted at its cost cap, document shared with the member, member clearance changed, new member joined (admin recipients), and admin broadcast. Each notification MUST carry a category, priority, human-readable title/body, and a payload referencing the originating resource for deep-linking.
+- **FR-032**: System MUST generate a notification for each of the following recipient-scoped events: ingestion completed, ingestion failed, workspace invite received/accepted/revoked, credit near-limit warning, credit balance exhausted, long-horizon task halted at its cost cap, document shared with the member, member clearance changed, new member joined (admin recipients), and admin broadcast. Each notification MUST carry a category, priority, human-readable title/body, and a payload referencing the originating resource for deep-linking. Each notification-generating event MUST carry an idempotency key derived from the originating resource and event so that a redelivered or retried event produces at most one persisted notification, one in-app push, and one email per recipient.
 - **FR-033**: System MUST persist notifications in a recipient-scoped inbox, expose an unread count, and let members mark notifications read individually and all-at-once; read state MUST persist durably.
 - **FR-034**: System MUST deliver in-app notifications to the recipient in real time over the existing streaming channel, updating the unread count without a page reload.
-- **FR-035**: System MUST let each member configure delivery per category and per channel (in-app and email) independently; when a category's channel is disabled, the system MUST NOT deliver that category over that channel. Email delivery MUST go through a provider-agnostic interface and MUST retry transient failures, parking exhausted sends in a dead-letter path rather than dropping them silently.
+- **FR-035**: System MUST let each member configure delivery per category and per channel (in-app and email) independently; when a category's channel is disabled, the system MUST NOT deliver that category over that channel. Email delivery MUST go through a provider-agnostic interface and MUST retry transient failures, parking exhausted sends in a dead-letter path rather than dropping them silently. Every non-essential notification email MUST include an unsubscribe affordance that disables that category's email channel, and the system MUST honor provider bounce/complaint signals by suppressing further email to a hard-bouncing or complaining address rather than repeatedly retrying it.
 - **FR-036**: System MUST scope every notification strictly to its intended recipient within the originating workspace, enforced at the data layer; a notification MUST never be visible or delivered to another member or across workspaces, regardless of clearance.
-- **FR-037**: System MUST allow a workspace admin to send a broadcast announcement to all current members of that workspace, subject to each member's per-channel preferences, and MUST record the broadcast in the audit trail.
+- **FR-037**: System MUST allow a workspace admin to send a broadcast announcement to all current members of that workspace, subject to each member's per-channel preferences, and MUST record the broadcast in the audit trail. Broadcast fan-out MUST execute asynchronously (off the request path) so that delivery to a large membership neither blocks nor times out the admin's request.
+- **FR-038**: System MUST protect recipients from notification storms by coalescing high-volume same-category events (e.g., many documents finishing ingestion in a short window) into a digest or rate-limited summary rather than one in-app push and one email per event, while still recording the underlying activity.
+- **FR-039**: System MUST bound notification storage growth with a documented retention policy that archives or purges old read notifications, so the inbox and unread-count queries remain performant over time.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -265,8 +275,9 @@ Members receive notifications about workspace activity that concerns them — in
 - **Connected Device**: A registered local agent with type, billing mode, scope, and revocable credentials.
 - **Long-Horizon Task Run**: A durable record of a multi-step agent task with status, checkpoint state, per-task cost cap, and spend.
 - **Structured Records**: Workspace-scoped operational data (employees, projects, metrics) answerable via fixed tools.
-- **Notification**: A recipient-scoped, persisted record of a workspace event — category, priority, title, body, resource-reference payload, and read state — surfaced in the in-app inbox and optionally by email.
+- **Notification**: A recipient-scoped, persisted record of a workspace event — category, priority, title, body, resource-reference payload, idempotency key (for de-duplicating redelivered events), and read state — surfaced in the in-app inbox and optionally by email, and subject to a retention policy.
 - **Notification Preference**: A member's per-category, per-channel (in-app / email) delivery choice within a workspace.
+- **Email Suppression**: A per-address record marking an email address as suppressed after a hard bounce or spam complaint, so the system stops sending email to it.
 
 ## Success Criteria *(mandatory)*
 
@@ -284,6 +295,7 @@ Members receive notifications about workspace activity that concerns them — in
 - **SC-010**: Near-limit usage produces a member-visible warning at the configured threshold (admin-configurable per workspace, default 80%), and exhaustion produces a clear actionable message rather than a silent failure, in 100% of cases.
 - **SC-011**: A notification for a triggering event reaches the recipient's connected in-app inbox in near real time (target: under 5 seconds at p95), and the unread count reflects it without a page reload.
 - **SC-012**: 100% recipient-scoping correctness — across all generated notifications, a notification is never delivered to or visible by any member other than its intended recipient, nor across workspaces (hard requirement; any violation is a release blocker).
+- **SC-013**: Exactly-once recipient delivery — a triggering event delivered more than once (redelivery or producer retry) yields at most one persisted notification, one in-app push, and one email per recipient in 100% of duplicate-event cases.
 
 ## Assumptions
 

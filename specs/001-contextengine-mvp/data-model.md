@@ -31,9 +31,16 @@ Pending, revocable invitation.
 
 ### Document (P)
 An ingested unit of knowledge. Partitioned by `created_at`.
-- `id`, `workspace_id`, `user_id` (owner), `s3_key`, `source_type` (`pdf`|`docx`|`markdown`|`image`|`crawl`), `tags[]`, `summary`, `data_type`, `access_level` INT (1–5), `scope` (`personal`|`workspace`), `created_at`, `updated_at`, `deleted_at`
+- `id`, `workspace_id`, `user_id` (owner), `s3_key`, `source_type` (`pdf`|`docx`|`markdown`|`image`|`note`), `tags[]`, `summary`, `data_type`, `access_level` INT (1–5), `scope` (`personal`|`workspace`), `created_at`, `updated_at`, `deleted_at`
+- A **note** is a Document with `source_type='note'` (see Note below); it inherits all security/clearance/RLS/embedding behavior — no parallel entity. `crawl` is no longer a user-facing `source_type`; web crawling is now an internal fetch step of note enrichment (FR-001).
 - Security fields (`workspace_id`, `user_id`, `tenant_id`, `access_level`) are stamped server-side from the authenticated upload context — never model-inferred (FR-004/FR-005). `access_level` defaults to the uploader's own clearance when unset (Clarification Q1) and may never exceed it.
 - State transitions (ingestion status, tracked on the ingestion job / SSE, not necessarily a column): `received → converting → extracting_metadata → chunking → embedding → indexed` | `unsupported_type (501 stub)` | `rejected_oversize` | `dlq_parked` (embed-provider outage) | `failed`.
+
+### Note (P) — a Document with `source_type='note'`
+A user-authored knowledge unit with optional web-link enrichment (FR-001).
+- Additional fields on the Document row: `body` TEXT (user-authored; the **only** embedded/indexed content), `source_links[]` JSONB (attached URLs supplied as enrichment inputs), `citations[]` JSONB (`[{ url, title, fetched_at, content_hash }]`, metadata only — not embedded), `enrich_status` (`none`|`drafting`|`drafted`|`accepted`).
+- **Enrichment** (member-initiated, re-runnable): the enrich worker crawls `source_links`, distills each page aligned to `body`, and streams a draft. The draft is **never persisted** — it lives client-side until the member accepts. On accept, `body` + `citations[]` are persisted and the note follows the normal ingestion path (chunk → embed → indexed). Crawled pages are never embedded separately, keeping the persistent injection surface minimal (research §3).
+- A bare URL with no body creates a note whose draft body is the page summary, under the same accept gate.
 
 ### Chat Session (P)
 A member's conversational thread with remembered context. Partitioned by `HASH (user_id)`.
@@ -80,12 +87,14 @@ Workspace-scoped operational data answerable via fixed tools.
 
 ### Notifications (K)
 Recipient-scoped record of a workspace event, surfaced in-app and optionally by email (US8).
-- `notifications`: `id`, `workspace_id`, `user_id` (recipient), `category` (`ingestion_complete`|`ingestion_failed`|`invite_received`|`invite_accepted`|`invite_revoked`|`credit_warning`|`credit_exhausted`|`task_halted`|`doc_shared`|`clearance_changed`|`member_joined`|`admin_broadcast`), `priority` (`info`|`warning`|`critical`), `title`, `body`, `payload` JSONB (resource refs for deep-linking: `doc_id`/`invite_id`/`run_id`/`job_id`), `read_at` (NULL = unread), `created_at`
+- `notifications`: `id`, `workspace_id`, `user_id` (recipient), `category` (`ingestion_complete`|`ingestion_failed`|`invite_received`|`invite_accepted`|`invite_revoked`|`credit_warning`|`credit_exhausted`|`task_halted`|`doc_shared`|`clearance_changed`|`member_joined`|`admin_broadcast`), `priority` (`info`|`warning`|`critical`), `title`, `body`, `payload` JSONB (resource refs for deep-linking: `doc_id`/`invite_id`/`run_id`/`job_id`), `idem_key` (de-dupes redelivered/retried events), `read_at` (NULL = unread), `created_at`, `UNIQUE(user_id, idem_key)`
 - `notification_preferences`: `id`, `user_id`, `workspace_id`, `category`, `in_app` BOOL, `email` BOOL, `UNIQUE(user_id, workspace_id, category)`
-- Rules: RLS restricts `notifications` to `user_id = current_user` within `workspace_id` — a notification is never visible to any other member or across workspaces, even at L5 (FR-036, SC-012). The notification service applies `notification_preferences` before delivery; an absent preference row uses the category default (in-app on; email on for `credit_warning`, `credit_exhausted`, `invite_received`, `task_halted`, off otherwise) (FR-035). Index on `(user_id, read_at, created_at)` for inbox + unread-count queries.
+- `email_suppressions`: `id`, `email` (citext, `UNIQUE`), `reason` (`hard_bounce`|`complaint`|`unsubscribe`), `created_at` — addresses to which email is no longer sent (FR-035)
+- Rules: RLS restricts `notifications` to `user_id = current_user` within `workspace_id` — a notification is never visible to any other member or across workspaces, even at L5 (FR-036, SC-012). The notification service applies `notification_preferences` before delivery; an absent preference row uses the category default (in-app on; email on for `credit_warning`, `credit_exhausted`, `invite_received`, `task_halted`, off otherwise) (FR-035). Delivery is idempotent: the `(user_id, idem_key)` unique constraint plus a `SET NX notify:applied:{idem_key}` guard make a redelivered/retried event a no-op (one row, one in-app push, one email) (FR-032, SC-013). High-volume same-category bursts for one recipient are coalesced into a digest/rate-limited summary rather than one push + one email per event (FR-038). The email worker skips any address present in `email_suppressions` and adds rows on provider bounce/complaint webhooks; unsubscribe links flip the relevant `notification_preferences.email` to false (FR-035). Retention: read notifications older than a configured window (default 90 days) are pruned/archived so inbox + unread-count stay performant; the table MAY be range-partitioned by `created_at` for cheap drop (FR-039). Index on `(user_id, read_at, created_at)` for inbox + unread-count queries.
 
 ### Supporting kernel tables
 - `api_keys` (K), `plans` (K), `subscriptions` (K), `feature_flags` (K), `token_usage_daily` (P, per-role daily token counter, partitioned by `usage_date`).
+- `dead_letters` (K) — terminal store for poison messages that exhausted DLQ re-drive: `id`, `workspace_id`, `source_subject` (the originating work subject), `dlq_subject`, `payload` JSONB, `dlq_attempts`, `last_error`, `first_failed_at`, `dead_at`. RLS-scoped to `workspace_id`; admin-readable for inspection / manual replay. Written only by the DLQ sweeper once `dlq_attempts ≥ MAX_DLQ_ATTEMPTS` (default 5), which also emits a `dlq.dead.count` alert metric (research §18, FR-029/FR-035).
 - The `plans` and `subscriptions` rows above are Phase 1 stubs (status/entitlement only).
 
 ### Billing & payments (Phase 2, US4-ext)
@@ -116,7 +125,7 @@ Two collections: `personal`, `workspace`. Every chunk payload:
   - `workspace` collection: `must = [workspace_id == ctx, access_level <= user_access_level]` — returns shared docs at or below the requester's clearance.
   - Merged results are RRF-interleaved, then reranked as a single candidate set (FR-007, SC-001).
 - **Personal doc privacy invariant**: a chunk in the `personal` collection with `user_id != requester_user_id` MUST never appear in any search result, even for an L5 admin. This is enforced by the Qdrant payload filter above — not by prompt instructions.
-- Chunking: child = 200 tokens (stored/searched), parent = 1000 tokens (linked by `parent_doc_id`, sent to LLM).
+- Chunking (research §16): **structure-aware** boundaries (split on headings / paragraph / sentence, never mid-sentence) feeding a **parent/child "small-to-big"** scheme — child = 200 tokens (embedded/searched), parent = 1000 tokens (linked by `parent_doc_id`, sent to the LLM). A flag-gated **contextual-retrieval** prefix (`chunking.contextual_prefix`, `fast` alias, per-doc summary reused) is prepended to each child *before* embedding to lift recall on context-poor fragments; the prefix is embedded with the child but is **not** a citation span.
 
 ## Relationships (high level)
 
@@ -156,3 +165,8 @@ erDiagram
 | Disallowed/injection input refused before retrieval/spend | SC-007, FR-010 | LangGraph Node 0 moderation gate |
 | A memory is injected only when its stamped `access_level` ≤ requester's current clearance | SC-001 (blocker), research §13 | Mem0 `access_level` stamp on write + Node 5 read-time clearance filter |
 | A notification is visible only to its recipient, never to other members or across workspaces | SC-012 (blocker), FR-036 | `notifications` RLS (`user_id = current_user` within `workspace_id`) |
+| A redelivered/retried event yields one notification, one in-app push, one email | SC-013, FR-032 | `notifications.(user_id, idem_key) UNIQUE` + `SET NX notify:applied:{idem_key}` |
+| Read notifications do not grow unbounded | FR-039 | Retention prune (default 90d) / range-partition drop on `created_at` |
+| Email is not sent to a hard-bounced/complained/unsubscribed address | FR-035 | `email_suppressions` lookup in email worker + bounce/complaint webhook upsert |
+| A DLQ-parked message is re-driven to its owning subject (reprocessed in the owning tier), not handled cross-tier in the sweeper | research §18 | DLQ sweeper re-publishes to the original work subject; owning worker idempotency |
+| A poison message terminates in `dead_letters` after `MAX_DLQ_ATTEMPTS`, never re-driven forever | research §18 | DLQ sweeper attempt-cap + `dead_letters` write + `dlq.dead.count` alert |

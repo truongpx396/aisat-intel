@@ -95,6 +95,10 @@ before high-concurrency production load.
 - **Do**: Execute the Phase-2-anticipated split into independent clusters per
   durability profile; add Sentinel/Cluster failover; verify cold-start
   rehydration and hourly reconciliation behave correctly across a failover.
+  **Locks are not the correctness boundary** (DB constraints are — [research.md §10/§15](./research.md));
+  the Cluster-specific work is: hash-tag each workspace's keys onto one slot,
+  accept `DECRBY` balance drift as an RPO/reconcile concern, and treat
+  rate-limit counters + the opaque session store as fail-safe.
 
 ### 7. Operational resilience primitives
 - **Gap**: No readiness/liveness probes, graceful drain (esp. for in-flight SSE

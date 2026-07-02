@@ -71,7 +71,7 @@ Raw, verified provider webhook events, for idempotent processing and replay-safe
 - Rules: the unique constraint is the replay guard. Insert-on-receive (after signature verification); a duplicate insert short-circuits processing (SC-006-style idempotency for webhooks).
 
 ### Extension: `credit_ledger.operation_type`
-Phase 1 enumerates only `reconcile` (+ the implicit consumption types). Phase 2 adds the **credit-positive** operation types:
+Phase 1 enumerates only `reconcile` (+ the implicit consumption types, e.g. `query`, `ingest`, `caption`, **`enrich`** — note web-link enrichment, FR-001). Phase 2 adds the **credit-positive** operation types:
 - `grant` (signup / promo), `purchase` (one-time top-up), `subscription_grant` (recurring allotment), `refund` (negative), `chargeback` (negative), `expiry` (negative, if credits expire), `admin_adjustment` (signed).
 - **Sign convention (to confirm in implementation):** `credits_used` becomes a signed delta — negative = debit (consumption), positive = credit (grant). The Redis balance is `SUM(delta)`. The column may be renamed `credits_delta` in a Phase 2 migration; document the chosen convention in one place.
 - Rules: every grant row carries an `idem_key` (the `payments.idem_key`); the existing `UNIQUE (idem_key)` makes webhook replays and double-clicks no-ops (SC-006).
