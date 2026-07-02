@@ -194,10 +194,16 @@ for a **batch** core that exploits `[P]` disjointness for parallel-generation la
 2. **Fan out generation** (`dispatching-parallel-agents`) — N **read-only** subagents each *return a
    file body as text*; none writes to disk, runs tests, or commits (so no shared-index race).
 3. **Apply** all bodies at once (controller = single writer) → one converged tree.
-4. **One batch evidence** — build + lint + bring-up health check against the converged tree; **paste
-   output**. This is **kept**, not skipped: it is the "does the scaffold actually build/come up" proof.
+4. **One `verification-before-completion` capture** — build + lint + bring-up health check against the
+   converged tree; **paste output**. This is **kept**, not skipped: it is the "does the scaffold
+   actually build/come up" proof.
 5. **One `requesting-code-review`** over the whole scaffold diff (quality-only is correct — the guard
    already established there is no trust-boundary surface), then the same **draft-PR finish**.
+
+Steps 4 and 5 are **orthogonal and both mandatory** — verification proves the scaffold *works*, review
+proves it is *correct*; neither substitutes for the other. See
+[`references/scaffold-mode.md`](references/scaffold-mode.md#which-superpowers-skill-runs-at-which-step)
+for the full skill-per-step map.
 
 Preflight, isolation, run-log/`RUN_ID`, the hooks bundle, and the draft-PR boundary are **reused
 unchanged** — scaffold mode swaps only the execution core, so it is a *mode*, not a forked skill.

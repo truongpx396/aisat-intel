@@ -61,10 +61,34 @@ core differs:
     each RETURNS a file body as a string (no disk writes)         [parallel ✅  dispatching-parallel-agents]
 3.  APPLY all returned bodies to the worktree at once             [serial, single writer, instant]
 4.  ONE batch verify against the converged tree:
-    build (all runtimes) + lint + bring-up health check           [serial → capture output]
-5.  ONE requesting-code-review over the whole scaffold diff       [serial, single review]
-6.  Draft-PR finish                                              [reuse: overrides SDD terminal]
+    build (all runtimes) + lint + bring-up health check           [serial → verification-before-completion]
+5.  ONE code review over the whole scaffold diff                  [serial → requesting-code-review]
+6.  Draft-PR finish                                              [reuse: overrides finishing-a-development-branch]
 ```
+
+### Which superpowers skill runs at which step
+
+Every step's owning skill is **explicit** — nothing is implied by a `[P]` marker or inferred at
+runtime. The two SDD-core skills (`test-driven-development`, `subagent-driven-development`) are
+**deliberately absent**: the Step-1 guard proved the batch is non-behavioral, so there is no
+test-first cycle and no per-task implement↔review loop to run.
+
+| Step | Action | Skill ("—" = no skill) | Why this skill / why none |
+|---|---|---|---|
+| 0 | Preflight & mint `RUN_ID` | `track-preflight.sh` (this skill's bundle) | Durable run identity + prereq gate — a script, not a superpowers skill |
+| 0 | Isolate branch/worktree | `using-git-worktrees` | Never start on main; one branch, one worktree |
+| 1 | Eligibility guard | — (local refusal guard) | All-or-nothing non-behavioral assertion; routes back to the SDD core on any hit |
+| 2 | Fan-out generation | `dispatching-parallel-agents` | N read-only subagents return file bodies in parallel — safe because nothing writes |
+| 3 | Apply bodies | — (controller = single writer) | Collapses N proposals into one tree; serial application, no skill |
+| 4 | Batch evidence | `verification-before-completion` | "Does it work" proof — real build/lint/bring-up output, not assertion |
+| 5 | Whole-diff review | `requesting-code-review` | "Is it correct" proof — quality-only rubric (the guard already cleared trust boundaries) |
+| 6 | Draft-PR finish | **overrides** `finishing-a-development-branch` | Worker stops at a draft PR; merge is owned by repo/CI |
+
+**Steps 4 and 5 are orthogonal and both mandatory.** `verification-before-completion` (Step 4)
+answers *does the scaffold actually build and come up*; `requesting-code-review` (Step 5) answers *is
+the diff correct and well-formed*. Neither substitutes for the other — a scaffold can build cleanly
+yet be wrong, or read well yet never come up. Scaffold mode drops TDD and the two-stage loop, but it
+**never** drops either of these two.
 
 ### Step 2 — parallel generation is safe because nothing writes
 
@@ -79,12 +103,14 @@ hazards apply. (See the SKILL Gotcha on in-session fan-out.)
 The controller applies every returned body in one pass. Single writer ⇒ no `.git/index.lock` race,
 deterministic tree. This is the moment the N parallel proposals collapse into **one** tree state.
 
-### Step 4 — batch evidence, kept (do NOT skip)
+### Step 4 — batch evidence via `verification-before-completion` (do NOT skip)
 
-Scaffold mode drops per-task TDD and per-task review, but it **keeps one evidence capture**. Evidence
-here is not a TDD artifact — it is the "does this actually work" proof, and it is cheap. Without it
-you can open a PR where a manifest won't resolve, a compose file won't parse, or the stack won't come
-up, and **nobody noticed** because the only check was an LLM reading its own output.
+Scaffold mode drops per-task TDD and per-task review, but it **keeps one `verification-before-completion`
+capture**. Evidence here is not a TDD artifact — it is the "does this actually work" proof, and it is
+cheap. Without it you can open a PR where a manifest won't resolve, a compose file won't parse, or the
+stack won't come up, and **nobody noticed** because the only check was an LLM reading its own output.
+This step is orthogonal to Step 5's review — see [the skill-per-step map](#which-superpowers-skill-runs-at-which-step):
+verification proves the scaffold *works*, review proves it is *correct*, and neither is optional.
 
 The scaffold's Definition of Done is the plan's own **bootstrap checkpoint** — typically some form of
 *"all runtimes build; the infra stack comes up."* Realize it as one command set against the converged
