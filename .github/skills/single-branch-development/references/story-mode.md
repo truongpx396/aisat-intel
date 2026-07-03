@@ -46,21 +46,23 @@ story mode is for the *behavioral, security-critical heart* and **requires** exa
 
 ### Eligibility
 
-Use story mode when a stage is a spec-driven **user-story stage** whose tasks are split into a
-write-first `### Tests` group (carrying the story's contract/acceptance/**security** criteria — access
-scope, injection resistance, clearance) and a separate `### Implementation` group. If a stage is pure
-non-behavioral bootstrap → [scaffold mode](scaffold-mode.md). If a task is a genuinely self-contained
-behavioral unit (its own test *and* impl) → the normal SDD core. When a story mixes in a task that
-must own its own micro red-green, run that task through the normal core inside the green phase.
+Use story mode for **all behavioral work**. The canonical case is a spec-driven **user-story stage**
+whose tasks split into a write-first `### Tests` group (carrying the story's contract/acceptance/
+**security** criteria — access scope, injection resistance, clearance) and a separate
+`### Implementation` group. A **lone feature or bugfix is just story mode with N=1** — a one-test RED
+batch → freeze → one green — so there is **no** separate per-task core to fall back to. Only pure
+non-behavioral bootstrap routes elsewhere → [scaffold mode](scaffold-mode.md). A self-contained
+behavioral task that owns its own micro red-green is simply an N=1 story run.
 
 ## Pipeline (story core)
 
-Steps 0 (preflight + isolate) and 6 (draft PR) are identical to the normal pipeline. The core is a
+Steps 0 (preflight + isolate) and 6 (draft PR) are identical to the universal bracket. The core is a
 **RED batch → review → incremental GREEN → converge** sequence:
 
 ```
 0.  Preflight & isolate branch                                   [reuse: track-preflight.sh, using-git-worktrees]
-1.  GUARD: confirm a story stage with a ### Tests + ### Impl split [else → scaffold mode / normal SDD]
+1.  GUARD: confirm the batch is behavioral (a ### Tests + ### Impl
+    split, or an N=1 task with its own test)                      [non-behavioral? → scaffold mode]
 2.  RED BATCH: fan-out generate the ### Tests group ([P] disjoint),
     apply serially, RUN, assert the WHOLE group fails correctly    [parallel gen ✅  dispatching-parallel-agents]
 3.  RED REVIEW: review + FREEZE the failing test suite             [serial → requesting-code-review + security]
@@ -81,7 +83,7 @@ this stage is behavioral, so `test-driven-development` (via the RED batch) and
 | Step | Action | Skill (`—` = no skill) | Why this skill |
 |---|---|---|---|
 | 0 | Preflight & isolate | `track-preflight.sh` + `using-git-worktrees` | Durable run identity; one branch, one worktree |
-| 1 | Story-stage guard | — (local eligibility guard) | Confirm the tests/impl split; else route to scaffold or normal SDD |
+| 1 | Story-stage guard | — (local eligibility guard) | Confirm the batch is behavioral; route pure non-behavioral bootstrap to scaffold mode |
 | 2 | RED batch authoring | `dispatching-parallel-agents` (+ `test-driven-development`) | `[P]` tests are disjoint → generate in parallel; the batch **is** the story's failing acceptance suite |
 | 3 | RED review + freeze | `requesting-code-review` + `security-and-owasp` | A wrong test = false confidence; these encode clearance/injection criteria, so security review is mandatory |
 | 4 | Incremental green | `subagent-driven-development` | Per-task implement→review loop, but the "test" is the pre-authored red test each task must green |
@@ -131,7 +133,7 @@ Batching the *test authoring* up front (Step 2) is what aligns with the file lay
 
 ### Step 5 — converge on one fingerprint
 
-Identical to the normal core's Step 2b: once the last impl increment greens its subset, make **no
+Identical to the universal bracket's Step 2b: once the last impl increment greens its subset, make **no
 further edits**, then run the whole story test suite plus every required evidence kind
 (`go-test`, `pg`, `redis`, browser E2E, …) back-to-back so all captures share one whole-tree
 fingerprint. The story's Definition of Done is its **Checkpoint** line (e.g. *"US1 fully functional —
@@ -139,7 +141,7 @@ ingest … browsable library"*) realized as green output you paste, not assert.
 
 ## What story mode changes vs. keeps
 
-| Aspect | Normal SDD core | Story core |
+| Aspect | Per-task SDD (inside green) | Story core (whole story) |
 |---|---|---|
 | Test authoring | Per task, interleaved with impl | **Batched up front** as the story's RED suite (generation fans out) |
 | Test review | Folded into per-task review | **Dedicated RED review + freeze gate** before any green (quality + security) |
@@ -154,11 +156,12 @@ ingest … browsable library"*) realized as green output you paste, not assert.
 **Use** for behavioral **user-story stages** laid out as a write-first `### Tests` group + a separate
 `### Implementation` group — the bulk of a spec-driven plan (US1…USN).
 
-**Refuse** (route elsewhere) when: the stage is pure non-behavioral bootstrap (→ scaffold mode), or a
-task is a self-contained behavioral unit that should own its own micro red-green (→ normal SDD core).
-The Foundational stage is a mix — its chokepoints (LLM gateway, MCP server, access filter) are
-security-critical and *do* follow tests-first, so they suit story mode; its pure platform-client
-wiring may run as normal SDD tasks.
+**Refuse** (→ [scaffold mode](scaffold-mode.md)) only when the batch is pure non-behavioral bootstrap.
+A self-contained behavioral task does **not** route elsewhere — it runs here as an N=1 story (one-test
+RED batch → freeze → one green). The Foundational stage is a mix — its chokepoints (LLM gateway, MCP
+server, access filter) are security-critical and *do* follow tests-first, so they suit story mode; its
+pure platform-client wiring runs as small N=1 story tasks (or scaffold mode, where a given file is
+genuinely non-behavioral config).
 
 ## Composition
 

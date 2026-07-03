@@ -6,10 +6,13 @@ description: 'Run a full end-to-end implementation pipeline on one branch or wor
 # Single-Branch Development
 
 Run one autonomous branch from implement to review to evidence to draft PR. This skill is a thin
-**per-branch bracket** around `subagent-driven-development` (SDD): it adds isolation *before* the
-loop, an evidence gate *after* it, a draft-PR boundary that **replaces** SDD's merge-capable finish,
-and the optional hooks bundle. It does **not** re-implement the implement/review loop — SDD owns
-that. Use it standalone (N=1) or composed by a higher-level orchestrator.
+**per-branch bracket** — isolation *before*, an evidence gate + draft-PR boundary *after* — around an
+**execution core that always runs in one of two modes**: **scaffold mode** for non-behavioral
+bootstrap batches, or **story mode** for behavioral work (a lone feature or bugfix is just story mode
+with N=1). There is no third free-form per-task path. It does **not** re-implement the implement/review
+loop: story mode's green phase delegates to `subagent-driven-development` (SDD), and the draft-PR
+boundary **replaces** SDD's merge-capable finish. Use it standalone or composed by a higher-level
+orchestrator.
 
 ## When to Use This Skill
 
@@ -27,8 +30,10 @@ that. Use it standalone (N=1) or composed by a higher-level orchestrator.
 
 ## Pipeline (One Branch)
 
-This pipeline **brackets** `subagent-driven-development`; it never re-describes or re-runs SDD's
-internal stages.
+This pipeline is the **universal bracket**: steps 0–1 (before) and 2b–5 (after) are identical no
+matter which mode runs. Step 2 is the **execution core**, and it is *always* one of **two modes** —
+never a free-form per-task loop. Story mode's green phase delegates to `subagent-driven-development`
+(SDD); this skill never re-describes or re-runs SDD's internal stages.
 
 0a. **Preflight & Confirm (start gate).** Run [`scripts/track-preflight.sh`](scripts/track-preflight.sh)
    (`inspect` mode) before touching the repo. You only ever supply the **track slug** (e.g. *"do
@@ -62,27 +67,28 @@ internal stages.
    (fingerprint match), never a judgement call. On a clean tree with nothing missing this is a no-op.
    Safe because setup tasks are idempotent (`go mod tidy`, `mkdir -p`, file creation replay cleanly).
 1. **Isolate** — create/select one branch or worktree (`using-git-worktrees`). Never start on main.
-2. **Delegate the implement → review loop to `subagent-driven-development`.** SDD owns the per-task
-   engine, and this skill does **not** re-run or duplicate it. For each task SDD dispatches a fresh
-   implementer subagent, then reviews its output in two stages — **stage 1** spec/contract compliance,
-   **stage 2** code quality (the `requesting-code-review` rubric) — looping implementer↔reviewer until
-   both stages pass. After the final task it runs one **whole-diff review** over the combined change.
+2. **Run the execution core — pick the mode with the guard.** There are exactly **two** cores; a
+   batch is never run as a free-form per-task loop:
+   - **Any behavioral work → Story Mode** (below). A test obligation, a trust boundary
+     (input/auth/secrets/DB/network), or any correctness/security success-criterion routes here.
+     Story mode authors the tests as a failing **RED batch**, reviews and **freezes** them, then
+     greens implementation **incrementally** via SDD's per-task loop. A lone feature or bugfix is
+     simply story mode with **N=1** (a one-test RED batch → freeze → one green) — there is no separate
+     single-task path to remember.
+   - **Pure non-behavioral bootstrap → Scaffold Mode** (below). Skeletons, manifests,
+     lint/compose/`Makefile` configs — batch-generated, no TDD, one review.
 
-   SDD's loop leaves **two gaps** that this skill treats as invariants you must close per task:
+   Story mode's green phase **delegates to `subagent-driven-development`**, which owns the per-task
+   implement↔review engine — **stage 1** spec/contract compliance, **stage 2** code quality (the
+   `requesting-code-review` rubric) — looping implementer↔reviewer until both pass. This skill does
+   **not** re-run SDD; it only closes SDD's **two gaps** wherever that loop runs:
    - **Test-first is opt-in, so demand it.** SDD's implementer follows `test-driven-development` only
-     "if the task says to." **Each implementation task's text must explicitly require TDD**, or
-     test-first ordering is silently skipped.
+     "if the task says to." Story mode supplies the failing test up front via the RED batch, so each
+     impl task's contract is *"green these specific red tests without weakening them."*
    - **Stage 2 is quality-only, so add security.** The `requesting-code-review` rubric contains no
-     security checks. For any change touching a trust boundary (input handling, auth, secrets, DB,
-     network), the stage-2 reviewer must **also** apply `security-and-owasp.instructions.md`.
-
-   **When the plan is laid out in phased spec-driven stages** — a write-first `### Tests` group and a
-   separate `### Implementation` group per user story (e.g. Spec Kit `tasks.md`, where a test task and
-   its implementing task are *distinct IDs in different files*) — the test-first invariant is satisfied
-   at **story scope, not per task**: author the story's whole `### Tests` group as one failing RED
-   batch, review and **freeze** it, then green the `### Implementation` group **incrementally** (each
-   impl task flips an identifiable subset of the frozen suite green). This is the **Story Mode** core
-   below; it does not replace SDD, it re-phases how SDD's loop is fed.
+     security checks. For any change touching a trust boundary, the reviewer must **also** apply
+     `security-and-owasp.instructions.md` — in story mode this fires **twice**: on the RED suite up
+     front and per trust-boundary impl increment.
 2b. **Freeze & verify-all (converge on one fingerprint).** Once the last task's review passes, make
    **no further edits**, then run *every* required evidence kind (`go-test`, `pg`, `redis`, …)
    back-to-back against the now-frozen tree so all captures share the **same** fingerprint. This
@@ -102,10 +108,11 @@ internal stages.
 
 These are the **invariants** this skill asserts; most are *realized by* SDD's loop, not re-run here.
 
-- **TDD required** for implementation changes — but SDD's implementer applies it only when the task
-  says so, so this skill's contract is that **every implementation task explicitly demands
-  `test-driven-development`**. Nothing mechanically enforces test-first ordering (hooks can't see it);
-  it is a prompt-level invariant, backstopped by the evidence gate requiring fresh passing tests.
+- **TDD required** for behavioral changes — realized at **story scope**: story mode authors the
+  failing RED suite *before* any implementation (N=1 for a lone task/bugfix). Nothing mechanically
+  enforces test-first ordering (hooks can't see it); it is a prompt-level invariant, backstopped by
+  the RED gate (tests must fail first) and the evidence gate (they must end green). Scaffold mode is
+  the sole exemption — its guard proved there is nothing behavioral to test.
 - **Security review required** at stage 2 for trust-boundary changes: the `requesting-code-review`
   rubric is code-quality only, so the reviewer must also apply `security-and-owasp.instructions.md`.
 - **Maker/checker principle required**: the stage-1/stage-2 reviewer must be a subagent distinct
@@ -166,7 +173,7 @@ These are the **invariants** this skill asserts; most are *realized by* SDD's lo
 - **`[P]` is *not* the scaffold-mode trigger.** `[P]` marks file-disjointness, not
   non-behavioral-ness — it sits on security-critical tasks too. Scaffold mode keys on an explicit
   `scaffold_only` batch + the eligibility guard; a task with any test obligation or trust boundary
-  **refuses the whole batch** to the normal SDD core. In-session fan-out is **generate-only** in the
+  **refuses the whole batch** to story mode. In-session fan-out is **generate-only** in the
   shared worktree (subagents return file bodies, the controller lands them serially) — true
   parallel-for-commits comes from worktree-per-track (`executing-parallel-tracks`), never from
   fanning multiple writers into one tree.
@@ -202,7 +209,7 @@ lint/compose/proxy/`Makefile` configs, test-harness scaffolding) — you may swa
 for a **batch** core that exploits `[P]` disjointness for parallel-generation latency:
 
 1. **Guard** — assert **every** batched task is non-behavioral; **refuse the whole batch** (route to
-   the normal SDD core) if any task has a test obligation, touches a trust boundary (input/auth/
+   **story mode**) if any task has a test obligation, touches a trust boundary (input/auth/
    secrets/DB/network), or carries a security/correctness success-criterion.
 2. **Fan out generation** (`dispatching-parallel-agents`) — N **read-only** subagents each *return a
    file body as text*; none writes to disk, runs tests, or commits (so no shared-index race).
@@ -236,9 +243,9 @@ injection resistance, and clearance criteria). Per-task TDD literally cannot run
 and its implementing task are **distinct IDs in different files/runtimes**, so a test-only task has
 nothing to green within itself.
 
-1. **Guard** — confirm the stage is a user story with a `### Tests` + `### Implementation` split. If
-   it is pure non-behavioral bootstrap → scaffold mode; if a task is a self-contained behavioral unit
-   → normal SDD core.
+1. **Guard** — confirm the batch is behavioral. A user-story stage with a `### Tests` +
+   `### Implementation` split runs here; a lone behavioral task runs here as **N=1**. Only pure
+   non-behavioral bootstrap routes away → scaffold mode.
 2. **RED batch** (`dispatching-parallel-agents`) — fan out generation of the `### Tests` group (`[P]`
    disjoint), apply serially, **run**, and assert the **whole group fails for the right reason** (real
    red, not a typo/missing import).
@@ -267,10 +274,11 @@ run-id/trace requirements.
 
 ## References
 
-- **Delegates the per-task implement → two-stage review loop to** `subagent-driven-development`,
-  which **transitively** uses `test-driven-development` (implementation) and `requesting-code-review`
-  (stage-2 rubric). Do **not** list those as separate steps — they are nested inside SDD.
-- **Brackets that loop with** `using-git-worktrees` (isolation, before) and
+- **Story mode's green phase delegates the per-task implement → two-stage review loop to**
+  `subagent-driven-development`, which **transitively** uses `test-driven-development` (implementation)
+  and `requesting-code-review` (stage-2 rubric). Do **not** list those as separate steps — they are
+  nested inside SDD, which is itself nested inside story mode.
+- **Brackets both cores with** `using-git-worktrees` (isolation, before) and
   `verification-before-completion` (evidence gate, after).
 - **Overrides** SDD's terminal `finishing-a-development-branch`: this skill stops at a **draft PR**
   (no local-merge menu); integration/merge is owned by repo process/CI.
