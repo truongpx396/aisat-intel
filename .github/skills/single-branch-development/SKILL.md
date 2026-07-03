@@ -75,6 +75,14 @@ internal stages.
    - **Stage 2 is quality-only, so add security.** The `requesting-code-review` rubric contains no
      security checks. For any change touching a trust boundary (input handling, auth, secrets, DB,
      network), the stage-2 reviewer must **also** apply `security-and-owasp.instructions.md`.
+
+   **When the plan is laid out in phased spec-driven stages** — a write-first `### Tests` group and a
+   separate `### Implementation` group per user story (e.g. Spec Kit `tasks.md`, where a test task and
+   its implementing task are *distinct IDs in different files*) — the test-first invariant is satisfied
+   at **story scope, not per task**: author the story's whole `### Tests` group as one failing RED
+   batch, review and **freeze** it, then green the `### Implementation` group **incrementally** (each
+   impl task flips an identifiable subset of the frozen suite green). This is the **Story Mode** core
+   below; it does not replace SDD, it re-phases how SDD's loop is fed.
 2b. **Freeze & verify-all (converge on one fingerprint).** Once the last task's review passes, make
    **no further edits**, then run *every* required evidence kind (`go-test`, `pg`, `redis`, …)
    back-to-back against the now-frozen tree so all captures share the **same** fingerprint. This
@@ -162,6 +170,11 @@ These are the **invariants** this skill asserts; most are *realized by* SDD's lo
   shared worktree (subagents return file bodies, the controller lands them serially) — true
   parallel-for-commits comes from worktree-per-track (`executing-parallel-tracks`), never from
   fanning multiple writers into one tree.
+- **In story mode, the RED suite is frozen after review — never green by weakening a test.** The
+  story's `### Tests` group is authored and reviewed as one failing batch *before* implementation;
+  once it passes RED review it is frozen. Making a test pass by deleting an assertion, loosening a
+  matcher, or `skip`-ing a case defeats the whole point (false green). A genuinely wrong test routes
+  back through the RED review gate — it is never edited silently mid-green.
 
 ## Hooks (Optional, Composable) — Bundle Owned Here
 
@@ -212,6 +225,40 @@ TDD and the two-stage review are dropped **only because** the guard proved the b
 See [`references/scaffold-mode.md`](references/scaffold-mode.md) for the full flow, the eligibility
 guard, and the drop-vs-keep table.
 
+## Story Mode (Optional) — Story-Scoped Phased TDD
+
+For **behavioral user-story stages** that a spec-driven plan lays out as two task groups — a
+write-first `### Tests` group (contract/integration/**security** tests, all `[P]`) and a separate
+`### Implementation` group — you may swap the SDD per-task loop for a **story core** that authors the
+tests as a batch, then greens implementation incrementally. This is the **inverse of scaffold mode**:
+scaffold refuses anything behavioral; story mode *requires* it (these tests encode access-scope,
+injection resistance, and clearance criteria). Per-task TDD literally cannot run here — a test task
+and its implementing task are **distinct IDs in different files/runtimes**, so a test-only task has
+nothing to green within itself.
+
+1. **Guard** — confirm the stage is a user story with a `### Tests` + `### Implementation` split. If
+   it is pure non-behavioral bootstrap → scaffold mode; if a task is a self-contained behavioral unit
+   → normal SDD core.
+2. **RED batch** (`dispatching-parallel-agents`) — fan out generation of the `### Tests` group (`[P]`
+   disjoint), apply serially, **run**, and assert the **whole group fails for the right reason** (real
+   red, not a typo/missing import).
+3. **RED review + freeze** (`requesting-code-review` **+** `security-and-owasp`) — a wrong test is
+   worse than no test. Review the failing suite, then **freeze** it: the green phase may add production
+   code only. Greening by weakening a test (deleting an assertion, `skip`-ing a case) is forbidden.
+4. **Incremental green** (`subagent-driven-development`) — implement the `### Implementation` group in
+   dependency order; each task/cluster flips an *identifiable subset* of the frozen suite green, with
+   per-increment stage-1/stage-2 (+ security) review. **Not** big-bang green — a story-long red period
+   discards TDD's feedback loop and turns integration into big-bang debugging.
+5. **Converge & verify-all** (`verification-before-completion`) — freeze, run the whole story suite +
+   every evidence kind on one fingerprint; the story's **Checkpoint** line is the Definition of Done.
+
+Preflight, isolation, run-log/`RUN_ID`, hooks, and the draft-PR boundary are **reused unchanged** —
+story mode swaps only the execution core. TDD is **kept** (at story scope, via the RED batch); the
+two-stage review is **kept** (RED review up front + per-increment green review).
+
+See [`references/story-mode.md`](references/story-mode.md) for the full flow, the skill-per-step map,
+the freeze rule, and the incremental-vs-big-bang-green rationale.
+
 ## Composition Contract
 
 When composed by a parallel orchestrator, this skill's gates may be **tightened** by overlays such
@@ -232,5 +279,8 @@ run-id/trace requirements.
 - [`references/scaffold-mode.md`](references/scaffold-mode.md) — optional batch fan-out core for
   non-behavioral bootstrap: the eligibility guard, the generate→apply→batch-verify→review→PR flow,
   and the drop-vs-keep table.
+- [`references/story-mode.md`](references/story-mode.md) — optional story-scoped phased-TDD core for
+  behavioral user-story stages (Spec Kit `### Tests` + `### Implementation` split): the RED-batch →
+  freeze → incremental-green flow, the skill-per-step map, and the incremental-vs-big-bang rationale.
 - Related orchestrator: `../executing-parallel-tracks/SKILL.md` (dispatches one run of this skill
   per track and layers parallel-only overlays).
