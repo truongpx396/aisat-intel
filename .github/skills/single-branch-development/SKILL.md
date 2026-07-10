@@ -1,6 +1,6 @@
 ---
 name: single-branch-development
-description: 'Run a full end-to-end implementation pipeline on one branch or worktree (TDD or keep-green refactor discipline, two-stage verification for spec compliance plus code quality, evidence capture, optional Copilot hooks, and draft PR handoff). Use when asked to implement one feature, fix one bug, refactor existing code, or do foundation setup with strong quality gates but without parallel fan-out orchestration.'
+description: 'Run a full end-to-end implementation pipeline on one branch/worktree in one of three execution cores — scaffold (non-behavioral bootstrap batch), story (TDD for new/changed behavior), or refactor (behavior-preserving keep-green) — with two-stage spec-compliance + code-quality verification, evidence capture, optional Copilot hooks, and draft-PR handoff. Use when asked to implement one feature, fix one bug, refactor existing code, or do foundation/scaffold setup with strong quality gates but without multi-track parallel orchestration.'
 ---
 
 # Single-Branch Development
@@ -58,8 +58,10 @@ Skip Step 0 entirely if `--check` already exits `0`.
 ## Pipeline (One Branch)
 
 Steps 1–3 (before) and 5–8 (after) are the **universal bracket** — identical no matter which mode
-runs. Step 4 is the **execution core**: always scaffold or story mode, never a free-form per-task
-loop. See the [skill-per-step map](#skill-per-step-map) for which superpower skill owns each step.
+runs: preflight, reconcile, isolation, and the evidence-gate + draft-PR boundary are reused unchanged
+by every core. Step 4 is the **execution core**: always scaffold, story, or refactor mode, never a
+free-form per-task loop. See the [skill-per-step map](#skill-per-step-map) for which superpower skill
+owns each step.
 
 1. **Preflight & confirm** — run [`scripts/track-preflight.sh`](scripts/track-preflight.sh)
    (`inspect` mode) before touching the repo. Supply only the **track slug** (`TRACK_ID=a`); the
@@ -117,12 +119,11 @@ loop. See the [skill-per-step map](#skill-per-step-map) for which superpower ski
    `.github/instructions/*` whose `applyTo` globs match the changed files — and any trust-boundary
    change additionally applies `security-and-owasp.instructions.md`.
 
-   *Self-reported trace (optional):* at the top of each core step call
-   [`scripts/track-note.sh`](scripts/track-note.sh)` skill <name> [step]` to append an ordered
-   `skills[]` entry, and once per RED→GREEN→review cycle call `track-note.sh loop <phase>` to bump the
-   `iterations` counter. These are the model's **own claim** (tagged `self_reported:true` /
-   `iterations_self_reported:true`), not hook-observed — no hook can see a skill name or a reasoning
-   loop. Skip them if you don't want a self-attested trace; the mechanical hooks are unaffected.
+   *Self-reported trace (optional):* call [`scripts/track-note.sh`](scripts/track-note.sh)` skill
+   <name>` at each core step and `track-note.sh loop <phase>` once per RED→GREEN→review cycle to append
+   an ordered, provenance-tagged `skills[]` / `iterations` record. These are the model's **own claim**
+   (`self_reported:true`), never hook-observed; skip them if you don't want a self-attested trace. See
+   [references/hooks.md](references/hooks.md) for the full mechanics.
 5. **Freeze & verify-all** — once the last task's review passes, make **no further edits**, then run
    every required evidence kind (`go-test`, `pg`, `redis`, …) back-to-back so all captures share the
    **same** fingerprint. Any change after this — including a review-driven fix — invalidates the
@@ -191,8 +192,6 @@ Invariants this skill asserts; most are *realized by* SDD's loop, not re-run her
   every required kind must pass against **one common final tree** (Step 5 converges the lanes).
 - **Self-heal cap**: SDD loops "until approved" unbounded; this skill's controller caps retries at
   `self_heal_attempts` (default 2) per distinct failure, then escalates `blocked` rather than thrashing.
-- **Draft-PR handoff** by default — **overrides** `finishing-a-development-branch`. Merge policy is
-  owned by repo process/CI.
 
 ## Gotchas
 
@@ -225,8 +224,6 @@ Invariants this skill asserts; most are *realized by* SDD's loop, not re-run her
   preset — copy `templates/track-env.sh.example` → `.github/hooks/track-env.base.sh` — which
   travels into every worktree; add a gitignored `.github/hooks/track-env.sh` only to override a
   single worktree. Every hook auto-sources both. See [references/hooks.md](references/hooks.md#install).
-- **Hooks are local and bypassable — defense-in-depth, not the merge gate.** Layer them: in-session
-  hooks → git `pre-push` → **CI** (the only unbypassable authority).
 - **Don't freeze entrypoints on a bootstrap branch.** Leave `TRACK_FROZEN_PATHS` unset until parallel
   tracks begin and the entrypoints exist.
 - **The worker physically stops at `gh pr create --draft`.** Push/merge/force are denied by the guard.
@@ -243,17 +240,10 @@ Invariants this skill asserts; most are *realized by* SDD's loop, not re-run her
   the only writer" means it is **only** a writer, never the generator. Read
   [`references/scaffold-mode.md`](references/scaffold-mode.md) **before** executing Step 4 — the SKILL
   body is only a summary; the mode reference is the binding spec.
-- **In story mode, the RED suite is frozen after review — never green by weakening a test.** Deleting
-  an assertion, loosening a matcher, or `skip`-ing a case is a false green. A genuinely wrong test
-  routes back through the RED review gate, never edited silently mid-green.
-- **A refactor that goes red has changed behavior — it is wrong, not "almost done".** Refactor mode's
-  invariant is keep-green; a red test mid-transform means you altered observable behavior (route to
-  story mode) or broke something. Never green it by editing a behavioral/contract test. Only
-  implementation-coupled unit tests may move in lockstep with the code, and that move goes through
-  maker/checker review to prove it is coupling, not a silent behavior edit.
-- **Characterization tests must pass at baseline.** In refactor mode they pin *current* behavior — the
-  mirror of a RED batch — so one that fails before you touch anything is a wrong test (or a real bug,
-  which is story-mode work), never a licence to change behavior to make it green.
+- **Never green a frozen test by weakening it (story) or editing behavior (refactor).** A deleted
+  assertion, loosened matcher, `skip`-ped case, or a behavioral/contract test rewritten to pass is a
+  false green in every mode. A genuinely wrong test routes back through its review gate; characterization
+  tests must pass at baseline and are never edited to green. (Full rules in the story/refactor sections.)
 
 ## Hooks (Optional, Composable) — Bundle Owned Here
 
@@ -293,9 +283,8 @@ disjointness for parallel-generation latency:
    boundaries), then the same **draft-PR finish**.
 
 Steps 4 and 5 are orthogonal and both mandatory: verification proves it *works*, review proves it is
-*correct*. Preflight, isolation, run-log/`RUN_ID`, hooks, and the draft-PR boundary are reused
-unchanged — scaffold mode swaps only the core. TDD and two-stage review are dropped only because the
-guard proved the batch is non-behavioral.
+*correct*. TDD and two-stage review are dropped only because the guard proved the batch is
+non-behavioral — scaffold mode swaps only the core.
 
 See [`references/scaffold-mode.md`](references/scaffold-mode.md) for the full flow, the eligibility
 guard, and the drop-vs-keep table.
@@ -327,8 +316,7 @@ implementing task are distinct IDs in different files/runtimes.
 *first*, encode the diagnosis as the failing regression test (that's step 2's RED), then green it. It
 is not a separate mode — diagnose before writing the fix so you green the cause, not a symptom.
 
-Preflight, isolation, run-log/`RUN_ID`, hooks, and the draft-PR boundary are reused unchanged. TDD is
-kept (at story scope, via the RED batch); the two-stage review is kept (RED review up front +
+TDD is kept at story scope (via the RED batch); the two-stage review is kept (RED review up front +
 per-increment green review).
 
 See [`references/story-mode.md`](references/story-mode.md) for the full flow, the skill-per-step map,
@@ -363,9 +351,9 @@ mode *adds* behavior; refactor mode *touches* behavioral code but adds none.
    evidence kind on one fingerprint, and confirm the public contract is unchanged. Definition of Done:
    **same behavior, clearer structure** — the suite that passed at Step 2 still passes, untouched.
 
-Preflight, isolation, run-log/`RUN_ID`, hooks, and the draft-PR boundary are reused unchanged. TDD's
-red→green is replaced by keep-green (characterization + never-red transform); the two-stage review is
-kept (characterization review up front + per-step transform review, + security on trust boundaries).
+TDD's red→green is replaced by keep-green (characterization + never-red transform); the two-stage
+review is kept (characterization review up front + per-step transform review, + security on trust
+boundaries).
 
 See [`references/refactor-mode.md`](references/refactor-mode.md) for the full flow, the
 behavior-preserving guard, the freeze/keep-green rule, and the characterization-vs-RED contrast.
