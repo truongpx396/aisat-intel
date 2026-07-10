@@ -36,6 +36,25 @@ by an orchestrator.
 - Project test commands are known (lint/unit/integration/e2e as applicable).
 - Optional: Copilot agent hooks enabled with a hook file in `.github/hooks/*.json`.
 
+### Step 0 — First-run bootstrap (offer, then install on consent)
+
+Before Step 1, probe whether this repo has the hooks wired and current:
+run [`scripts/install-hooks.sh --check`](scripts/install-hooks.sh). It exits `0` if the installed
+bundle matches source, or `3` if hooks are **missing or drifted** (a repo can silently run a
+months-stale bundle — the #1 reason a run executes ungated). If it reports drift or absence:
+
+1. Run `install-hooks.sh` (no args) to print the **dry-run plan** — it writes nothing.
+2. **Surface the plan and ask the user for consent.** Installing touches shared repo config
+   (`.github/hooks/`, `.gitignore`), so never auto-apply — this is a confirmation-worthy action.
+3. On "yes", run `install-hooks.sh --apply`. It is idempotent and non-destructive: it syncs the
+   bundle, gitignores `runs/`, and seeds a **stack-aware** `track-env.base.sh` (evidence catalog +
+   toolchain + base ref detected from the repo's `go.mod`/`pyproject.toml`/`package.json`/spec dirs;
+   TASK-DERIVED scope/floor left EMPTY so an unedited copy fails loud). An existing base preset is
+   **never clobbered**. Then have the user review + commit the changes.
+4. On "no", proceed — the hooks stay no-ops until their env is set, so skipping install is safe.
+
+Skip Step 0 entirely if `--check` already exits `0`.
+
 ## Pipeline (One Branch)
 
 Steps 1–3 (before) and 5–8 (after) are the **universal bracket** — identical no matter which mode

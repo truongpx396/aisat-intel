@@ -51,6 +51,26 @@ exit code `2` (stderr → model) or `hookSpecificOutput.permissionDecision: "den
 
 ## Install
 
+**Recommended — the installer** ([`../scripts/install-hooks.sh`](../scripts/install-hooks.sh)).
+Idempotent, consent-gated, drift-aware. It fixes the "install once, silently drift" footgun that
+manual `cp` invites (a stale bundle runs the *old* hooks; a forgotten gitignore self-stales the
+evidence fingerprint; a missing base preset runs the resume ungated):
+
+```bash
+install-hooks.sh --check   # exit 3 if installed bundle is missing/stale (drift probe)
+install-hooks.sh           # DRY-RUN: print the plan, write nothing
+install-hooks.sh --apply   # sync bundle + gitignore runs/ + seed stack-aware track-env.base.sh
+```
+
+It (1) syncs `scripts/track-*.sh` + `templates/track-hooks.json` into `.github/hooks/`, (2) ensures
+`runs/` is gitignored, and (3) seeds `.github/hooks/track-env.base.sh` **only if absent**, pre-filled
+from detected repo signals (`go.mod`→go-test, `pyproject.toml`→py, `package.json`→ts, `migrations/`,
+default branch) — REPO-POLICY vars filled, TASK-DERIVED scope/floor left EMPTY so an unedited copy
+fails loud. An existing base preset is never clobbered. `--apply` writes into shared repo config, so
+the skill's Step 0 runs the dry-run, gets consent, then applies.
+
+### Manual install (equivalent)
+
 Copy every [`../scripts/track-*.sh`](../scripts/) into the repo's `.github/hooks/` directory and
 place [`../templates/track-hooks.json`](../templates/track-hooks.json) there too. Each script is
 **opt-in and no-ops unless its env is set**, so dropping them in is safe before configuring anything.
