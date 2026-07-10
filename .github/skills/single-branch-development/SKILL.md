@@ -91,8 +91,18 @@ loop. See the [skill-per-step map](#skill-per-step-map) for which superpower ski
    current fingerprint. Then: stash any `dirty_worktree` (untrusted, reversible — never `reset
    --hard`), skip every `fresh` kind, and resume at the first `missing`/`stale`/`failed` task.
    Doneness is mechanical (fingerprint match), never a judgement call. No-op on a clean, complete tree.
-3. **Isolate** — create/select one branch or worktree (`using-git-worktrees`) using the **Branch** name
-   from preflight's summary — an explicit `TRACK_BRANCH` if you set one, otherwise the track slug. Never start on main.
+3. **Isolate** — run `using-git-worktrees` to place the work in an **isolated worktree**, using the
+   **Branch** name from preflight's summary (an explicit `TRACK_BRANCH` if you set one, otherwise the
+   track slug). **A dedicated worktree is the default and expected form of isolation** — the whole
+   point of this step is that a failed or abandoned run's files live in a *separate directory you can
+   delete wholesale*, never in your primary checkout. Follow `using-git-worktrees` exactly: detect
+   existing isolation first (if `git rev-parse --git-dir` ≠ `--git-common-dir` and you are not in a
+   submodule, you are already in a linked worktree — reuse it), then prefer a native worktree tool,
+   then fall back to `git worktree add`. **A bare branch in the primary checkout is NOT sufficient
+   isolation** and is permitted *only* when `using-git-worktrees` explicitly routes there — i.e. the
+   user has declined worktree consent, or the harness cannot create one. In that fallback you MUST (a)
+   surface the decline/limitation to the user, and (b) proceed branch-in-place only after explicit
+   acknowledgement. Never silently downgrade worktree → branch-in-place, and never start on main.
 4. **Run the execution core — pick the mode with the guard.** Behavioral work that **adds or changes**
    behavior (a test obligation, a trust boundary, or a correctness/security criterion) →
    **[Story Mode](#story-mode-optional--story-scoped-phased-tdd)**. Behavior-**preserving** change to
@@ -193,6 +203,14 @@ Invariants this skill asserts; most are *realized by* SDD's loop, not re-run her
   restarts so `track-reconcile.sh` reopens the same record. Typing your own breaks resume.
 - **A dirty worktree at startup is untrusted.** Reconcile stashes it (reversible) — never `git reset
   --hard` unfamiliar work and never build on it.
+- **Isolation means a *worktree*, not just a branch.** Step 3 defaults to a dedicated worktree so an
+  abandoned run's files sit in a separate directory you can delete wholesale. Creating a branch in the
+  **primary** checkout and working there is the failure this step exists to prevent: an abandoned
+  scaffold then pollutes your main tree and must be hand-cleaned (`git clean`). Branch-in-place is
+  allowed **only** when `using-git-worktrees` routes there (user declined worktree consent, or no
+  worktree mechanism exists), and only after that decline is surfaced and acknowledged. Never silently
+  downgrade worktree → branch-in-place because it "feels lighter." Verify with `git worktree list`:
+  more than the primary entry means you isolated; a single entry means you did **not**.
 - **Doneness is mechanical.** A task is done only when its evidence `fingerprint` matches the current
   tree. "All green" without pasted output is not done.
 - **Set `TRACK_BASE_REF` — it's required, not optional.** The gate derives "what changed" from the
