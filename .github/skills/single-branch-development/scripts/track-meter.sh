@@ -37,8 +37,13 @@ mkdir -p "$RUNS_DIR"
 [ -f "$rec" ] || printf '{"run_id":"%s","v":1,"trace":[],"evidence":[],"tool_calls":0}\n' "$RUN_ID" >"$rec"
 
 count="$(jq -r '(.tool_calls // 0) + 1' "$rec")"
+now_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 tmp="$(mktemp)"
-jq --argjson n "$count" '.tool_calls = $n' "$rec" >"$tmp" && mv "$tmp" "$rec"
+# Also stamp the heartbeat: started_ts once, last_ts on every call. now - last_ts is
+# the orchestrator's idle/staleness signal (a hung worker stops advancing last_ts);
+# last_ts - started_ts is the run's wall-clock duration.
+jq --argjson n "$count" --arg t "$now_ts" \
+  '.tool_calls = $n | .started_ts = (.started_ts // $t) | .last_ts = $t' "$rec" >"$tmp" && mv "$tmp" "$rec"
 
 if [ "$count" -gt "$TRACK_MAX_TOOL_CALLS" ]; then
   # Also record the terminal state for the orchestrator's summary.

@@ -28,10 +28,11 @@ EVIDENCE="$SCRIPTS_DIR/track-evidence.sh"
 EVIDENCE_GATE="$SCRIPTS_DIR/track-evidence-gate.sh"
 METER="$SCRIPTS_DIR/track-meter.sh"
 TRACE="$SCRIPTS_DIR/track-trace.sh"
+NOTE="$SCRIPTS_DIR/track-note.sh"
 SENTINEL="$SCRIPTS_DIR/track-sentinel.sh"
 NOTIFY="$SCRIPTS_DIR/track-notify.sh"
 for s in "$GUARD" "$PREFLIGHT" "$RECONCILE" "$EVIDENCE" "$EVIDENCE_GATE" \
-         "$METER" "$TRACE" "$SENTINEL" "$NOTIFY"; do
+         "$METER" "$TRACE" "$NOTE" "$SENTINEL" "$NOTIFY"; do
   [ -x "$s" ] || chmod +x "$s"
 done
 
@@ -111,6 +112,42 @@ ls "$TMPDIR_RUNS"/*.dispatch >/dev/null 2>&1 \
   && pass "preflight: --commit persists .dispatch breadcrumb" \
   || fail "preflight: --commit persists .dispatch breadcrumb"
 
+# breadcrumb records the confirmed scope/toolchain/floor, not just identity
+rm -f "$TMPDIR_RUNS"/*.dispatch
+TRACK_ID=tst-stamp TASKS="T001" TRACK_BASE_REF=main PREFLIGHT_REQUIRE_GH=0 \
+  TRACK_ALLOWED_PREFIXES="backend-go/:frontend/" PREFLIGHT_REQUIRE_TOOLCHAIN="git,jq" \
+  TRACK_REQUIRED_EVIDENCE="go-test,py" RUNS_DIR="$TMPDIR_RUNS" \
+  bash "$PREFLIGHT" --commit >/dev/null 2>&1
+stamp_file=$(ls "$TMPDIR_RUNS"/*tst-stamp*.dispatch 2>/dev/null | head -1)
+if [ -n "$stamp_file" ] && jq -e '(.allowed_prefixes | index("backend-go/") != null) and .scope_set == true and (.require_toolchain | index("jq") != null) and (.required_evidence | index("go-test") != null) and .evidence_floor_set == true' "$stamp_file" >/dev/null 2>&1; then
+  pass "preflight: --commit stamps confirmed scope/toolchain/floor into breadcrumb"
+else
+  fail "preflight: --commit stamps confirmed scope/toolchain/floor into breadcrumb"
+fi
+
+# --complete stamps completed_utc + numeric duration_secs (write-once) at PR handoff
+rm -f "$TMPDIR_RUNS"/*.dispatch
+TRACK_ID=tst-done TASKS="T001" TRACK_BASE_REF=main PREFLIGHT_REQUIRE_GH=0 \
+  RUNS_DIR="$TMPDIR_RUNS" bash "$PREFLIGHT" --commit >/dev/null 2>&1
+TRACK_ID=tst-done TRACK_BASE_REF=main PREFLIGHT_REQUIRE_GH=0 \
+  RUNS_DIR="$TMPDIR_RUNS" bash "$PREFLIGHT" --complete >/dev/null 2>&1
+done_file=$(ls "$TMPDIR_RUNS"/*tst-done*.dispatch 2>/dev/null | head -1)
+if [ -n "$done_file" ] && jq -e '(.completed_utc | type == "string" and . != "") and (.duration_secs | type == "number")' "$done_file" >/dev/null 2>&1; then
+  pass "preflight: --complete stamps completed_utc + numeric duration_secs"
+else
+  fail "preflight: --complete stamps completed_utc + numeric duration_secs"
+fi
+# write-once: a second --complete must not overwrite the original finish time
+first_done=$(jq -r '.completed_utc' "$done_file" 2>/dev/null)
+TRACK_ID=tst-done TRACK_BASE_REF=main PREFLIGHT_REQUIRE_GH=0 \
+  RUNS_DIR="$TMPDIR_RUNS" bash "$PREFLIGHT" --complete >/dev/null 2>&1
+[ "$(jq -r '.completed_utc' "$done_file" 2>/dev/null)" = "$first_done" ] \
+  && pass "preflight: --complete is write-once (resume can't clobber finish time)" \
+  || fail "preflight: --complete is write-once (resume can't clobber finish time)"
+rm -f "$TMPDIR_RUNS"/*.dispatch
+TRACK_ID=tst-setup TASKS="T001-T005" TRACK_BASE_REF=main \
+  PREFLIGHT_REQUIRE_GH=0 RUNS_DIR="$TMPDIR_RUNS" bash "$PREFLIGHT" --commit >/dev/null 2>&1
+
 result=$(TRACK_ID=tst-setup TRACK_BASE_REF=main PREFLIGHT_REQUIRE_GH=0 \
          RUNS_DIR="$TMPDIR_RUNS" bash "$PREFLIGHT" 2>&1)
 printf '%s' "$result" | grep -q '"mode":"resume"' \
@@ -125,6 +162,50 @@ printf '%s' "$result2" | grep -q '"mode":"start"' \
 RUNS_DIR="$TMPDIR_RUNS" bash "$PREFLIGHT" 2>/dev/null \
   && fail "preflight: missing TRACK_ID -> hard-fail exit 1" \
   || pass "preflight: missing TRACK_ID -> hard-fail exit 1"
+
+result=$(TRACK_ID=tst-scope TRACK_BASE_REF=main PREFLIGHT_REQUIRE_GH=0 \
+         TRACK_ALLOWED_PREFIXES="backend-go/:frontend/" RUNS_DIR="$TMPDIR_RUNS" \
+         bash "$PREFLIGHT" 2>/dev/null)
+printf '%s' "$result" | jq -e '.scope_set == true and (.allowed_prefixes | index("backend-go/") != null)' >/dev/null 2>&1 \
+  && pass "preflight: writable scope surfaced in JSON" \
+  || fail "preflight: writable scope surfaced in JSON"
+
+# TRACK_BRANCH: custom name wins; absent -> derived from the track slug; invalid -> hard-fail
+result=$(TRACK_ID=tst-br TRACK_BRANCH="feat/custom-name" TRACK_BASE_REF=main PREFLIGHT_REQUIRE_GH=0 \
+         RUNS_DIR="$TMPDIR_RUNS" bash "$PREFLIGHT" 2>/dev/null)
+printf '%s' "$result" | jq -e '.branch == "feat/custom-name"' >/dev/null 2>&1 \
+  && pass "preflight: TRACK_BRANCH override sets custom branch name" \
+  || fail "preflight: TRACK_BRANCH override sets custom branch name"
+
+result=$(TRACK_ID=tst-slug TRACK_BASE_REF=main PREFLIGHT_REQUIRE_GH=0 \
+         RUNS_DIR="$TMPDIR_RUNS" bash "$PREFLIGHT" 2>/dev/null)
+printf '%s' "$result" | jq -e '.branch == "tst-slug"' >/dev/null 2>&1 \
+  && pass "preflight: no TRACK_BRANCH -> branch derived from track slug" \
+  || fail "preflight: no TRACK_BRANCH -> branch derived from track slug"
+
+TRACK_ID=tst-badbr TRACK_BRANCH="bad branch~name" TRACK_BASE_REF=main PREFLIGHT_REQUIRE_GH=0 \
+  RUNS_DIR="$TMPDIR_RUNS" bash "$PREFLIGHT" >/dev/null 2>&1 \
+  && fail "preflight: invalid TRACK_BRANCH -> hard-fail exit 1" \
+  || pass "preflight: invalid TRACK_BRANCH -> hard-fail exit 1"
+
+result=$(TRACK_ID=tst-noscope TRACK_BASE_REF=main PREFLIGHT_REQUIRE_GH=0 \
+         RUNS_DIR="$TMPDIR_RUNS" bash "$PREFLIGHT" 2>/dev/null)
+printf '%s' "$result" | jq -e '.scope_set == false' >/dev/null 2>&1 \
+  && pass "preflight: unset scope -> scope_set=false (guard fails closed)" \
+  || fail "preflight: unset scope -> scope_set=false (guard fails closed)"
+
+result=$(TRACK_ID=tst-tc TRACK_BASE_REF=main PREFLIGHT_REQUIRE_GH=0 \
+         PREFLIGHT_REQUIRE_TOOLCHAIN="git,jq" TRACK_REQUIRED_EVIDENCE="go-test,py" \
+         RUNS_DIR="$TMPDIR_RUNS" bash "$PREFLIGHT" 2>/dev/null)
+printf '%s' "$result" | jq -e '.toolchain_set == true and (.require_toolchain | index("git") != null) and .evidence_floor_set == true and (.required_evidence | index("py") != null)' >/dev/null 2>&1 \
+  && pass "preflight: toolchain + evidence floor surfaced in JSON" \
+  || fail "preflight: toolchain + evidence floor surfaced in JSON"
+
+result=$(TRACK_ID=tst-nofloor TRACK_BASE_REF=main PREFLIGHT_REQUIRE_GH=0 \
+         RUNS_DIR="$TMPDIR_RUNS" bash "$PREFLIGHT" 2>/dev/null)
+printf '%s' "$result" | jq -e '.evidence_floor_set == false and .toolchain_set == false' >/dev/null 2>&1 \
+  && pass "preflight: unset floor/toolchain -> *_set=false (weaker gate flagged)" \
+  || fail "preflight: unset floor/toolchain -> *_set=false (weaker gate flagged)"
 
 # ---------------------------------------------------------------------------
 # SUITE 2 -- track-reconcile.sh
@@ -479,6 +560,19 @@ status_seen=$(jq -r '.status // empty' "$ACC_RUNS/$ACC_RID.json" 2>/dev/null)
   || fail "meter: ceiling trip records status=no-progress (got: $status_seen)"
 rm -rf "$ACC_RUNS"
 
+# Heartbeat: every meter write stamps started_ts (once) + last_ts (every call) so the
+# orchestrator can derive idle-staleness and run wall-clock.
+HB_RUNS="$(mktemp -d)"; HB_RID="meter-hb"
+jq -nc '{"tool_name":"create_file","tool_response":"ok"}' | \
+  RUN_ID="$HB_RID" RUNS_DIR="$HB_RUNS" TRACK_MAX_TOOL_CALLS=100 bash "$METER" >/dev/null 2>&1 || true
+if jq -e '(.started_ts | type == "string" and . != "") and (.last_ts | type == "string" and . != "")' \
+     "$HB_RUNS/$HB_RID.json" >/dev/null 2>&1; then
+  pass "meter: stamps started_ts + last_ts heartbeat"
+else
+  fail "meter: stamps started_ts + last_ts heartbeat"
+fi
+rm -rf "$HB_RUNS"
+
 # ---------------------------------------------------------------------------
 # SUITE 9 -- track-trace.sh
 # ---------------------------------------------------------------------------
@@ -494,6 +588,54 @@ trace_len=$(jq '.trace | length' "$TMPDIR_RUNS/${RUN1_ID:-test}.json" 2>/dev/nul
 
 result=$(jq -nc '{"hook_event_name":"SubagentStart"}' | bash "$TRACE" 2>&1) || true
 [ -z "$result" ] && pass "trace: no RUN_ID -> no-op" || fail "trace: no RUN_ID -> no-op"
+
+# ---------------------------------------------------------------------------
+# SUITE 9b -- track-note.sh (SELF-REPORTED skills[] + iterations)
+# ---------------------------------------------------------------------------
+section "track-note.sh"
+NOTE_RUNS="$(mktemp -d)"; NOTE_RID="note-run"
+
+# skill: appends an ordered, provenance-tagged entry to skills[]
+RUN_ID="$NOTE_RID" RUNS_DIR="$NOTE_RUNS" bash "$NOTE" skill test-driven-development red >/dev/null 2>&1 || true
+RUN_ID="$NOTE_RID" RUNS_DIR="$NOTE_RUNS" bash "$NOTE" skill requesting-code-review review >/dev/null 2>&1 || true
+if jq -e '(.skills | length == 2) and (.skills[0].skill == "test-driven-development") and (.skills[0].step == "red") and (.skills[0].self_reported == true)' \
+     "$NOTE_RUNS/$NOTE_RID.json" >/dev/null 2>&1; then
+  pass "note: skill appends ordered self_reported skills[] entry"
+else
+  fail "note: skill appends ordered self_reported skills[] entry"
+fi
+
+# loop: increments iterations, sets the provenance flag, logs the phase
+RUN_ID="$NOTE_RID" RUNS_DIR="$NOTE_RUNS" bash "$NOTE" loop cycle-1 >/dev/null 2>&1 || true
+RUN_ID="$NOTE_RID" RUNS_DIR="$NOTE_RUNS" bash "$NOTE" loop cycle-2 >/dev/null 2>&1 || true
+if jq -e '.iterations == 2 and .iterations_self_reported == true and (.iteration_log | length == 2)' \
+     "$NOTE_RUNS/$NOTE_RID.json" >/dev/null 2>&1; then
+  pass "note: loop increments iterations + tags provenance + logs phase"
+else
+  fail "note: loop increments iterations + tags provenance + logs phase"
+fi
+
+# note writes preserve the canonical skeleton (co-exist with hook fields)
+if jq -e 'has("run_id") and .v == 1 and (.trace | type == "array") and (.evidence | type == "array") and (.tool_calls | type == "number")' \
+     "$NOTE_RUNS/$NOTE_RID.json" >/dev/null 2>&1; then
+  pass "note: preserves canonical skeleton (run_id/v/trace/evidence/tool_calls)"
+else
+  fail "note: preserves canonical skeleton (run_id/v/trace/evidence/tool_calls)"
+fi
+
+# opt-in: no RUN_ID -> silent no-op, writes nothing
+before=$(ls "$NOTE_RUNS" | wc -l)
+RUNS_DIR="$NOTE_RUNS" bash "$NOTE" skill should-not-write >/dev/null 2>&1 || true
+after=$(ls "$NOTE_RUNS" | wc -l)
+[ "$before" -eq "$after" ] \
+  && pass "note: no RUN_ID -> silent no-op (writes nothing)" \
+  || fail "note: no RUN_ID -> silent no-op (writes nothing)"
+
+# bad subcommand -> non-zero, no write
+RUN_ID="$NOTE_RID" RUNS_DIR="$NOTE_RUNS" bash "$NOTE" bogus >/dev/null 2>&1 \
+  && fail "note: unknown subcommand -> non-zero exit" \
+  || pass "note: unknown subcommand -> non-zero exit"
+rm -rf "$NOTE_RUNS"
 
 # ---------------------------------------------------------------------------
 # SUITE 10 -- track-notify.sh

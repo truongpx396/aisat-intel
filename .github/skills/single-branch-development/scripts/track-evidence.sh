@@ -100,5 +100,5 @@ mkdir -p "$RUNS_DIR"
 ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 tmp="$(mktemp)"
 jq --arg t "$ts" --arg k "$kind" --arg c "$cmd" --arg r "$resp" --arg f "$fingerprint" \
-  '.evidence = ((.evidence // []) + [{t:$t, kind:$k, cmd:$c, response:$r, fingerprint:$f}])' "$rec" >"$tmp" && mv "$tmp" "$rec"
+  '.evidence = ((.evidence // []) + [{t:$t, kind:$k, cmd:$c, response:$r, fingerprint:$f}]) | .started_ts = (.started_ts // $t) | .last_ts = $t' "$rec" >"$tmp" && mv "$tmp" "$rec"
 exit 0

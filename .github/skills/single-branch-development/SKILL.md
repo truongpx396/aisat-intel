@@ -1,17 +1,19 @@
 ---
 name: single-branch-development
-description: 'Run a full end-to-end implementation pipeline on one branch or worktree (TDD, two-stage verification for spec compliance plus code quality, evidence capture, optional Copilot hooks, and draft PR handoff). Use when asked to implement one feature or foundation setup with strong quality gates but without parallel fan-out orchestration.'
+description: 'Run a full end-to-end implementation pipeline on one branch or worktree (TDD or keep-green refactor discipline, two-stage verification for spec compliance plus code quality, evidence capture, optional Copilot hooks, and draft PR handoff). Use when asked to implement one feature, fix one bug, refactor existing code, or do foundation setup with strong quality gates but without parallel fan-out orchestration.'
 ---
 
 # Single-Branch Development
 
 Run one autonomous branch from implement → review → evidence → draft PR. This skill is a thin
 **per-branch bracket** (isolation before, an evidence gate + draft-PR boundary after) around an
-**execution core that always runs in one of two modes**: **scaffold mode** for non-behavioral
-bootstrap batches, or **story mode** for behavioral work (a lone feature or bugfix is story mode with
-N=1). There is no third free-form per-task path. It does **not** re-implement the implement/review
-loop — story mode's green phase delegates to `subagent-driven-development` (SDD), and the draft-PR
-boundary **replaces** SDD's merge-capable finish. Use it standalone or composed by an orchestrator.
+**execution core that always runs in one of three modes**: **scaffold mode** for non-behavioral
+bootstrap batches, **story mode** for behavioral work that adds or changes behavior (a lone feature or
+bugfix is story mode with N=1), or **refactor mode** for behavior-preserving change to existing code
+(keep-green, no new behavior). There is no free-form per-task path. It does **not** re-implement the
+implement/review loop — story and refactor modes' green phase delegates to `subagent-driven-development`
+(SDD), and the draft-PR boundary **replaces** SDD's merge-capable finish. Use it standalone or composed
+by an orchestrator.
 
 ## When to Use This Skill
 
@@ -20,6 +22,8 @@ boundary **replaces** SDD's merge-capable finish. Use it standalone or composed 
 - You want TDD + verifier + evidence + draft PR without parallel fan-out complexity.
 - You need a reusable per-branch worker contract that another skill can compose.
 - A bugfix counts — it runs as story mode N=1 (see [Story Mode](#story-mode-optional--story-scoped-phased-tdd)).
+- A refactor counts — behavior-preserving change runs as refactor mode, keep-green (see
+  [Refactor Mode](#refactor-mode-optional--behavior-preserving-keep-green)).
 - **Not** for reworking PR-review feedback on already-implemented work — that has no preflight/isolate/
   RED-authoring to run; it's owned by `receiving-code-review` (then `verification-before-completion`).
 
@@ -27,6 +31,8 @@ boundary **replaces** SDD's merge-capable finish. Use it standalone or composed 
 
 - `git` and `gh` CLI authenticated for PR creation.
 - One or more tasks defined (a single task or a small plan that SDD can execute).
+- Planning is already done upstream: this skill starts post-planning and does **not** reopen
+  brainstorming, spec-writing, or task breakdown mid-run.
 - Project test commands are known (lint/unit/integration/e2e as applicable).
 - Optional: Copilot agent hooks enabled with a hook file in `.github/hooks/*.json`.
 
@@ -42,35 +48,68 @@ loop. See the [skill-per-step map](#skill-per-step-map) for which superpower ski
    `TRACK_ID` exists. No breadcrumb → **START**: mint `RUN_ID` = `<UTC-timestamp>_<track>`, check
    prerequisites, and on approval persist `runs/<RUN_ID>.dispatch`. Breadcrumb exists → **RESUME**
    that run automatically (there is no `--resume` flag). It prints a one-screen summary (Mode · Track
-   · Tasks · RUN_ID · Branch · Base ref · Prereqs) and the same as JSON. Confirm is optional
-   (`auto_confirm`/`--yes` for orchestrators); a prerequisite failure hard-fails. Re-run with
-   `--commit` to persist. See [references/hooks.md](references/hooks.md) for `RUN_ID` mechanics.
+   · Tasks · RUN_ID · Branch · Base ref · Prereqs) and the same as JSON. **The interactive confirm is
+   mandatory: STOP and get explicit human approval of this summary before Step 3 creates anything.**
+   The only waiver is an explicitly-set `auto_confirm`/`--yes` (orchestrator runs only) — absent that
+   flag, treat confirm as required, never skippable by default. A prerequisite failure hard-fails
+   regardless. Re-run with `--commit` to persist. See [references/hooks.md](references/hooks.md) for
+   `RUN_ID` mechanics.
+   **Derive the task-shaped config here.** From the task set's file/language surface, set — *before*
+   inspect — the values whose correct value depends on *this* task (not repo-wide policy):
+   `TRACK_ALLOWED_PREFIXES` (writable scope) and any `TRACK_FROZEN_PATHS`; `PREFLIGHT_REQUIRE_TOOLCHAIN`
+   (the bins the task's languages need, so a missing tool fails here not mid-run); and
+   `TRACK_REQUIRED_EVIDENCE` (the evidence *floor* for the task's languages). Preflight echoes each in
+   its summary/JSON with an unset flag — `scope_set:false` means the guard fails closed and denies
+   **all** edits; `evidence_floor_set:false` means the gate is rules-only. Repo-wide catalog/policy
+   (`TRACK_EVIDENCE_KINDS`/`RULES`, sentinel, ceilings, `RUNS_DIR`) stays in the committed
+   `track-env.base.sh` — do not regenerate it per run. Confirm the derived values as part of the same
+   proceed-confirm, then `--commit` — which stamps the confirmed scope, frozen paths, toolchain, and
+   evidence floor into `runs/<RUN_ID>.dispatch`, so the artifact is a faithful record of what was
+   approved. Do not hand-widen scope mid-run.
 2. **Reconcile / resume** — run [`scripts/track-reconcile.sh`](scripts/track-reconcile.sh) to rebuild
    position from **persisted state only** (committed history + `runs/<run-id>.json`), never the
    model's reading of the worktree. It marks each evidence kind `fresh|stale|missing|failed` at the
    current fingerprint. Then: stash any `dirty_worktree` (untrusted, reversible — never `reset
    --hard`), skip every `fresh` kind, and resume at the first `missing`/`stale`/`failed` task.
    Doneness is mechanical (fingerprint match), never a judgement call. No-op on a clean, complete tree.
-3. **Isolate** — create/select one branch or worktree (`using-git-worktrees`). Never start on main.
-4. **Run the execution core — pick the mode with the guard.** Any behavioral work (a test obligation,
-   a trust boundary, or a correctness/security criterion) →
-   **[Story Mode](#story-mode-optional--story-scoped-phased-tdd)**. Pure non-behavioral bootstrap →
-   **[Scaffold Mode](#scaffold-mode-optional--batch-in-session-fan-out)**. Story mode delegates its
-   green phase to `subagent-driven-development`; this skill never re-runs SDD, it only closes SDD's
-   two gaps: (a) SDD's test-first is opt-in, so story mode supplies the failing tests up front via the
-   RED batch; (b) SDD's stage-2 review is quality-only, so any trust-boundary change also applies
-   `security-and-owasp.instructions.md`.
+3. **Isolate** — create/select one branch or worktree (`using-git-worktrees`) using the **Branch** name
+   from preflight's summary — an explicit `TRACK_BRANCH` if you set one, otherwise the track slug. Never start on main.
+4. **Run the execution core — pick the mode with the guard.** Behavioral work that **adds or changes**
+   behavior (a test obligation, a trust boundary, or a correctness/security criterion) →
+   **[Story Mode](#story-mode-optional--story-scoped-phased-tdd)**. Behavior-**preserving** change to
+   existing behavioral code (rename/extract/restructure, no contract change) →
+   **[Refactor Mode](#refactor-mode-optional--behavior-preserving-keep-green)**. Pure non-behavioral
+   bootstrap → **[Scaffold Mode](#scaffold-mode-optional--batch-in-session-fan-out)**. Story and
+   refactor modes delegate their green phase to `subagent-driven-development`; this skill never re-runs
+   SDD, it only closes SDD's two gaps: (a) SDD's test-first is opt-in, so story mode supplies the
+   failing tests up front via the RED batch (refactor mode instead pins the existing suite green up
+   front); (b) SDD's stage-2 review is quality-only, so every review also applies the standing
+   **governance** — the project constitution (`.specify/memory/constitution.md`, if present) and the
+   `.github/instructions/*` whose `applyTo` globs match the changed files — and any trust-boundary
+   change additionally applies `security-and-owasp.instructions.md`.
+
+   *Self-reported trace (optional):* at the top of each core step call
+   [`scripts/track-note.sh`](scripts/track-note.sh)` skill <name> [step]` to append an ordered
+   `skills[]` entry, and once per RED→GREEN→review cycle call `track-note.sh loop <phase>` to bump the
+   `iterations` counter. These are the model's **own claim** (tagged `self_reported:true` /
+   `iterations_self_reported:true`), not hook-observed — no hook can see a skill name or a reasoning
+   loop. Skip them if you don't want a self-attested trace; the mechanical hooks are unaffected.
 5. **Freeze & verify-all** — once the last task's review passes, make **no further edits**, then run
    every required evidence kind (`go-test`, `pg`, `redis`, …) back-to-back so all captures share the
    **same** fingerprint. Any change after this — including a review-driven fix — invalidates the
-   convergence and requires re-running all kinds. Skipping this is safe but wasteful (the gate bounces
-   stale lanes until you re-run them).
+   convergence and requires re-running all kinds.
 6. **Evidence gate** (`verification-before-completion`) — paste real command output; "all green"
    without pasted output is not done.
-7. **Update the run artifact** if your workflow tracks one (`runs/<run-id>.json`, handoff notes).
+7. **Update the run artifact** if your workflow tracks one (`runs/<run-id>.json`, handoff notes). If
+   you logged the self-reported trace in Step 4, `skills[]` (ordered skill activations) and
+   `iterations` (loop count) now live in the record alongside the hook-observed `tool_calls` / `trace[]`
+   / `evidence[]` — read them together, but never conflate the self-reported fields with the mechanical
+   ones.
 8. **Draft-PR finish** — open a **draft** PR and stop. This **replaces** SDD's call to
    `finishing-a-development-branch`; the worker never reaches its merge menu. Integration/merge is
-   owned by repo process/CI.
+   owned by repo process/CI. Once the PR is open, run `track-preflight.sh --complete` to stamp
+   `completed_utc` + `duration_secs` (now − `created_utc`) onto the breadcrumb — write-once, the one
+   deliberate boundary that knows the run's total wall-clock (a per-event hook never sees PR handoff).
 
 ## Skill-Per-Step Map
 
@@ -80,10 +119,12 @@ loop. See the [skill-per-step map](#skill-per-step-map) for which superpower ski
 | 2 Reconcile | `track-reconcile.sh` (bundled) |
 | 3 Isolate | `using-git-worktrees` |
 | 4 Core — **story** RED author | `dispatching-parallel-agents` |
-| 4 Core — **story** RED review + freeze | `requesting-code-review` + `security-and-owasp` |
+| 4 Core — **story** RED review + freeze | `requesting-code-review` + governance (constitution + matched `.github/instructions/*`) + `security-and-owasp` |
 | 4 Core — **story** incremental green | `subagent-driven-development` (→ `test-driven-development`, `requesting-code-review`) |
+| 4 Core — **refactor** pin-green + characterize | `dispatching-parallel-agents` + `requesting-code-review` |
+| 4 Core — **refactor** incremental transform (keep green) | `subagent-driven-development` (+ governance + `security-and-owasp` on trust boundaries) |
 | 4 Core — **scaffold** generate | `dispatching-parallel-agents` |
-| 4 Core — **scaffold** review | `requesting-code-review` |
+| 4 Core — **scaffold** review | `requesting-code-review` + governance (constitution — hard gate) |
 | 5–6 Converge & gate | `verification-before-completion` |
 | 8 Finish | draft PR — **overrides** `finishing-a-development-branch` |
 
@@ -96,8 +137,22 @@ Invariants this skill asserts; most are *realized by* SDD's loop, not re-run her
   can't see test-first ordering), backstopped by the RED gate (tests must fail first) and the evidence
   gate (they must end green). Scaffold mode is the sole exemption — its guard proved nothing is
   behavioral.
+- **Behavior-preserving work is keep-green, not red-first**: refactor mode is the third core — it
+  never authors a failing RED suite. It pins the existing suite green up front (adding characterization
+  tests that must pass *immediately* where coverage of the touched surface is thin), then holds it
+  green through every transform step. A red test mid-refactor signals a behavior change and must route
+  to story mode; greening it by editing a behavioral/contract test is a false green.
+- **Governance gate — hard, in every mode (incl. scaffold)**: each mode's review must apply the repo's
+  standing governance on top of the quality rubric — (a) the **project constitution**
+  (`.specify/memory/constitution.md`, if the repo has one) as a *hard* gate: a diff that violates a
+  stated principle fails review in **every** mode; (b) whichever **`.github/instructions/*`** files'
+  `applyTo` globs match the changed files (e.g. `go` for `**/*.go`, `reactjs`/`state-management` for
+  `**/*.tsx`), applied to the diff even when the reviewer didn't author the file. This is a
+  prompt-level review invariant (no hook can read principle compliance) and **no-ops only when those
+  files genuinely don't exist**, never by omission.
 - **Security review required** at stage 2 for trust-boundary changes: the `requesting-code-review`
-  rubric is quality-only, so the reviewer must also apply `security-and-owasp.instructions.md`.
+  rubric is quality-only, so the reviewer must also apply `security-and-owasp.instructions.md` (the
+  security leg of the governance gate above).
 - **Maker/checker required**: the stage-1/stage-2 reviewer must be a subagent distinct from the
   implementer (SDD's two-stage review).
 - **Resume from durable state, not memory**: an interrupted run reconciles from committed history +
@@ -145,6 +200,14 @@ Invariants this skill asserts; most are *realized by* SDD's loop, not re-run her
 - **In story mode, the RED suite is frozen after review — never green by weakening a test.** Deleting
   an assertion, loosening a matcher, or `skip`-ing a case is a false green. A genuinely wrong test
   routes back through the RED review gate, never edited silently mid-green.
+- **A refactor that goes red has changed behavior — it is wrong, not "almost done".** Refactor mode's
+  invariant is keep-green; a red test mid-transform means you altered observable behavior (route to
+  story mode) or broke something. Never green it by editing a behavioral/contract test. Only
+  implementation-coupled unit tests may move in lockstep with the code, and that move goes through
+  maker/checker review to prove it is coupling, not a silent behavior edit.
+- **Characterization tests must pass at baseline.** In refactor mode they pin *current* behavior — the
+  mirror of a RED batch — so one that fails before you touch anything is a wrong test (or a real bug,
+  which is story-mode work), never a licence to change behavior to make it green.
 
 ## Hooks (Optional, Composable) — Bundle Owned Here
 
@@ -222,6 +285,42 @@ per-increment green review).
 See [`references/story-mode.md`](references/story-mode.md) for the full flow, the skill-per-step map,
 the freeze rule, and the incremental-vs-big-bang rationale.
 
+## Refactor Mode (Optional) — Behavior-Preserving Keep-Green
+
+For **behavior-preserving change to existing behavioral code** — rename, extract, inline, de-duplicate,
+restructure, move, or retype with **no change to observable behavior or public contract** — swap the
+SDD per-task loop for a keep-green core. This is the **third sibling** of scaffold and story mode and
+the **inverse of story mode**: story mode starts RED (new failing tests) and drives to green; refactor
+mode starts GREEN and **stays green** the whole way. Scaffold mode refuses anything behavioral; story
+mode *adds* behavior; refactor mode *touches* behavioral code but adds none.
+
+1. **Guard** — confirm the change is behavior-preserving: no new/changed behavior, no altered
+   request/response or persistence contract, no new trust-boundary surface. New or changed behavior →
+   **story mode**. A bugfix is **not** a refactor (it changes wrong behavior) → story mode N=1. Pure
+   non-behavioral bootstrap → **scaffold mode**.
+2. **Pin green + characterize** (`dispatching-parallel-agents` + `requesting-code-review`) — run the
+   existing suite over the surface and confirm it is green *before touching anything*. Where coverage
+   of the code you're about to move is thin, author **characterization tests first** — the mirror of
+   the RED batch: they must **pass immediately** (they pin current behavior). A characterization test
+   that fails at baseline is a wrong test, not a found bug — route it back; never change behavior to
+   green it. Review, then **freeze** this safety net.
+3. **Transform incrementally** (`subagent-driven-development`, + `security-and-owasp` on trust
+   boundaries) — apply the refactor in small reviewable steps; after **every** step the whole suite
+   stays green. No long red period — a refactor that goes red has changed behavior (it is wrong, or it
+   was story work in disguise). Behavioral/contract tests are frozen; only implementation-coupled unit
+   tests may move in lockstep with the code, and that move goes through maker/checker review to prove
+   it is coupling, not a silent behavior edit.
+4. **Converge & verify-all** (`verification-before-completion`) — freeze, run the whole suite + every
+   evidence kind on one fingerprint, and confirm the public contract is unchanged. Definition of Done:
+   **same behavior, clearer structure** — the suite that passed at Step 2 still passes, untouched.
+
+Preflight, isolation, run-log/`RUN_ID`, hooks, and the draft-PR boundary are reused unchanged. TDD's
+red→green is replaced by keep-green (characterization + never-red transform); the two-stage review is
+kept (characterization review up front + per-step transform review, + security on trust boundaries).
+
+See [`references/refactor-mode.md`](references/refactor-mode.md) for the full flow, the
+behavior-preserving guard, the freeze/keep-green rule, and the characterization-vs-RED contrast.
+
 ## Composition Contract
 
 When composed by a parallel orchestrator, this skill's gates may be **tightened** by overlays such
@@ -246,5 +345,8 @@ run-id/trace requirements.
 - [`references/story-mode.md`](references/story-mode.md) — optional story-scoped phased-TDD core for
   behavioral user-story stages (Spec Kit `### Tests` + `### Implementation` split): the RED-batch →
   freeze → incremental-green flow, the skill-per-step map, and the incremental-vs-big-bang rationale.
+- [`references/refactor-mode.md`](references/refactor-mode.md) — optional behavior-preserving
+  keep-green core for refactors (rename/extract/restructure with no behavior change): the guard, the
+  characterization safety-net, the never-go-red transform rule, and the keep-green-vs-RED-first contrast.
 - Related orchestrator: `../executing-parallel-tracks/SKILL.md` (dispatches one run of this skill
   per track and layers parallel-only overlays).

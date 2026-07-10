@@ -34,13 +34,17 @@ evidence gate, the draft-PR finish — is unchanged.
 
 Story mode is the **mirror image** of [scaffold mode](scaffold-mode.md): scaffold mode is for the
 *non-behavioral* edges of a plan and **refuses** anything with a test obligation or trust boundary;
-story mode is for the *behavioral, security-critical heart* and **requires** exactly those.
+story mode is for the *behavioral, security-critical heart* and **requires** exactly those. Its own
+mirror is [refactor mode](refactor-mode.md), the *keep-green* sibling: story mode starts RED (new
+failing tests) and drives to green, whereas refactor mode starts GREEN and stays green because it adds
+no behavior. Any work that **changes or adds** behavior (including a bugfix) is story mode;
+behavior-**preserving** restructuring is refactor mode.
 
 | | Scaffold mode | **Story mode** |
 |---|---|---|
 | Eligibility guard | refuse if any task is behavioral / trust-boundary | **require** a story stage with a `### Tests` + `### Implementation` split |
 | Tests | dropped (nothing to test) | **batched up front (RED), then reviewed and frozen** |
-| Review | quality-only (guard cleared trust boundaries) | quality **+ security** (`security-and-owasp.instructions.md`) — mandatory |
+| Review | quality **+ governance** (constitution — hard gate) | quality **+ governance + security** (`security-and-owasp.instructions.md`) — mandatory |
 | Green phase | n/a | **incremental** — each impl task/cluster flips an identifiable subset green |
 | TDD | dropped | **kept, at story scope** (RED batch = the story's failing acceptance suite) |
 
@@ -103,8 +107,9 @@ reason" is a silent hole; assert real red before proceeding.
 
 A batch of unreviewed tests is worse than no tests: it manufactures false confidence, and here the
 tests define **security** behavior (access-scope, injection resistance, memory clearance). So the RED
-suite gets a full `requesting-code-review` pass **plus** `security-and-owasp.instructions.md` *before*
-any implementation. After this gate the tests are **frozen**: the green phase may add production code
+suite gets a full `requesting-code-review` pass **plus** the governance gate — the project
+constitution (hard) and any `.github/instructions/*` matching the changed files — **plus**
+`security-and-owasp.instructions.md` *before* any implementation. After this gate the tests are **frozen**: the green phase may add production code
 only. **Greening by weakening a test — deleting an assertion, loosening a matcher, `skip`-ing a
 case — is forbidden.** If a test is genuinely wrong, route the fix back through this RED review gate;
 never edit it silently mid-green.

@@ -36,7 +36,7 @@ exit code `2` (stderr → model) or `hookSpecificOutput.permissionDecision: "den
 
 | Pipeline gate | Bundled script (event) | What it does |
 |---|---|---|
-| Start gate / mint-or-recover RUN_ID | `track-preflight.sh` (manual / skill Step 0a) | **Start gate.** `inspect` mints a stable `RUN_ID` = `<UTC>_<track>` on a fresh start, or **recovers** it from an existing `runs/<id>.dispatch` breadcrumb (resume), then checks prerequisites (git tree, `runs/` writable, opt. `gh` auth + `PREFLIGHT_REQUIRE_TOOLCHAIN` bins). Prints a confirm summary + JSON; **hard-fails non-zero** on any unmet prereq (both interactive and `auto_confirm`). `--commit` persists the breadcrumb (track, tasks, branch, base ref) so resume is self-recovering. Run by the skill, not a hook, since it precedes RUN_ID. |
+| Start gate / mint-or-recover RUN_ID | `track-preflight.sh` (manual / skill Step 0a) | **Start gate.** `inspect` mints a stable `RUN_ID` = `<UTC>_<track>` on a fresh start, or **recovers** it from an existing `runs/<id>.dispatch` breadcrumb (resume), then checks prerequisites (git tree, `runs/` writable, opt. `gh` auth + `PREFLIGHT_REQUIRE_TOOLCHAIN` bins). Prints a confirm summary + JSON; **hard-fails non-zero** on any unmet prereq (both interactive and `auto_confirm`). `--commit` persists the breadcrumb (track, tasks, branch, base ref, plus the confirmed writable scope, frozen paths, required toolchain, and evidence floor with their `*_set` flags) so resume is self-recovering and the artifact records exactly what the human confirmed. `--complete` (at draft-PR handoff) stamps `completed_utc` + `duration_secs` (now − `created_utc`) onto the breadcrumb — write-once, the honest home for the run's total wall-clock. Run by the skill, not a hook, since it precedes RUN_ID. |
 | Resume / reconcile after interruption | `track-reconcile.sh` (`SessionStart`/`agentStart`) | **Read-only** preflight: from committed history + `runs/<RUN_ID>.json` only, emit `{head, dirty_worktree, evidence:{fresh,stale,missing,failed}, resumable}` at the current fingerprint — so a crashed/credit-out run resumes at the first not-done task and stashes untrusted uncommitted work, instead of the model guessing where it left off. Self-recovers `RUN_ID` from the `runs/<id>.dispatch` breadcrumb when none is exported. No-op unless a `RUN_ID` is set or recoverable. Mirrors `track-evidence-gate.sh`'s fingerprint logic exactly. |
 | Scope / never edit frozen entrypoints | `track-guard.sh` (`PreToolUse`) | **Deny** an edit whose target path is outside `TRACK_ALLOWED_PREFIXES` or hits a `TRACK_FROZEN_PATHS` entrypoint (deny-by-default, per worktree). |
 | Never hand-edit generated or applied artifacts | `track-guard.sh` (`PreToolUse`) | **Deny** edits to any file carrying a `GENERATED — DO NOT EDIT` banner (re-run the generator), and to already-committed files under `TRACK_IMMUTABLE_PREFIXES` (e.g. applied migrations — add a NEW file instead). A brand-new file under the prefix is allowed. |
@@ -93,6 +93,7 @@ export TRACK_FROZEN_PATHS="cmd/main.go:internal/app/app.go" # guard: frozen entr
 export RUNS_DIR="runs"                                       # RUN_ID keys the record + runs/<id>.dispatch breadcrumb. GITIGNORE THIS DIR: it's local run state, and if tracked, evidence writes shift the fingerprint (gate sees its own capture as STALE) and reconcile reads the tree as dirty (see Gotchas).
 # OPTIONAL — each stays off until set
 export TRACK_ID="setup"                                     # preflight: track slug for breadcrumb resume-matching
+export TRACK_BRANCH="feat/setup-foundation"                # preflight: target branch name to work to (empty = derive from the track slug); validated with git check-ref-format
 export PREFLIGHT_REQUIRE_GH=1                               # preflight: require authenticated gh (0 to waive for early setup runs)
 export PREFLIGHT_REQUIRE_TOOLCHAIN="go,uv"                  # preflight: extra bins that must be on PATH
 export TRACK_IMMUTABLE_PREFIXES="migrations/"               # guard: committed files here are append-only
@@ -124,8 +125,11 @@ hook *and* its env are set — launch without them and the run still works but r
 | Recorded | Field | Written on | Source |
 |---|---|---|---|
 | Schema version | `v` (integer, currently `1`) | first hook to touch the record | any writer — all seed the **same** canonical skeleton `{run_id, v, trace, evidence, tool_calls}` |
+| Heartbeat | `started_ts` (first event) / `last_ts` (latest event) | **every** hook write (`track-meter.sh` / `track-trace.sh` / `track-evidence.sh`) | orchestrator derives **idle/staleness** = `now − last_ts` (a hung/crashed worker stops advancing it — the count-based caps can't see that) and **run wall-clock** = `last_ts − started_ts`. Resolution = frequency of whichever hooks are enabled: `track-trace.sh` (RUN_ID-only) stamps on subagent boundaries; set `TRACK_MAX_TOOL_CALLS` so `track-meter.sh` stamps on **every** tool call for finer granularity. |
 | Tool-call count | `tool_calls` (running integer) | **every** `PostToolUse` | `track-meter.sh` — `+1` per call; halts at `TRACK_MAX_TOOL_CALLS` |
 | Subagent spawn/stop timeline | `trace[]` (`{t, kind, event, agent_id, agent_type}`) | `SubagentStart` / `SubagentStop` | `track-trace.sh` |
+| **Self-reported** skill order | `skills[]` (`{t, skill, step, self_reported:true}`) | skill calls `track-note.sh skill …` at each core step | `track-note.sh` — the model's **own claim**, not hook-observed (no hook can see a skill name). Provenance-tagged so it can't be mistaken for verified truth. |
+| **Self-reported** loop count | `iterations` (integer) + `iterations_self_reported:true` (+ optional `iteration_log[]`) | skill calls `track-note.sh loop …` once per RED→GREEN→review cycle | `track-note.sh` — asserted by the model; hooks never see a reasoning loop. `tool_calls` remains the only mechanical turns-proxy. |
 | Test evidence | `evidence[]` (`{t, kind, cmd, response, fingerprint}`) | `PostToolUse` matching a **test** command only | `track-evidence.sh` |
 | Terminal state | `status` (`no-progress` only) | when the tool-call ceiling trips | `track-meter.sh` — the **only** hook that writes `status` |
 
@@ -133,9 +137,14 @@ hook *and* its env are set — launch without them and the run still works but r
 
 - **No loop / review-iteration count.** The TDD + 2-stage-review loop and the `self_heal_attempts`
   cap live inside SDD's in-context reasoning; hooks never see review rounds. `tool_calls` is the only
-  (approximate) "turns" proxy.
+  (approximate) "turns" proxy. *(A skill may **self-report** a loop count via `track-note.sh loop` —
+  stored as `iterations` + `iterations_self_reported:true` — but that is the model's claim, not a
+  hook-observed fact.)*
 - **No token or cost data.** Hook I/O carries none, so only a **tool-call** ceiling is enforceable
   here; token/$ ceilings stay orchestrator-side.
+- **No per-tool `duration_ms`.** A `PostToolUse` hook fires only *after* a call and gets no start
+  time, so a single call's duration isn't measurable here. Use `last_ts − started_ts` for run
+  wall-clock and the gaps between consecutive `trace[]` timestamps to approximate per-step duration.
 - **No per-tool argument log.** `tool_calls` is a bare counter; non-test tool calls (reads, `ls`,
   edits) tick it but are not itemized. Only **test** commands land in `evidence[]`.
 - **`response` is textual, not an exit code.** `PostToolUse` exposes a (possibly truncated) text

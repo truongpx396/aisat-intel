@@ -11,6 +11,9 @@
 #                        missing dep is not a preference, it blocks in every mode.
 #   --commit           — persist runs/<RUN_ID>.dispatch (the breadcrumb) after the caller
 #                        has confirmed. Idempotent: re-committing the same id is a no-op.
+#   --complete         — stamp completed_utc + duration_secs (now − created_utc) onto the
+#                        breadcrumb at draft-PR handoff. Write-once; the honest home for
+#                        "total run time" (a per-event hook never sees PR handoff).
 #
 # Inputs (env or args):
 #   TRACK_ID     short track slug (e.g. setup, us1). REQUIRED.
@@ -18,6 +21,8 @@
 #   RUN_ID       override the minted id (rare). If a breadcrumb for this TRACK_ID already
 #                exists, its id WINS (resume) unless RUN_ID is set explicitly.
 #   RUNS_DIR     default "runs".
+#   TRACK_BRANCH target branch name to work to. Optional — empty derives it from the track
+#                slug. Validated with `git check-ref-format` so a bad name fails here.
 #   TRACK_BASE_REF / default_branch  base for the new branch (summary only; default main).
 #   PREFLIGHT_REQUIRE_TOOLCHAIN  comma list of extra bins to require (e.g. "go,uv,node").
 #   PREFLIGHT_REQUIRE_GH         "1" (default) to require an authenticated gh; "0" to skip
@@ -45,6 +50,7 @@ for a in "$@"; do
   case "$a" in
     --commit) mode="commit" ;;
     --inspect) mode="inspect" ;;
+    --complete) mode="complete" ;;
   esac
 done
 
@@ -52,7 +58,12 @@ RUNS_DIR="${RUNS_DIR:-runs}"
 track="${TRACK_ID:-}"
 tasks="${TASKS:-}"
 base="${TRACK_BASE_REF:-${default_branch:-main}}"
+branch_override="${TRACK_BRANCH:-}"          # arbitrary target branch name; empty = derive from the track slug
 require_gh="${PREFLIGHT_REQUIRE_GH:-1}"
+allowed_prefixes="${TRACK_ALLOWED_PREFIXES:-}"   # writable scope the guard enforces; derived from the task file set upstream
+frozen_paths="${TRACK_FROZEN_PATHS:-}"           # exact entrypoints no task may edit
+require_toolchain="${PREFLIGHT_REQUIRE_TOOLCHAIN:-}"  # bins this task needs on PATH; derive from the task's languages so a missing tool fails HERE, not mid-run
+required_evidence="${TRACK_REQUIRED_EVIDENCE:-}"      # evidence floor required on EVERY diff; empty = rules-only (weaker gate)
 
 err() { printf '%s\n' "preflight: $1" >&2; }
 die() { err "$1"; exit 1; }
@@ -161,7 +172,14 @@ if [ -n "${labels// /}" ]; then
 fi
 config_warn="$(printf '%s' "$config_warn" | sed 's/^ *//')"
 
-branch="$track"
+# Target branch: an explicit TRACK_BRANCH wins; otherwise derive from the track slug.
+# Validate an explicit name with git's own ref rules so a bad name fails HERE (at the
+# start gate), not mid-run when the worktree step tries to create it.
+branch="${branch_override:-$track}"
+if [ -n "$branch_override" ]; then
+  git check-ref-format --branch "$branch_override" >/dev/null 2>&1 \
+    || die "TRACK_BRANCH '$branch_override' is not a valid git branch name."
+fi
 prereq_ok=true; [ -n "$missing" ] && prereq_ok=false
 
 # --- commit phase: persist the breadcrumb, then exit -------------------------------
@@ -174,14 +192,54 @@ if [ "$mode" = "commit" ]; then
       --arg run_id "$run_id" --arg track "$track" --arg tasks "$tasks" \
       --arg branch "$branch" --arg base "$base" \
       --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      '{run_id:$run_id, track:$track, tasks:$tasks, branch:$branch, base_ref:$base, created_utc:$created}' \
+      --arg allowed "$allowed_prefixes" --arg frozen "$frozen_paths" \
+      --arg toolchain "$require_toolchain" --arg required_evidence "$required_evidence" \
+      '{run_id:$run_id, track:$track, tasks:$tasks, branch:$branch, base_ref:$base, created_utc:$created,
+        allowed_prefixes:($allowed | if . == "" then [] else split(":") end),
+        frozen_paths:($frozen | if . == "" then [] else split(":") end),
+        scope_set:($allowed != ""),
+        require_toolchain:($toolchain | if . == "" then [] else split(",") end),
+        toolchain_set:($toolchain != ""),
+        required_evidence:($required_evidence | if . == "" then [] else split(",") end),
+        evidence_floor_set:($required_evidence != "")}' \
       > "$rec_dispatch"
   fi
   printf '%s\n' "$run_id"
   exit 0
 fi
 
-# --- inspect phase: human summary (stderr) + machine JSON (stdout) ------------------
+# --- complete phase: stamp the terminal breadcrumb, then exit ----------------------
+# Called ONCE at draft-PR handoff — the one deliberate step that knows the run is done.
+# Writes completed_utc + duration_secs (now − created_utc) into the existing breadcrumb.
+# Write-once: re-completing a stamped run is a no-op, so a resume can't overwrite the
+# original finish time. This is the honest home for "total run time" — a single stamp at
+# a real boundary, not a per-event hook (a PostToolUse hook never sees PR handoff).
+if [ "$mode" = "complete" ]; then
+  [ -f "$rec_dispatch" ] || die "cannot complete — no breadcrumb at $rec_dispatch (run --commit first)."
+  if [ "$(jq -r '.completed_utc // empty' "$rec_dispatch" 2>/dev/null)" != "" ]; then
+    printf '%s\n' "preflight: breadcrumb already completed ($rec_dispatch) — no-op." >&2
+    printf '%s\n' "$run_id"
+    exit 0
+  fi
+  now_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  created="$(jq -r '.created_utc // empty' "$rec_dispatch" 2>/dev/null)"
+  # Portable ISO-8601-UTC → epoch (BSD/macOS `date -j -f`; GNU `date -d`). Either failing
+  # leaves duration null rather than aborting the handoff over a clock-parse quirk.
+  to_epoch() { date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null || date -u -d "$1" +%s 2>/dev/null || echo ""; }
+  dur="null"
+  if [ -n "$created" ]; then
+    c_epoch="$(to_epoch "$created")"; n_epoch="$(to_epoch "$now_utc")"
+    if [ -n "$c_epoch" ] && [ -n "$n_epoch" ] && [ "$n_epoch" -ge "$c_epoch" ]; then
+      dur="$(( n_epoch - c_epoch ))"
+    fi
+  fi
+  tmp="$(mktemp)"
+  jq --arg done "$now_utc" --argjson dur "$dur" \
+    '.completed_utc = $done | .duration_secs = $dur' "$rec_dispatch" >"$tmp" && mv "$tmp" "$rec_dispatch"
+  printf '%s\n' "$run_id"
+  exit 0
+fi
+
 {
   echo "PREFLIGHT — single-branch-development"
   echo "  Mode:         $([ "$resume" = true ] && echo 'RESUME (breadcrumb found)' || echo 'START (fresh)')"
@@ -189,8 +247,24 @@ fi
   echo "  Tasks:        ${tasks:-<unspecified>}"
   echo "  RUN_ID:       $run_id $([ "$resume" = true ] && echo '(recovered)' || echo '(generated)')"
   [ -n "$existing_file" ] && echo "  Breadcrumb:   $existing_file"
-  echo "  Branch:       $branch"
+  echo "  Branch:       $branch  $([ -n "$branch_override" ] && echo '(TRACK_BRANCH — custom)' || echo '(derived from track slug)')"
   echo "  Base ref:     $base"
+  if [ -n "$allowed_prefixes" ]; then
+    echo "  Scope:        $allowed_prefixes  (guard denies edits outside this)"
+  else
+    echo "  Scope:        ⚠ TRACK_ALLOWED_PREFIXES UNSET — guard fails closed (denies ALL edits). Derive + set the writable scope from the task file set before dispatch."
+  fi
+  [ -n "$frozen_paths" ] && echo "  Frozen:       $frozen_paths  (no task may edit)"
+  if [ -n "$require_toolchain" ]; then
+    echo "  Toolchain:    $require_toolchain  (required on PATH — a missing bin blocks here)"
+  else
+    echo "  Toolchain:    (none required) — derive from the task's languages so a missing tool fails here, not mid-run"
+  fi
+  if [ -n "$required_evidence" ]; then
+    echo "  Evid. floor:  $required_evidence  (required on every diff regardless of rules)"
+  else
+    echo "  Evid. floor:  ⚠ TRACK_REQUIRED_EVIDENCE UNSET — gate is rules-only (no floor). Derive the mandatory kinds from the task's languages if any must run on every diff."
+  fi
   if [ "$prereq_ok" = true ]; then
     echo "  Prereqs:      OK (git ✓ · runs/ ✓ writable$([ "$require_gh" = 1 ] && echo ' · gh ✓ authed')${PREFLIGHT_REQUIRE_TOOLCHAIN:+ · $PREFLIGHT_REQUIRE_TOOLCHAIN ✓})"
     echo "  → Proceed?    confirm to dispatch (then re-run with --commit to persist the breadcrumb)"
@@ -207,9 +281,18 @@ jq -nc \
   --argjson resume "$resume" --argjson prereq_ok "$prereq_ok" \
   --arg missing "$missing" --arg breadcrumb "$existing_file" \
   --arg config_warn "$config_warn" \
+  --arg allowed "$allowed_prefixes" --arg frozen "$frozen_paths" \
+  --arg toolchain "$require_toolchain" --arg required_evidence "$required_evidence" \
   '{run_id:$run_id, track:$track, tasks:$tasks, branch:$branch, base_ref:$base,
     mode:(if $resume then "resume" else "start" end),
     prereq_ok:$prereq_ok,
+    allowed_prefixes:($allowed | if . == "" then [] else split(":") end),
+    frozen_paths:($frozen | if . == "" then [] else split(":") end),
+    scope_set:($allowed != ""),
+    require_toolchain:($toolchain | if . == "" then [] else split(",") end),
+    toolchain_set:($toolchain != ""),
+    required_evidence:($required_evidence | if . == "" then [] else split(",") end),
+    evidence_floor_set:($required_evidence != ""),
     missing:($missing | if . == "" then [] else split(" ") end),
     config_warnings:($config_warn | if . == "" then [] else split(" ") end),
     breadcrumb:($breadcrumb | if . == "" then null else . end)}'
