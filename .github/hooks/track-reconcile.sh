@@ -27,6 +27,12 @@
 # branches on nothing tool-specific. Wire it at SessionStart / agentStart, or run it by
 # hand at the top of a resumed session.
 #
+# NOTE (manual runs): this script reads stdin (`cat` below). A hook surface always closes
+# stdin, but running it by hand in an interactive terminal makes that read block on the
+# TTY, which looks like a hang. Redirect an empty/JSON stdin when invoking manually, e.g.:
+#     RUN_ID=... ./track-reconcile.sh < /dev/null
+#     echo '{}' | RUN_ID=... ./track-reconcile.sh
+#
 # Requires: jq, git. Keep runtime < 5s.
 set -eufo pipefail
 
