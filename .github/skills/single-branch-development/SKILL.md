@@ -216,6 +216,15 @@ Invariants this skill asserts; most are *realized by* SDD's loop, not re-run her
 - **`[P]` is *not* the scaffold trigger.** `[P]` marks file-disjointness, not non-behavioral-ness — it
   sits on security-critical tasks too. Scaffold mode keys on an explicit `scaffold_only` batch + the
   guard; any test obligation or trust boundary refuses the whole batch to story mode.
+- **In scaffold mode the controller *applies* file bodies — it never *authors* them.** Step 2
+  generation is **delegated** to N read-only subagents that return each body as text; Step 3 the
+  controller applies them as sole writer. Writing the files yourself with `create_file` — because
+  they're "just trivial config" and a subagent-per-file feels like overkill — silently collapses the
+  two roles and **skips the fan-out entirely** (the exact failure mode this mode exists to prevent).
+  "Same converged tree" is not the point: the *delegation* is the discipline. Step 3's "controller is
+  the only writer" means it is **only** a writer, never the generator. Read
+  [`references/scaffold-mode.md`](references/scaffold-mode.md) **before** executing Step 4 — the SKILL
+  body is only a summary; the mode reference is the binding spec.
 - **In story mode, the RED suite is frozen after review — never green by weakening a test.** Deleting
   an assertion, loosening a matcher, or `skip`-ing a case is a false green. A genuinely wrong test
   routes back through the RED review gate, never edited silently mid-green.
@@ -254,8 +263,11 @@ disjointness for parallel-generation latency:
 1. **Guard** — assert every batched task is non-behavioral; **refuse the whole batch** (→ story mode)
    if any task has a test obligation, touches a trust boundary, or carries a security/correctness
    criterion.
-2. **Fan out generation** (`dispatching-parallel-agents`) — N **read-only** subagents each return a
-   file body as text; none writes to disk, runs tests, or commits.
+2. **Fan out generation** (`dispatching-parallel-agents`) — one **read-only** subagent per
+   **independent domain / disjoint-file cluster** (not one-per-file, not one-per-task) returns its
+   file bodies as text; none writes to disk, runs tests, or commits. A single file written by two
+   tasks (e.g. a `pyproject.toml` holding both deps and lint config) stays in **one** agent; two
+   agents must never share a target file.
 3. **Apply** all bodies at once (controller = single writer) → one converged tree.
 4. **One `verification-before-completion` capture** — build + lint + bring-up health check; paste
    output. This proves the scaffold *works*.

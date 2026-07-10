@@ -60,8 +60,10 @@ core differs:
 ```
 0.  Preflight & isolate branch                                   [reuse: track-preflight.sh]
 1.  GUARD: assert every batched task is non-behavioral            [refuse → story mode]
-2.  FAN-OUT generate — N read-only subagents, one per [P] file,
-    each RETURNS a file body as a string (no disk writes)         [parallel ✅  dispatching-parallel-agents]
+2.  FAN-OUT generate — N read-only subagents, one per INDEPENDENT
+    DOMAIN / DISJOINT-FILE CLUSTER (not one-per-file, not
+    one-per-task), each RETURNS its file bodies as strings
+    (no disk writes)                                             [parallel ✅  dispatching-parallel-agents]
 3.  APPLY all returned bodies to the worktree at once             [serial, single writer, instant]
 4.  ONE batch verify against the converged tree:
     build (all runtimes) + lint + bring-up health check           [serial → verification-before-completion]
@@ -81,7 +83,7 @@ test-first cycle and no per-task implement↔review loop to run.
 | 0 | Preflight & mint `RUN_ID` | `track-preflight.sh` (this skill's bundle) | Durable run identity + prereq gate — a script, not a superpowers skill |
 | 0 | Isolate branch/worktree | `using-git-worktrees` | Never start on main; one branch, one worktree |
 | 1 | Eligibility guard | — (local refusal guard) | All-or-nothing non-behavioral assertion; routes to story mode on any hit |
-| 2 | Fan-out generation | `dispatching-parallel-agents` | N read-only subagents return file bodies in parallel — safe because nothing writes |
+| 2 | Fan-out generation | `dispatching-parallel-agents` | One subagent per independent domain / disjoint-file cluster returns its file bodies in parallel — safe because nothing writes |
 | 3 | Apply bodies | — (controller = single writer) | Collapses N proposals into one tree; serial application, no skill |
 | 4 | Batch evidence | `verification-before-completion` | "Does it work" proof — real build/lint/bring-up output, not assertion |
 | 5 | Whole-diff review | `requesting-code-review` | "Is it correct" proof — quality-only rubric (the guard already cleared trust boundaries) |
@@ -95,16 +97,43 @@ yet be wrong, or read well yet never come up. Scaffold mode drops TDD and the tw
 
 ### Step 2 — parallel generation is safe because nothing writes
 
-The fan-out subagents are **read-only**: each receives one task's text + the relevant design-doc
-context and **returns the file body as text**. They do not touch the git index, do not run tests,
-do not commit. That is why in-session parallelism is safe here and *not* in story mode's serial green
-phase — there is no shared mutable worktree during generation, so none of the single-index /
-whole-tree-fingerprint hazards apply. (See the SKILL Gotcha on in-session fan-out.)
+The fan-out subagents are **read-only**: each receives its cluster's task text + the relevant
+design-doc context and **returns the file body (or bodies) as text**. They do not touch the git index,
+do not run tests, do not commit. That is why in-session parallelism is safe here and *not* in story
+mode's serial green phase — there is no shared mutable worktree during generation, so none of the
+single-index / whole-tree-fingerprint hazards apply. (See the SKILL Gotcha on in-session fan-out.)
+
+**The fan-out unit is an independent domain (a disjoint-file cluster) — NOT one-per-file, and NOT
+one-per-task.** This is the same rule `dispatching-parallel-agents` states: *one agent per independent
+problem domain*, not per file. Two facts force this:
+
+- **A file may be written by more than one task.** In a real Setup batch, one manifest often satisfies
+  two `[P]` tasks — e.g. a Python `pyproject.toml` holds both the *dependencies* task and the
+  *ruff/black lint config* task. "One agent per file" is undefined here (two tasks, one file) and
+  "one agent per task" is a race (two agents writing the same path). Both tasks belong to **one**
+  agent that owns that file, so the file stays internally consistent.
+- **A task may span several files.** A test-harness task can create Go, Python, and Playwright fixtures
+  at once; the frontend cluster owns `package.json` + `eslint`/`prettier` + `tsconfig` + `vite.config`
+  together. Splitting these across agents fragments a coherent config.
+
+So group the batch into **disjoint-file clusters** (natural seams: per-runtime, per-tool-surface,
+per-deploy-area), give each cluster to one subagent, and guarantee **no two agents share a target
+file**. `[P]` tells you tasks *can* run concurrently; the clustering tells you *how to slice the
+agents* without two of them racing the same path. If you cannot cleanly partition the files, the tasks
+are not disjoint and must not fan out.
 
 ### Step 3 — the controller is the only writer
 
 The controller applies every returned body in one pass. Single writer ⇒ no `.git/index.lock` race,
 deterministic tree. This is the moment the N parallel proposals collapse into **one** tree state.
+
+"The only writer" also means the controller is **only** a writer, never the generator. If you find
+yourself composing file contents from your own reasoning and saving them directly — skipping Step 2's
+read-only subagents because the files are "trivial config" or a subagent-per-file feels heavyweight —
+you have collapsed generate and apply into one role and **dropped the fan-out**. The delegation is the
+discipline, not an optimization to trade away: generation is delegated to the subagents, application
+is the controller's sole job. A converged tree that the controller authored itself is a scaffold-mode
+violation even though it "looks the same."
 
 ### Step 4 — batch evidence via `verification-before-completion` (do NOT skip)
 
@@ -140,7 +169,7 @@ the batch.)
 
 | Aspect | Story core | Scaffold core |
 |---|---|---|
-| Execution | Serial: RED batch → incremental green | **Parallel generate** → serial apply/land |
+| Execution | Serial: RED batch → incremental green | **Parallel generate (one agent per disjoint-file cluster)** → serial apply/land |
 | TDD (test-first) | Required — story-scoped RED batch | **Dropped** — nothing behavioral to test |
 | Review | RED review + per-increment spec/quality (+ security) | **One** whole-diff `requesting-code-review` |
 | Evidence | Whole story suite, converged via Step 2b/5 | **One** batch build/lint/bring-up capture — **kept** |
