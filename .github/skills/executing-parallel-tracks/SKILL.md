@@ -106,6 +106,8 @@ that must hold ("do not edit frozen entrypoints; do not delete existing tests"),
   "iterations": 12,
   "tokens": 48000,
   "cost_usd": 0.91,
+  "started_ts": "2026-06-26T14-03-11Z",  // first hook event — run wall-clock start
+  "last_ts": "2026-06-26T14-11-05Z",     // last hook event — now - last_ts = idle/staleness
   "blocker": "flaky Testcontainers Postgres startup",
   "next_step": "pin image tag; retry integration",
   "pr_url": null,
@@ -128,11 +130,27 @@ transcript: enough to see *which step* the worker was in when it failed, without
 
 ## Hard stops (enforced by the orchestrator)
 
-The #1 protection against runaway cost with N workers in flight. Enforce all four:
+The #1 protection against runaway cost with N workers in flight. Enforce all five:
 - **Max iterations** per worker (default 25 turns) → halt, `status: no-progress` if exceeded.
 - **No-progress detection** — if the verifier result hasn't moved in N passes (default 3), halt that worker `no-progress`. (Distinct from the self-heal cap, which counts *fix attempts*; this counts *stalled passes*.)
+- **Max idle** (heartbeat) — if `now − last_ts` exceeds a wall-clock threshold (default 15 min), halt that worker `no-progress`. This is the signal the other four MISS: a worker hung on a network call, deadlocked in a container, or silently crashed stops advancing `last_ts` while its iteration/pass/token counters also freeze — so it looks identical to a slow-but-working one to every *count-based* cap. Every hook stamps `last_ts` (see the run record), so the orchestrator computes staleness per tick with no extra plumbing. **Enforce this orchestrator-side, not in a hook** — a truly hung worker isn't firing hooks to self-halt.
 - **Per-worker token/\$ ceiling** → halt, `status: budget-exceeded`.
 - **Global token/\$ ceiling across ALL workers** → at N>1 this matters more than any single cap; halt the fleet when hit.
+
+### Failure taxonomy — route by class, don't feed everything to self-heal
+
+A worker's self-heal budget is for *task* failures only. Conflating the three classes below wastes
+fix attempts re-reasoning about a network blip, or lets a silent-but-wrong change through:
+
+- **Infra failure** (registry timeout, image-pull failure, worktree lock, OOM) → **bounded retry with
+  backoff at the orchestrator layer**, NOT the agent. The worker shouldn't reason about "npm timed
+  out"; the orchestrator retries the step and only escalates to the worker if retries exhaust. Do not
+  spend the self-heal budget on these.
+- **Task failure** (tests fail, build breaks, lint errors) → what the worker **should** see and
+  self-correct on, capped by the self-heal / no-progress limits above.
+- **Divergence failure** (technically green but wrong — out-of-scope refactor, deleted a file it
+  shouldn't) → the dangerous class because tests can still pass. Caught by the guard path-allowlist +
+  frozen paths (mechanical, pre-emptive) and the distinct adversarial verifier — never by retrying.
 
 ## Terminal states (name them explicitly)
 
@@ -177,6 +195,7 @@ export RUNS_DIR="runs"                                       # one shared dir; R
 # OPTIONAL — global; each stays off until set
 export TRACK_TEST_CMD_PATTERN="go test|uv run pytest|npm (run )?test"  # evidence
 export TRACK_MAX_TOOL_CALLS=200                                       # hard stop
+export TRACK_MAX_IDLE_SECS=900                                        # hard stop: heartbeat staleness (orchestrator-side)
 export TRACK_NOTIFY_WEBHOOK="https://hooks.slack.com/services/..."     # notify
 ```
 Per-track `TRACK_ALLOWED_PREFIXES` values must be **non-overlapping** across tracks — the
@@ -231,7 +250,7 @@ This orchestrator then applies the stricter parallel-only overlays:
 - **Distinct adversarial verifier required** — maker/checker must be a different subagent from the authoring worker; failed verifier -> run record + no PR.
 - **Draft-only, no-merge worker boundary** — workers may open draft PRs only; merge remains the merge gate's job.
 - **Run-id spine required** — run record + PR title/body + commit trailer stay trace-linked.
-- **Fleet controls required** — enforce concurrency cap, no-progress detector, and global budget ceiling across workers.
+- **Fleet controls required** — enforce concurrency cap, no-progress detector, idle/heartbeat detector (`now − last_ts`), and global budget ceiling across workers.
 
 ### 4. Per-track finish → DRAFT PR (autonomous, success only)
 
@@ -290,6 +309,7 @@ Start low; graduate only after weeks of clean runs.
 - **Lockfiles are derived** — regenerate, never hand-merge. The most common "conflict" is a no-op script, not a real merge.
 - **Frozen entrypoints** (`main.go` / `app.py`) must iterate a module registry; tracks self-register via their own files. Editing the entrypoint per track guarantees merge conflicts.
 - **Global budget > per-agent budget at N>1** — one runaway worker is cheap; ten are not. Enforce the fleet ceiling.
+- **A silent worker beats every count-based cap** — iteration, no-progress, and token caps only advance when the worker is *acting*; a hung/crashed/deadlocked worker freezes all three and looks identical to a slow-but-working one. Track **staleness** (`now − last_ts` from the run record's heartbeat), not just pass/fail, and enforce `TRACK_MAX_IDLE_SECS` orchestrator-side — a truly hung worker won't fire a hook to self-halt.
 - **Human review of MERGED code never leaves the loop** — no matter how good the adversarial verifier gets, "done" is still a claim, not a proof, and comprehension debt grows faster the more the fleet ships code you didn't write. The verifier gate lets you approve faster; it does not let you stop reading what landed on the default branch.
 - **Prefer CLIs over heavy MCP servers inside workers** — a single broad MCP can burn ~20k+ tokens of a worker's context before it does any work, and context bloat is a top cause of quality decay and cost blowups over a long run. Give workers named CLIs (self-documenting via `--help`, ~zero context) and reserve MCP for tools with no CLI equivalent.
 - **Cap concurrency to the manifest value** — Docker resource exhaustion shows up as flaky timeouts, misread as logic bugs.

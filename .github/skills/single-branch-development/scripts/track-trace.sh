@@ -41,7 +41,9 @@ mkdir -p "$RUNS_DIR"
 
 ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 tmp="$(mktemp)"
+# Append the event AND refresh the heartbeat (started_ts once, last_ts every event) so
+# now - last_ts stays a usable idle signal even between tool calls.
 jq --arg t "$ts" --arg e "$ev" --arg id "$aid" --arg ty "$atype" \
-  '.trace = ((.trace // []) + [{t:$t, kind:"subagent", event:$e, agent_id:$id, agent_type:$ty}])' \
+  '.trace = ((.trace // []) + [{t:$t, kind:"subagent", event:$e, agent_id:$id, agent_type:$ty}]) | .started_ts = (.started_ts // $t) | .last_ts = $t' \
   "$rec" >"$tmp" && mv "$tmp" "$rec"
 exit 0

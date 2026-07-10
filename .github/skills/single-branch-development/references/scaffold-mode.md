@@ -1,8 +1,10 @@
 # Scaffold Mode (Optional) — Batch In-Session Fan-Out
 
-Scaffold mode is **one of the skill's two execution cores** (the other is [story mode](story-mode.md)).
-Story mode handles all behavioral work — it authors a failing RED test batch, then greens
-implementation via `subagent-driven-development` (SDD). Scaffold mode is the **non-behavioral
+Scaffold mode is **one of the skill's three execution cores** (the others are
+[story mode](story-mode.md) and [refactor mode](refactor-mode.md)).
+Story mode handles behavioral work that adds or changes behavior — it authors a failing RED test batch,
+then greens implementation via `subagent-driven-development` (SDD); refactor mode handles
+behavior-preserving change to existing code (keep-green). Scaffold mode is the **non-behavioral
 counterpart**, for a narrow, explicitly-declared class of work: *mechanical, non-behavioral bootstrap
 files with no test obligation and no trust-boundary surface.*
 
