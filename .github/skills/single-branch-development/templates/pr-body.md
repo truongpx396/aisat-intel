@@ -56,6 +56,20 @@
 | ✅ | {{Principle I/II — kernel isolation}} | {{depguard bans kernel→internal (see `.golangci.yml`)}} |
 | ✅ | {{OWASP A02/A03}} | {{credentials in env vars; images pinned}} |
 
+#### Verification
+<!-- Evidence has ONE canonical home: the AUTO block's "#### Evidence" table (Kind | Command |
+     Result | Fingerprint), rendered by track-report.sh from the hook-captured evidence pack — that
+     is the fingerprinted, machine-verified record. Do NOT duplicate it here.
+     Author this section ONLY when the auto block shows "No evidence rows recorded" (evidence hooks
+     off / empty pack). Then paste the real command output as a MANUAL table mirroring the auto shape,
+     so a reviewer reads one consistent format. It is a model claim (unfingerprinted) — that is why it
+     lives in the Asserted zone; call that out. Delete this whole section if the auto table is populated. -->
+| Check | Command | Result |
+|-------|---------|--------|
+| {{compose parses}} | {{`docker compose config --quiet`}} | {{✅ OK}} |
+| {{python deps}} | {{`uv sync` / tomllib parse}} | {{✅ 22 deps}} |
+| {{go module}} | {{`go build ./...`}} | {{⚠️ not run — no packages yet}} |
+
 #### Follow-ups / caveats
 <!-- Anything a merger or the next stage must know: manual steps, deferred work, known gaps. -->
 - {{e.g. "`go mod tidy` required in backend-go/ before first build (no go.sum in scaffold)"}}

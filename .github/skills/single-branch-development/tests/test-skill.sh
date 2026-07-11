@@ -1072,6 +1072,15 @@ else
   fail "struct: pr-body.md steers Asserted zone to tables (Task→files→intent) + warns vs escaped backticks"
 fi
 
+# 10.18 — pr-body.md keeps evidence canonical in the auto block; Asserted Verification is fallback-only
+if grep -qi 'Evidence has ONE canonical home' "$PR_BODY_TMPL" 2>/dev/null \
+   && grep -qi 'Check | Command | Result' "$PR_BODY_TMPL" 2>/dev/null \
+   && grep -qi 'ONLY when the auto block shows' "$PR_BODY_TMPL" 2>/dev/null; then
+  pass "struct: pr-body.md keeps evidence canonical in auto block, Asserted Verification is fallback-only"
+else
+  fail "struct: pr-body.md keeps evidence canonical in auto block, Asserted Verification is fallback-only"
+fi
+
 # 10.17 — governance is pushed to the MAKER (fan-out), not only the checker/review
 STORY_MD="$SCRIPT_DIR/../references/story-mode.md"
 REFACTOR_MD="$SCRIPT_DIR/../references/refactor-mode.md"
