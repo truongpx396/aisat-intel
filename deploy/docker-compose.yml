@@ -5,9 +5,9 @@ services:
     image: postgres:16-alpine
     container_name: aisat-postgres
     environment:
-      POSTGRES_USER: aisat
-      POSTGRES_PASSWORD: aisat
-      POSTGRES_DB: aisat
+      POSTGRES_USER: ${POSTGRES_USER:-aisat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aisat}
+      POSTGRES_DB: ${POSTGRES_DB:-aisat}
     ports:
       - "5432:5432"
     volumes:
@@ -64,7 +64,7 @@ services:
     restart: unless-stopped
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: aisat-minio
     ports:
       - "9000:9000"
@@ -72,8 +72,8 @@ services:
     volumes:
       - minio_data:/data
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     command: server /data --console-address ":9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
@@ -83,7 +83,7 @@ services:
     restart: unless-stopped
 
   casdoor:
-    image: casbin/casdoor:latest
+    image: casbin/casdoor:3.113.0
     container_name: aisat-casdoor
     ports:
       - "8000:8000"
