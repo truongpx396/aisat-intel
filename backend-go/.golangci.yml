@@ -1,0 +1,41 @@
+version: "1.56"
+
+run:
+  go: "1.23"
+  concurrency: 0
+  timeout: 5m
+
+linters:
+  enable:
+    - gofmt
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - gosimple
+    - ineffassign
+    - typecheck
+    - revive
+    - depguard
+
+linters-settings:
+  gocyclo:
+    min-complexity: 15
+  funlen:
+    lines: 60
+    statements: 40
+  depguard:
+    rules:
+      kernel_isolation:
+        deny:
+          - pkg: "github.com/aisat-studio/aisat-studio/backend-go/internal"
+            desc: "kernel/ packages must not import from internal/"
+        files:
+          - "kernel/**/*.go"
+
+issues:
+  exclude-rules:
+    - path: "_test\\.go"
+      linters:
+        - gocyclo
+        - funlen
