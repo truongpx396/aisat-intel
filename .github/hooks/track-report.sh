@@ -242,7 +242,7 @@ printf '\n#### Run stats (hook-observed)\n\n'
 printf -- '- **Tool calls:** %s\n' "${tool_calls:-0}"
 if [ -f "$rec" ] && [ "$(jq -r '.trace | length' "$rec" 2>/dev/null || echo 0)" -gt 0 ]; then
   printf -- '- **Subagent trace (in order):**\n'
-  jq -r '.trace[] | "  - \(.t): \(.event) \(.agent_type // "") \((.agent_id // "") | if . == "" then "" else "(\(.))" end)"' \
+  jq -r '.trace[] | "  - \(.t): \(.event) \(.agent_type // .agent_display_name // "") \((.agent_id // "") | if . == "" then "" else "(\(.))" end)\((.reason // "") | if . == "" then "" else " — why: \(.)" end)"' \
     "$rec" 2>/dev/null || true
 fi
 

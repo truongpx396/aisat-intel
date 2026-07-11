@@ -5,6 +5,12 @@
 # record shows which step a worker was in without reading the full transcript.
 #
 # NOTE: this records SUBAGENT spawn/stop events (the data hooks actually expose).
+# The richest field is `agent_description` (the subagent's one-line "why") — it is
+# present on SubagentStart ONLY; SubagentStop carries a `stop_reason` instead. Field
+# NAMES differ across surfaces (VS Code: snake_case agent_id/agent_type; CLI/cloud:
+# camelCase agentName/agentDisplayName/agentDescription — see references/hooks.md), so
+# every known spelling is read below and the trace is populated on any surface.
+#
 # The `Run-Id:` COMMIT trailer is NOT added here — a Copilot hook can't cleanly
 # rewrite an already-made commit. Add that trailer in the worker's commit command
 # (prompt-enforced) or via a git `prepare-commit-msg` hook.
@@ -29,8 +35,12 @@ unset __env_dir
 
 input="$(cat)"
 ev="$(jq -r '.hook_event_name // empty' <<<"$input")"
-aid="$(jq -r '.agent_id // empty' <<<"$input")"
-atype="$(jq -r '.agent_type // empty' <<<"$input")"
+aid="$(jq -r '.agent_id // .agentId // empty' <<<"$input")"
+atype="$(jq -r '.agent_type // .agentName // .agent_name // empty' <<<"$input")"
+adisp="$(jq -r '.agent_display_name // .agentDisplayName // empty' <<<"$input")"
+# The reason the agent was spawned (SubagentStart only); stop_reason (SubagentStop only).
+reason="$(jq -r '.agent_description // .agentDescription // empty' <<<"$input")"
+sreason="$(jq -r '.stop_reason // .stopReason // empty' <<<"$input")"
 
 RUNS_DIR="${RUNS_DIR:-runs}"
 rec="$RUNS_DIR/$RUN_ID.json"
@@ -42,8 +52,17 @@ mkdir -p "$RUNS_DIR"
 ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 tmp="$(mktemp)"
 # Append the event AND refresh the heartbeat (started_ts once, last_ts every event) so
-# now - last_ts stays a usable idle signal even between tool calls.
+# now - last_ts stays a usable idle signal even between tool calls. The base entry keeps
+# agent_id/agent_type (back-compat with track-report.sh); the display name, reason, and
+# stop_reason keys are added ONLY when non-empty, so records stay clean on surfaces that
+# don't supply them.
 jq --arg t "$ts" --arg e "$ev" --arg id "$aid" --arg ty "$atype" \
-  '.trace = ((.trace // []) + [{t:$t, kind:"subagent", event:$e, agent_id:$id, agent_type:$ty}]) | .started_ts = (.started_ts // $t) | .last_ts = $t' \
+   --arg disp "$adisp" --arg reason "$reason" --arg sr "$sreason" \
+  '.trace = ((.trace // []) + [
+     ({t:$t, kind:"subagent", event:$e, agent_id:$id, agent_type:$ty})
+     + (if $disp   != "" then {agent_display_name:$disp} else {} end)
+     + (if $reason != "" then {reason:$reason} else {} end)
+     + (if $sr     != "" then {stop_reason:$sr} else {} end)
+   ]) | .started_ts = (.started_ts // $t) | .last_ts = $t' \
   "$rec" >"$tmp" && mv "$tmp" "$rec"
 exit 0

@@ -588,6 +588,26 @@ trace_len=$(jq '.trace | length' "$TMPDIR_RUNS/${RUN1_ID:-test}.json" 2>/dev/nul
 [ "$trace_len" -ge 1 ] && pass "trace: SubagentStart -> appended to run record" \
   || fail "trace: SubagentStart -> appended to run record"
 
+# enriched: agent_description (SubagentStart-only "why") is captured as reason
+jq -nc '{"hook_event_name":"SubagentStart","agent_id":"a002","agent_type":"Explore","agent_description":"map the auth flow"}' | \
+  RUN_ID="${RUN1_ID:-test}" RUNS_DIR="$TMPDIR_RUNS" bash "$TRACE" >/dev/null 2>&1 || true
+if jq -e '[.trace[] | select(.reason == "map the auth flow")] | length == 1' \
+     "$TMPDIR_RUNS/${RUN1_ID:-test}.json" >/dev/null 2>&1; then
+  pass "trace: agent_description captured as reason"
+else
+  fail "trace: agent_description captured as reason"
+fi
+
+# camelCase surface: agentName + stop_reason are read too
+jq -nc '{"hook_event_name":"SubagentStop","agentName":"Explore","stop_reason":"end_turn"}' | \
+  RUN_ID="${RUN1_ID:-test}" RUNS_DIR="$TMPDIR_RUNS" bash "$TRACE" >/dev/null 2>&1 || true
+if jq -e '[.trace[] | select(.agent_type == "Explore" and .stop_reason == "end_turn")] | length == 1' \
+     "$TMPDIR_RUNS/${RUN1_ID:-test}.json" >/dev/null 2>&1; then
+  pass "trace: camelCase agentName + stop_reason captured"
+else
+  fail "trace: camelCase agentName + stop_reason captured"
+fi
+
 result=$(jq -nc '{"hook_event_name":"SubagentStart"}' | bash "$TRACE" 2>&1) || true
 [ -z "$result" ] && pass "trace: no RUN_ID -> no-op" || fail "trace: no RUN_ID -> no-op"
 
