@@ -35,7 +35,7 @@ export TRACK_BASE_REF="${TRACK_BASE_REF:-origin/main}"                 # [REPO-P
 # --- ceilings / hardening ----------------------------------------------------
 export TRACK_MAX_TOOL_CALLS="${TRACK_MAX_TOOL_CALLS:-200}"          # [REPO-POLICY] tool-call hard stop.
 export TRACK_SENTINEL="${TRACK_SENTINEL:-1}"                        # [REPO-POLICY] scan staged diff for secrets/leftovers.
-export TRACK_TOKEN_ESTIMATE="${TRACK_TOKEN_ESTIMATE:-1}"            # [REPO-POLICY] estimate token usage at Stop via transcript chars/4 heuristic.
+export MAX_TOKEN_ESTIMATE="${MAX_TOKEN_ESTIMATE:-200000}"         # [REPO-POLICY] token-estimate ceiling; blocks stop + sets status=budget-exceeded when exceeded. Set to 0 to disable.
 
 # --- notify (optional) -------------------------------------------------------
 export TRACK_NOTIFY_WEBHOOK="${TRACK_NOTIFY_WEBHOOK:-}"             # [REPO-POLICY] terminal-state webhook; empty = no notify.
