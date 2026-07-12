@@ -130,6 +130,14 @@ assert  "2  frontmatter name=executing-parallel-tracks" \
   grep -q "name: executing-parallel-tracks" "$SKILL"
 assert  "3  Steps 1-7 all present" \
   awk '/^### 1\. Precheck/{s1=1}/^### 2\. Create/{s2=1}/^### 3\. Fan/{s3=1}/^### 4\. Per-track/{s4=1}/^### 5\. Integration/{s5=1}/^### 6\. Stale-PR/{s6=1}/^### 7\. Report/{s7=1}END{exit !(s1&&s2&&s3&&s4&&s5&&s6&&s7)}' "$SKILL"
+assert  "3a Step 0 Analyze & plan waves present" \
+  grep -q "^### 0\. Analyze" "$SKILL"
+assert_pipe "3b Step 0 requires user confirm before fan-out" \
+  "awk '/^### 0[.] Analyze/,/^### 1[.]/' '$SKILL' | grep -qi 'confirm'"
+assert_pipe "3c Step 0 describes wave sequencing between dependent waves" \
+  "awk '/^### 0[.] Analyze/,/^### 1[.]/' '$SKILL' | grep -qi 'wave'"
+assert_pipe "3d Skill-Per-Step Map includes Step 0 row" \
+  "grep -q '^| 0 ' '$SKILL'"
 assert  "4  Steps appear in ascending line order" \
   awk '/^### 1\. Precheck/{l1=NR}/^### 7\. Report/{l7=NR}END{exit !(l1>0&&l7>0&&l1<l7)}' "$SKILL"
 assert  "5  3 mandatory gates stated" \
@@ -191,8 +199,8 @@ suite "Suite 3 — Embedded Run Record JSON Schema"
 assert "33 embedded run record is valid JSON" \
   jq empty <<< "$RUN_RECORD_JSON"
 
-for f in run_id track branch goal status evidence iterations tokens cost_usd \
-         blocker next_step pr_url trace; do
+for f in run_id track branch goal status evidence iterations iterations_self_reported tool_calls token_estimate \
+         blocker next_step pr_url trace skills; do
   assert "34+ run record has field: $f" \
     jq -e "has(\"$f\")" <<< "$RUN_RECORD_JSON"
 done
@@ -204,11 +212,14 @@ assert "47 status is one of the 4 terminal states" \
 assert "48 trace is an array with ≥2 entries" \
   jq -e '(.trace | length) >= 2' <<< "$RUN_RECORD_JSON"
 
-assert "49 every trace entry has t, kind, name" \
-  jq -e '[.trace[] | has("t") and has("kind") and has("name")] | all' <<< "$RUN_RECORD_JSON"
+assert "49 every trace entry has t, kind, event, agent_id, agent_type" \
+  jq -e '[.trace[] | has("t") and has("kind") and has("event") and has("agent_id") and has("agent_type")] | all' <<< "$RUN_RECORD_JSON"
 
-assert "50 trace kind values are only 'skill' or 'subagent'" \
-  jq -e '[.trace[].kind] | all(. == "skill" or . == "subagent")' <<< "$RUN_RECORD_JSON"
+assert "50 trace kind values are only 'subagent'" \
+  jq -e '[.trace[].kind] | all(. == "subagent")' <<< "$RUN_RECORD_JSON"
+
+assert "50a skills[] array present and self_reported tagged" \
+  jq -e '(.skills | length) > 0 and ([.skills[] | .self_reported == true] | all)' <<< "$RUN_RECORD_JSON"
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Suite 4 — Precheck Gate: Ownership Overlap Detection

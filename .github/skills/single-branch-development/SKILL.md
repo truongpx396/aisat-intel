@@ -61,7 +61,8 @@ Steps 1–3 (before) and 5–8 (after) are the **universal bracket** — identic
 runs: preflight, reconcile, isolation, and the evidence-gate + draft-PR boundary are reused unchanged
 by every core. Step 4 is the **execution core**: always scaffold, story, or refactor mode, never a
 free-form per-task loop. See the [skill-per-step map](#skill-per-step-map) for which superpower skill
-owns each step.
+owns each step **and whether that step runs in-session or dispatches subagents** (🧩 skill vs 🤖
+subagent vs ⚙️ script).
 
 1. **Preflight & confirm** — run [`scripts/track-preflight.sh`](scripts/track-preflight.sh)
    (`inspect` mode) before touching the repo. Supply only the **track slug** (`TRACK_ID=a`); the
@@ -71,15 +72,15 @@ owns each step.
    that run automatically (there is no `--resume` flag). It prints a one-screen summary (Mode · Track
    · Tasks · RUN_ID · Branch · Base ref · Prereqs) and the same as JSON. **Present that emitted summary
    verbatim for approval — never re-type it into a hand-built table.** A re-rendered summary can drift
-   silently from what `--commit` actually stamps into the breadcrumb; the script's own output is the
+   silently from what `--persist` actually stamps into the breadcrumb; the script's own output is the
    single source of truth. **The interactive confirm is
    mandatory: STOP and get explicit human approval of this summary before Step 3 creates anything.**
    The only waiver is an explicitly-set `auto_confirm`/`--yes` (orchestrator runs only) — absent that
    flag, treat confirm as required, never skippable by default. A prerequisite failure hard-fails
-   regardless. Re-run with `--commit` to persist. See [references/hooks.md](references/hooks.md) for
+   regardless. Re-run with `--persist` to persist. See [references/hooks.md](references/hooks.md) for
    `RUN_ID` mechanics.
-   **Derive the task-shaped config here.** From the task set's file/language surface, set — *before*
-   inspect — the values whose correct value depends on *this* task (not repo-wide policy):
+   **Derive task-shaped config before running the script.** From the task set's file/language
+   surface, set the values whose correct value depends on *this* task (not repo-wide policy):
    `TRACK_ALLOWED_PREFIXES` (writable scope) and any `TRACK_FROZEN_PATHS`; `PREFLIGHT_REQUIRE_TOOLCHAIN`
    (the bins the task's languages need, so a missing tool fails here not mid-run); and
    `TRACK_REQUIRED_EVIDENCE` (the evidence *floor* for the task's languages). Preflight echoes each in
@@ -87,7 +88,7 @@ owns each step.
    **all** edits; `evidence_floor_set:false` means the gate is rules-only. Repo-wide catalog/policy
    (`TRACK_EVIDENCE_KINDS`/`RULES`, sentinel, ceilings, `RUNS_DIR`) stays in the committed
    `track-env.base.sh` — do not regenerate it per run. Confirm the derived values as part of the same
-   proceed-confirm, then `--commit` — which stamps the confirmed scope, frozen paths, toolchain, and
+   proceed-confirm, then `--persist` — which stamps the confirmed scope, frozen paths, toolchain, and
    evidence floor into `runs/<RUN_ID>.dispatch`, so the artifact is a faithful record of what was
    approved. Do not hand-widen scope mid-run.
 2. **Reconcile / resume** — run [`scripts/track-reconcile.sh`](scripts/track-reconcile.sh) to rebuild
@@ -143,7 +144,7 @@ owns each step.
    <name>` at each core step and `track-note.sh loop <phase>` once per RED→GREEN→review cycle to append
    an ordered, provenance-tagged `skills[]` / `iterations` record. These are the model's **own claim**
    (`self_reported:true`), never hook-observed; skip them if you don't want a self-attested trace. The
-   **mechanical** fields (`tool_calls`, `trace[]`, heartbeat) record automatically — preflight `--commit`
+   **mechanical** fields (`tool_calls`, `trace[]`, heartbeat) record automatically — preflight `--persist`
    persists `RUN_ID` into the installed `track-env.sh`, so even a solo run populates the record with no
    extra setup. See [references/hooks.md](references/hooks.md) for the full mechanics.
 5. **Freeze & verify-all** — once the last task's review passes, make **no further edits**, then run
@@ -152,11 +153,10 @@ owns each step.
    convergence and requires re-running all kinds.
 6. **Evidence gate** (`verification-before-completion`) — paste real command output; "all green"
    without pasted output is not done.
-7. **Update the run artifact** if your workflow tracks one (`runs/<run-id>.json`, handoff notes). If
-   you logged the self-reported trace in Step 4, `skills[]` (ordered skill activations) and
-   `iterations` (loop count) now live in the record alongside the hook-observed `tool_calls` / `trace[]`
-   / `evidence[]` — read them together, but never conflate the self-reported fields with the mechanical
-   ones.
+7. **Confirm the run record** — `runs/<RUN_ID>.json` is auto-populated with hook-observed fields
+   (`tool_calls`, `trace[]`, `evidence[]`, heartbeat). If you called `track-note.sh` in Step 4,
+   `skills[]` and `iterations` are in the record too. Never conflate self-reported fields
+   (`skills[]`, `iterations`) with hook-observed ones — they carry different provenance.
 8. **Draft-PR finish** — open a **draft** PR and stop. This **replaces** SDD's call to
    `finishing-a-development-branch`; the worker never reaches its merge menu. Integration/merge is
    owned by repo process/CI. **Build the PR body from [`templates/pr-body.md`](templates/pr-body.md):**
@@ -174,20 +174,33 @@ owns each step.
 
 ## Skill-Per-Step Map
 
-| Step | Superpower skill / script |
-|------|---------------------------|
-| 1 Preflight | `track-preflight.sh` (bundled) |
-| 2 Reconcile | `track-reconcile.sh` (bundled) |
-| 3 Isolate | `using-git-worktrees` |
-| 4 Core — **story** RED author | `dispatching-parallel-agents` (+ governance brief in each maker) |
-| 4 Core — **story** RED review + freeze | `requesting-code-review` + governance (constitution + matched `.github/instructions/*`) + `security-and-owasp` |
-| 4 Core — **story** incremental green | `subagent-driven-development` (→ `test-driven-development`, `requesting-code-review`) |
-| 4 Core — **refactor** pin-green + characterize | `dispatching-parallel-agents` (+ governance brief in each maker) + `requesting-code-review` |
-| 4 Core — **refactor** incremental transform (keep green) | `subagent-driven-development` (+ governance + `security-and-owasp` on trust boundaries) |
-| 4 Core — **scaffold** generate | `dispatching-parallel-agents` (+ governance brief in each maker) |
-| 4 Core — **scaffold** review | `requesting-code-review` + governance (constitution — hard gate) |
-| 5–6 Converge & gate | `verification-before-completion` |
-| 8 Finish | draft PR — **overrides** `finishing-a-development-branch` |
+**Three kinds of trigger fire in this pipeline — the `Kind` column tags every row so you always know
+whether a *skill* runs in your own session or a *subagent* is dispatched:**
+
+- 🧩 **skill** — a superpower `SKILL.md` the **current** agent reads and follows **in-session**: no new
+  agent, no isolated context, your session's history stays intact.
+- 🤖 **subagent** — a **dispatched** agent instance with **isolated context + a hand-constructed brief**
+  (spawned via the `runSubagent`/Task tool). Subagents are **not** named catalog entries you trigger —
+  they are runtime workers, always spawned **by** one of the two *dispatcher skills*
+  (`dispatching-parallel-agents`, `subagent-driven-development`), and always cast in a role: **maker**
+  (authors/implements) or **reviewer** (spec + quality checker). "🧩 skill → 🤖 subagents" means the
+  named skill is what *you* invoke, and *it* then fans out subagents.
+- ⚙️ **script** — a bundled hook/CLI from the hooks bundle: mechanical, deterministic, no LLM.
+
+| Step | Fires | Kind |
+|------|-------|------|
+| 1 Preflight | `track-preflight.sh` | ⚙️ script |
+| 2 Reconcile | `track-reconcile.sh` | ⚙️ script |
+| 3 Isolate | `using-git-worktrees` | 🧩 skill |
+| 4 Core — **story** RED author | `dispatching-parallel-agents` → **N× maker** subagents (each carries the governance brief) | 🧩 skill → 🤖 subagents |
+| 4 Core — **story** RED review + freeze | `requesting-code-review` + governance (constitution + matched `.github/instructions/*`) + `security-and-owasp` | 🧩 skill |
+| 4 Core — **story** incremental green | `subagent-driven-development` → per-task **maker** + **reviewer** subagents (wraps `test-driven-development`, `requesting-code-review`) | 🧩 skill → 🤖 subagents |
+| 4 Core — **refactor** pin-green + characterize | `dispatching-parallel-agents` → **N× maker** subagents (+ governance brief) then `requesting-code-review` | 🧩 skill → 🤖 subagents |
+| 4 Core — **refactor** incremental transform (keep green) | `subagent-driven-development` → **maker** + **reviewer** subagents (+ governance + `security-and-owasp` on trust boundaries) | 🧩 skill → 🤖 subagents |
+| 4 Core — **scaffold** generate | `dispatching-parallel-agents` → **N× maker** subagents (each carries the governance brief) | 🧩 skill → 🤖 subagents |
+| 4 Core — **scaffold** review | `requesting-code-review` + governance (constitution — hard gate; matched `.github/instructions/*`; no security add-on — guard cleared trust boundaries) | 🧩 skill |
+| 5–6 Converge & gate | `verification-before-completion` | 🧩 skill |
+| 8 Finish | draft PR — **overrides** `finishing-a-development-branch` | 🧩 skill (overridden) |
 
 ## Quality Gates (Owned Here)
 
@@ -267,7 +280,7 @@ Invariants this skill asserts; most are *realized by* SDD's loop, not re-run her
   preset — copy `templates/track-env.sh.example` → `.github/hooks/track-env.base.sh` — which
   travels into every worktree; add a gitignored `.github/hooks/track-env.sh` only to override a
   single worktree. Every hook auto-sources both. See [references/hooks.md](references/hooks.md#install).
-- **The run record self-activates in a solo run.** Preflight `--commit` persists `RUN_ID` as a managed
+- **The run record self-activates in a solo run.** Preflight `--persist` persists `RUN_ID` as a managed
   block in the installed `.github/hooks/track-env.sh` (retired at `--complete`), so `tool_calls` /
   `trace[]` / heartbeat accrue with no ceiling and no manual export; `TRACK_MAX_TOOL_CALLS` only *adds*
   the hard-stop. The write is gated on the installed-hooks marker (`track-env.base.sh`), so it never
@@ -344,7 +357,8 @@ disjointness for parallel-generation latency:
 3. **Apply** all bodies at once (controller = single writer) → one converged tree.
 4. **One `verification-before-completion` capture** — build + lint + bring-up health check; paste
    output. This proves the scaffold *works*.
-5. **One `requesting-code-review`** over the whole diff (quality-only — the guard cleared trust
+5. **One `requesting-code-review`** over the whole diff (quality + governance: constitution hard
+   gate + matched `.github/instructions/*`; no security add-on — the guard cleared trust
    boundaries), then the same **draft-PR finish**.
 
 Steps 4 and 5 are orthogonal and both mandatory: verification proves it *works*, review proves it is

@@ -66,15 +66,17 @@ is triage → fix-under-test → re-evidence → update.
 
 ## Skill-Per-Step Map
 
-| Step | Superpower skill / script |
-|------|---------------------------|
-| 1 Triage feedback | `receiving-code-review` |
-| 2 Reconcile / resume | `track-reconcile.sh` (single-branch-development bundle) |
-| 3 Behavioral fix | `test-driven-development` (+ `systematic-debugging` for regressions) |
-| 3 Independent fixes | `dispatching-parallel-agents` (generate-only) |
-| 4 Re-review delta | `requesting-code-review` + `security-and-owasp` (trust-boundary) |
-| 5 Converge & re-evidence | `verification-before-completion` |
-| 6 Update PR | fast-forward `git push` (opt-in) **or** hand back — never `gh pr merge` |
+Kind legend (same as `single-branch-development`): 🧩 **skill** = runs in-session; 🤖 **subagent** = dispatched agent; ⚙️ **script** = bundled hook/CLI.
+
+| Step | Superpower skill / script | Kind |
+|------|---------------------------|------|
+| 1 Triage feedback | `receiving-code-review` | 🧩 skill |
+| 2 Reconcile / resume | `track-reconcile.sh` (single-branch-development bundle) | ⚙️ script |
+| 3 Behavioral fix | `test-driven-development` (+ `systematic-debugging` for regressions) | 🧩 skill |
+| 3 Independent fixes | `dispatching-parallel-agents` → read-only maker subagents | 🧩 skill → 🤖 subagents |
+| 4 Re-review delta | `requesting-code-review` + `security-and-owasp` (trust-boundary) | 🧩 skill |
+| 5 Converge & re-evidence | `verification-before-completion` | 🧩 skill |
+| 6 Update PR | fast-forward `git push` (opt-in) **or** hand back — never `gh pr merge` | ⚙️ script |
 
 ## Hooks (Reused, Not Owned)
 
@@ -93,6 +95,14 @@ The **only** configuration difference from a fresh build:
 
 See [`../single-branch-development/references/hooks.md`](../single-branch-development/references/hooks.md)
 for the full bundle, env reference, and what the run record captures.
+
+## Quality Gates (Owned Here)
+
+- **Triage before implementing**: `receiving-code-review` classifies each comment as accept / reject / clarify — a wrong or unclear suggestion gets a reasoned pushback, not a reflexive change.
+- **Behavioral fixes require TDD**: add a failing test that encodes the reviewer's concern first, then green it. A regression fix uses `systematic-debugging` → failing-repro-test → green.
+- **Re-evidence required after any fix**: a review fix invalidates the prior fingerprint. Re-run every required evidence kind (Step 5) against the new post-fix tree — not just the lane you touched.
+- **Never weaken a test to green CI**: no `skip`, no loosened assertion, no deleted case. A genuinely wrong test routes back through the review gate.
+- **`TRACK_BASE_REF` must point to the PR base**: so the diff-conditional gate selects the right evidence kinds for the rework diff, not an empty diff-vs-HEAD.
 
 ## Gotchas
 

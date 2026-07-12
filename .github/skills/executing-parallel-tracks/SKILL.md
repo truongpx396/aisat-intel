@@ -94,7 +94,10 @@ that must hold ("do not edit frozen entrypoints; do not delete existing tests"),
 (the hard stops below). A goal with no evidence to fail against will always think it succeeded.
 
 **Run record (one per track, git-ignored `runs/` dir).** Each worker writes/updates
-`runs/<run-id>.json` — this is the trace anchor and the orchestrator's memory between ticks:
+`runs/<run-id>.json` — the trace anchor and the orchestrator's memory between ticks.
+The record uses the **same two-array schema** as `single-branch-development`:
+`trace[]` = hook-observed SubagentStart/Stop (mechanical); `skills[]` = self-reported skill
+activations (model's claim, provenance-tagged). Never mix them.
 ```json
 {
   "run_id": "2026-06-26T14-03_us1",
@@ -104,29 +107,35 @@ that must hold ("do not edit frozen entrypoints; do not delete existing tests"),
   "status": "blocked",          // success | blocked | no-progress | budget-exceeded
   "evidence": { "lint": "clean", "unit": "42 passed", "integration": "exit 1", "e2e": "n/a" },
   "iterations": 12,
-  "tokens": 48000,
-  "cost_usd": 0.91,
+  "iterations_self_reported": true,
+  "tool_calls": 137,             // mechanical (track-meter.sh)
+  "token_estimate": 48000,       // rough chars/4 estimate (track-tokens.sh)
   "started_ts": "2026-06-26T14-03-11Z",  // first hook event — run wall-clock start
-  "last_ts": "2026-06-26T14-11-05Z",     // last hook event — now - last_ts = idle/staleness
+  "last_ts": "2026-06-26T14-11-05Z",     // last hook event — now − last_ts = idle/staleness
   "blocker": "flaky Testcontainers Postgres startup",
   "next_step": "pin image tag; retry integration",
   "pr_url": null,
   "trace": [
-    { "t": "2026-06-26T14-03-11Z", "kind": "skill",    "name": "using-git-worktrees" },
-    { "t": "2026-06-26T14-03-40Z", "kind": "skill",    "name": "test-driven-development" },
-    { "t": "2026-06-26T14-05-02Z", "kind": "subagent", "name": "implementer",  "task": "T038" },
-    { "t": "2026-06-26T14-09-18Z", "kind": "subagent", "name": "spec-reviewer", "task": "T038" },
-    { "t": "2026-06-26T14-11-05Z", "kind": "subagent", "name": "verifier",      "task": "T038", "result": "fail" }
+    { "t": "2026-06-26T14-05-02Z", "kind": "subagent", "event": "start", "agent_id": "sub-01", "agent_type": "implementer",   "reason": "green T038 impl" },
+    { "t": "2026-06-26T14-09-00Z", "kind": "subagent", "event": "stop",  "agent_id": "sub-01", "agent_type": "implementer",   "stop_reason": "done" },
+    { "t": "2026-06-26T14-09-05Z", "kind": "subagent", "event": "start", "agent_id": "sub-02", "agent_type": "spec-reviewer", "reason": "stage-1 review T038" },
+    { "t": "2026-06-26T14-11-05Z", "kind": "subagent", "event": "stop",  "agent_id": "sub-03", "agent_type": "verifier",      "stop_reason": "fail: integration test still red" }
+  ],
+  "skills": [
+    { "t": "2026-06-26T14-03-11Z", "skill": "using-git-worktrees",      "step": "2-isolate", "self_reported": true },
+    { "t": "2026-06-26T14-03-40Z", "skill": "subagent-driven-development", "step": "4-green", "self_reported": true }
   ]
 }
 ```
 Add `runs/` to `.gitignore`. The orchestrator aggregates all records into `runs/summary.md` for review.
 
-**Activation trace.** `trace` is an append-only event log the worker writes one line to **every time**
-it invokes a skill or spawns a subagent — giving a readable `skill A → skill B → subagent X → …`
-flow for that run. Keep each entry tiny (timestamp, `kind` = skill|subagent, `name`, optional `task`
-and `result`). This is the cheap middle layer between the one-line `blocker` and the full session
-transcript: enough to see *which step* the worker was in when it failed, without reading every turn.
+**Two arrays, two sources.** `trace[]` is written by `track-trace.sh` (SubagentStart/Stop hooks) with
+fields `{t, kind:"subagent", event:"start"|"stop", agent_id, agent_type, reason?, stop_reason?}`.
+`skills[]` is written by `track-note.sh skill <name>` (the model's self-reported claim) with fields
+`{t, skill, step, self_reported:true}`. Together they give a readable `skill A → subagent X → …`
+flow for each run — the cheap middle layer between the one-line `blocker` and the full session
+transcript. Never conflate them: `trace[]` entries are hook-observed facts; `skills[]` entries are
+model assertions.
 
 ## Hard stops (enforced by the orchestrator)
 
@@ -207,7 +216,35 @@ entirely. Layer them: hooks (fast, in-session) → git `pre-push` (local backsto
 **GitHub Actions (the unbypassable merge gate)**. CI stays the authority, exactly as the
 [autonomy boundary](#autonomy-boundary-read-first) states.
 
-## Step-by-Step Workflow
+## Pipeline (N Tracks)
+
+### 0. Analyze & plan waves (confirm before fan-out)
+
+**Before touching any branch**, read the requested stories/tasks and determine what can safely run in parallel and what must be sequenced.
+
+1. **Read the source**: if a `track-manifest.md` exists, use it. If absent, read `tasks.md` (or any dispatch/spec doc the user points to), extract the task set, infer the file-ownership surface per task, and draft a `track-manifest.md` — **do not silently invent one**; show it to the user.
+
+2. **Detect dependencies and overlap**: for each pair of requested tasks, check:
+   - Do they write overlapping file paths? (Overlap → must be sequential.)
+   - Does one produce a migration number or schema object the other reads? (Sequential.)
+   - Is there any explicit ordering stated in the spec? (Respect it.)
+
+3. **Produce a wave plan** — group tasks into the minimum number of waves where every task inside a wave is truly independent:
+   ```
+   Wave 1 (parallel): US1, US2, US3   — non-overlapping, independent
+   Wave 2 (parallel): US4, US5        — depend on Wave 1 merged; non-overlapping
+   Wave 3 (serial):   US6             — touches shared entrypoint, must run alone
+   ```
+
+4. **Confirm with the user before proceeding.** Present the wave plan: tasks per wave, why each is grouped as it is, the implied sequencing constraint between waves. Ask:
+   - "Run Wave 1 (US1+US2+US3) now, then wait for Wave 2?" — a simple yes/no.
+   - If the user wants a subset (e.g. only US1+US2), adjust the wave plan, recheck overlap, and confirm again.
+
+   **Do not fan out any worker until the user confirms the plan.** This is the one mandatory human checkpoint before autonomous work begins.
+
+5. **Sequential wave enforcement**: after Wave 1's PRs are all merged into the default branch, re-run Step 0 for Wave 2 — recheck the current tree for new overlaps introduced by Wave 1's changes, then confirm the next wave plan. Never start Wave N+1 before Wave N is merged.
+
+> **Why this step?** Pre-defined manifests are the stable-state happy path, but most real request start as "do user story 1, 2, 3" without a manifest. Analyzing first and confirming before fan-out prevents the worst failure mode: spinning up N workers only to discover mid-run that two of them are colliding on the same file.
 
 ### 1. Precheck gate (ask-back only on failure)
 
@@ -237,8 +274,11 @@ Export the manifest's per-track Docker/DB namespace before any integration run (
 ### 3. Fan out (one autonomous worker per track)
 
 Use `dispatching-parallel-agents` to launch one worker per track. Each worker executes
-`single-branch-development` **inside its own worktree only** for the per-branch pipeline (TDD,
-two-stage review, evidence, and draft PR handoff).
+`single-branch-development` **inside its own worktree only** for the per-branch pipeline. Each
+worker selects its own execution core from the task shape — **scaffold** (non-behavioral bootstrap),
+**story** (phased TDD for new/changed behavior), or **refactor** (behavior-preserving keep-green) —
+then runs preflight → isolate → core → evidence gate → draft-PR handoff. Mixed-mode fleets are fine
+(e.g. one scaffold track plus three story tracks).
 
 Pass each worker: run-id, task IDs, file-ownership scope, manifest commands, and project invariants.
 If bundled hooks are enabled, resolve each worker's env two-tier before launch (per-track +
@@ -255,11 +295,14 @@ This orchestrator then applies the stricter parallel-only overlays:
 ### 4. Per-track finish → DRAFT PR (autonomous, success only)
 
 Only a `success` run reaches this step. The worker opens a **draft** PR as the final step of
-`single-branch-development`:
+`single-branch-development`, building the body from [`templates/pr-body.md`](../single-branch-development/templates/pr-body.md)
+with its **Auto** block rendered by [`track-report.sh`](../single-branch-development/scripts/track-report.sh)
+(files changed, evidence + fingerprints, `tool_calls` / `trace[]`, token estimate — all from
+`runs/<run-id>.json`, never re-typed):
 ```bash
 gh pr create --draft \
   --title "track/<id> [run <run-id>]" \
-  --body "$(cat runs/<run-id>/handoff.md)" \
+  --body "$(bash .github/skills/single-branch-development/scripts/track-report.sh <run-id>)" \
   --label agent-generated
 ```
 The PR body carries the run-id, the goal contract, and the pasted evidence (test output, cost) — the
@@ -291,6 +334,31 @@ Aggregate every `runs/<run-id>.json` into `runs/summary.md`. Per track report: t
 (success / blocked / no-progress / budget-exceeded), evidence pointer, draft-PR URL, iterations, and
 cost. Do not claim success without the evidence having been produced. Blocked/exhausted runs are
 reported as such — never dressed up as done.
+
+## Skill-Per-Step Map
+
+Kind legend: 🧩 **skill** = runs in-session (reads a SKILL.md); 🤖 **subagent** = dispatched agent with isolated context, maker or reviewer role; ⚙️ **script** = bundled hook/CLI, mechanical, no LLM.
+
+| Step | Fires | Kind |
+|------|-------|------|
+| 0 Analyze & plan waves | Read tasks.md / manifest → derive wave plan → confirm with user | (in-session reasoning) |
+| 1 Precheck | `track-precheck.sh` (ownership overlap gate) | ⚙️ script |
+| 2 Isolate (one per track) | `using-git-worktrees` | 🧩 skill |
+| 3 Fan out (one worker per track) | `dispatching-parallel-agents` → N× **worker** subagents, each running `single-branch-development` | 🧩 skill → 🤖 subagents |
+| 4 Per-track draft PR | `track-report.sh` builds Auto block → `gh pr create --draft` | ⚙️ script |
+| 5 Integration (merge gate) | CI + human / merge queue — **not the worker** | (CI/human) |
+| 6 Stale-PR bounce | re-dispatch to owning worker subagent | 🤖 subagent |
+| 7 Report | `track-report.sh` → `runs/summary.md` aggregation | ⚙️ script |
+
+## Quality Gates (Owned Here)
+
+Four gates are mandatory — every track must pass all four before a PR counts as `success`:
+
+- **Precheck gate**: non-overlapping ownership, clean tree, manifest complete, Docker headroom within cap — all must pass before fan-out. Ask-back only on failure; proceed silently when clean.
+- **Verifier gate (maker/checker split)**: a **distinct adversarial subagent** verifies each worker's output. A failed verifier writes `status: blocked` to the run record and opens **no PR** — it never quietly skips or adjusts to pass.
+- **Merge gate**: workers stop at draft PR; **GitHub Actions CI is the mechanical gate**; merging is never the worker's job. Climb the [maturity ladder](#maturity-ladder-dont-start-at-the-top) deliberately — don't skip rungs.
+- **Hard stops (all five enforced)**: iteration cap, no-progress detector, idle/heartbeat staleness (`now − last_ts`), per-worker budget ceiling, and global fleet budget ceiling. A worker that trips any of these halts and writes its terminal state to the run record.
+- **Evidence gate**: `success` requires pasted output. A `success` claim without evidence in the run record is `NEEDS_CONTEXT`, not `success`.
 
 ## Maturity ladder (don't start at the top)
 
@@ -331,6 +399,6 @@ Start low; graduate only after weeks of clean runs.
 
 - `track-manifest.template.md` (bundled) — copy into a repo and fill per project.
 - [`scripts/track-precheck.sh`](scripts/track-precheck.sh) (bundled, parallel-only) — the mechanical Precheck overlap gate: reads a JSON array of `{id, prefixes}` on stdin, exits 0 when all tracks' ownership prefixes are mutually disjoint, or exit 2 with the exact colliding pair / config error (empty ownership, duplicate id). Run it in Step 1 before fan-out.
-- The Copilot agent-hook bundle is **owned by `single-branch-development`** ([`track-hooks.json`](../single-branch-development/templates/track-hooks.json) + [`scripts/track-*.sh`](../single-branch-development/scripts/)): `track-guard.sh` (PreToolUse ownership + push lockout), `track-evidence.sh` / `track-meter.sh` (PostToolUse evidence + tool-call ceiling), `track-trace.sh` (Subagent trace), `track-notify.sh` (Stop webhook). This orchestrator reuses it and layers per-track/global env on top.
+- The Copilot agent-hook bundle is **owned by `single-branch-development`** ([`track-hooks.json`](../single-branch-development/templates/track-hooks.json) + [`scripts/track-*.sh`](../single-branch-development/scripts/)) and reused whole by every worker: `track-reconcile.sh` (SessionStart resume), `track-guard.sh` (PreToolUse ownership + push lockout), `track-evidence.sh` / `track-meter.sh` (PostToolUse evidence + tool-call ceiling), `track-trace.sh` (Subagent trace with per-spawn reason), `track-evidence-gate.sh` / `track-tokens.sh` / `track-sentinel.sh` / `track-notify.sh` (Stop: freshness gate, token estimate, secrets scan, webhook). Manual/CLI members: `track-preflight.sh` (mint/recover RUN_ID), `track-report.sh` (deterministic PR-body Auto block), `track-note.sh` (self-reported skill/loop trace). This orchestrator reuses the bundle and layers per-track/global env on top. See [`references/hooks.md`](../single-branch-development/references/hooks.md) for the full per-script contract.
 - [Copilot agent hooks (GitHub Docs)](https://docs.github.com/en/copilot/concepts/agents/hooks) · [Agent hooks in VS Code](https://code.visualstudio.com/docs/copilot/customization/hooks) · [Hooks reference (per-event I/O schema)](https://code.visualstudio.com/docs/agents/reference/hooks-reference) — events, JSON I/O, exit codes, Claude/CLI cross-compatibility.
 - Composes: `using-git-worktrees`, `dispatching-parallel-agents`, `single-branch-development`.
