@@ -253,3 +253,6 @@ draft-idea.md
 # Local run records + resume breadcrumbs (default RUNS_DIR). Keeping these out of
 # the tree also keeps them out of the evidence fingerprint (see references/hooks.md).
 runs/
+
+# Local secrets (never commit)
+deploy/.env

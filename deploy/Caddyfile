@@ -1,0 +1,47 @@
+# Local dev — AISAT-STUDIO
+# Reverse-proxy routing for the local development stack.
+#
+# Traffic flow:
+#   Browser / client
+#     → Caddy :80
+#         /api/*   → Go BFF            (localhost:8080)
+#         /sse/*   → Go relay/SSE      (localhost:8081, buffering disabled)
+#         /mcp/*   → Python MCP server (localhost:8002)
+#         *        → Vite dev server   (localhost:5173, hot-reload passthrough)
+
+:80 {
+	# ── REST API ────────────────────────────────────────────────────────────────
+	# All /api/* requests are forwarded to the Go BFF gateway.
+	handle /api/* {
+		reverse_proxy localhost:8080
+	}
+
+	# ── Server-Sent Events (SSE) ─────────────────────────────────────────────
+	# Routed to the dedicated Go relay port.
+	# flush_interval -1 tells Caddy to forward response bytes immediately instead
+	# of waiting to fill a buffer — essential for SSE streams.
+	handle /sse/* {
+		reverse_proxy localhost:8081 {
+			flush_interval -1
+		}
+	}
+
+	# ── MCP server (Python FastAPI) ──────────────────────────────────────────
+	handle /mcp/* {
+		reverse_proxy localhost:8002
+	}
+
+	# ── Vite dev server fallback ─────────────────────────────────────────────
+	# All other requests (assets, HMR WebSocket upgrade, page routes) are
+	# proxied to the Vite dev server so hot-module-reload works through Caddy.
+	handle {
+		reverse_proxy localhost:5173
+	}
+
+	# ── Timeouts ─────────────────────────────────────────────────────────────
+	timeouts {
+		read_body 10s
+		write     5m
+		idle      5m
+	}
+}

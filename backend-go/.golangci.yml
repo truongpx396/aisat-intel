@@ -1,0 +1,78 @@
+# golangci-lint v2 configuration
+# https://golangci-lint.run/usage/configuration/
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - gofmt
+    - revive
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - gosimple
+    - ineffassign
+    - typecheck
+    - depguard
+    - gocyclo
+    - misspell
+    - dupl
+
+  settings:
+    depguard:
+      rules:
+        # Principle I/II: kernel/ must remain pure — no dependency on the
+        # product layer (internal/). Kernel code must stay free of product-layer
+        # dependencies to preserve architectural independence.
+        kernel-no-internal:
+          files:
+            - "**/kernel/**/*.go"
+          deny:
+            - pkg: "github.com/aisat-studio/aisat-studio/backend-go/internal"
+              desc: >
+                kernel must not import internal (product) packages.
+                Kernel code must stay free of product-layer dependencies
+                to preserve architectural independence (Principle I/II).
+
+    gocyclo:
+      min-complexity: 15
+
+    dupl:
+      threshold: 150
+
+    revive:
+      rules:
+        - name: exported
+          severity: warning
+        - name: var-naming
+          severity: warning
+        - name: error-return
+          severity: warning
+        - name: unused-parameter
+          severity: warning
+
+    govet:
+      enable-all: true
+      disable:
+        - shadow
+
+issues:
+  exclude-rules:
+    - path: "_test\\.go"
+      linters:
+        - dupl
+        - gocyclo
+        - errcheck
+
+    - path: "migrations/"
+      linters:
+        - revive
+        - gofmt
+        - misspell
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
