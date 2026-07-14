@@ -428,9 +428,9 @@ HOT PATH (api · per request, sub-ms)          ASYNC DRAIN (cmd/worker · sole l
 
 
 
-> **Phase 1 ships credit *metering*, not payments.** Credits are the single internal unit and the consumption hot path (Redis `DECRBY` + outbox + ledger) is fully implemented now. The fiat **payment/provider layer** — Stripe / Polar / PayPal adapters, checkout, webhooks-as-source-of-truth, subscriptions — is an **additive Phase 2** layer that only converts money → credits; it never changes consumption. `plans` / `subscriptions` exist as stubs in Phase 1. See [billing-payments-design.md](specs/001-contextengine-mvp/billing-payments-design.md) (Phase 2 design draft).
+> **Phase 1 ships credit *metering*, not payments.** Credits are the single internal unit and the consumption hot path (Redis `DECRBY` + outbox + ledger) is fully implemented now. The fiat **payment/provider layer** — Stripe / Polar / PayPal adapters, checkout, webhooks-as-source-of-truth, subscriptions — is an **additive Phase 2** layer that only converts money → credits; it never changes consumption. `plans` / `subscriptions` exist as stubs in Phase 1. See [draft-plan.md — Phase 2 Billing & Payments](specs/draft-plan.md#phase-2-billing-and-payments) (Phase 2 design draft).
 
-📄 Billing & payments design (Phase 2): [billing-payments-design.md](specs/001-contextengine-mvp/billing-payments-design.md) · 📐 [credit-metering-swimlane](specs/001-contextengine-mvp/diagrams/credit-metering-swimlane.excalidraw) · [billing-payment-flow](specs/001-contextengine-mvp/diagrams/addition/billing-payment-flow.excalidraw)
+📄 Billing & payments design (Phase 2): [draft-plan.md — Phase 2](specs/draft-plan.md#phase-2-billing-and-payments) · 📐 [credit-metering-swimlane](specs/001-contextengine-mvp/diagrams/credit-metering-swimlane.excalidraw) · [billing-payment-flow](specs/001-contextengine-mvp/diagrams/addition/billing-payment-flow.excalidraw)
 
 ---
 
@@ -453,7 +453,7 @@ Redis is far more than a cache here: it is the **low-latency control plane** for
 
 ---
 
-## � Notification System
+## 🔔 Notification System
 
 A fully **event-driven, multi-channel** notification subsystem (US8): any backend event — ingestion done/failed, invite received/accepted/revoked, credit near-limit / exhausted, long-horizon task halted, document shared, clearance changed, new member joined, admin broadcast — fans out to an **in-app inbox** (real-time over SSE) and an **opt-in email** channel, gated by each member's per-category, per-channel preferences. It is designed for the same production properties as the billing path: **exactly-once, recipient-scoped, async, and durable**.
 
@@ -494,7 +494,7 @@ DLQ DRAIN (dlq.sweep.tick · single-owner cmd/worker)
 
 ---
 
-## �🔭 Observability
+## 🔭 Observability
 
 Every answer is fully traceable. The **debug panel** (US5) surfaces, per query: detected intent, tool called, whether a semantic-cache hit served the answer, access-filter summary (how many docs filtered out by clearance), hybrid/rerank scores, chunk expansion, injected memory, model used, token cost, credits deducted — plus a link to the full **Langfuse + OpenTelemetry** trace. LLM call logs (`llm_call_log`) drive the admin cost dashboard; raw prompt/response bodies are retained 30 days, then purged to PII-scrubbed metadata.
 
@@ -591,7 +591,6 @@ aisat-studio/
 │   ├── data-model.md                  #   entities, RLS, partitions, invariants
 │   ├── quickstart.md                  #   local dev / run guide
 │   ├── tasks.md                       #   dependency-ordered task breakdown
-│   ├── billing-payments-design.md     #   credit + payments design
 │   ├── checklists/requirements.md     #   spec-quality checklist
 │   ├── contracts/                     #   📜 contract-first boundaries (REST · NATS · MCP · LLM · SSE)
 │   └── diagrams/                      #   📐 Excalidraw architecture diagrams
@@ -616,7 +615,7 @@ This repository is **spec-driven** (GitHub Spec Kit). The design package is the 
 | 🗄️ [data-model.md](specs/001-contextengine-mvp/data-model.md) | Entity catalog, RLS policies, partitions, access-control invariants. |
 | 🚀 [quickstart.md](specs/001-contextengine-mvp/quickstart.md) | Local development and run instructions. |
 | ✅ [tasks.md](specs/001-contextengine-mvp/tasks.md) | Dependency-ordered, TDD-first task breakdown by user story. |
-| 💳 [billing-payments-design.md](specs/001-contextengine-mvp/billing-payments-design.md) | Credit metering and payments design. |
+| 💳 [draft-plan.md](specs/draft-plan.md) | Phase 2+ later-phase design notes (billing & payments, scale/resilience hardening) held for future planning. |
 | ☑️ [checklists/requirements.md](specs/001-contextengine-mvp/checklists/requirements.md) | Spec-quality checklist. |
 
 ### 📜 Contracts (contract-first boundaries)
@@ -664,7 +663,7 @@ A dark-first developer/observability aesthetic — *"code dark + run green"* (sl
 | Phase | Scope |
 |---|---|
 | **Phase 1 — Core App** *(current)* | Ingestion, 7-pattern RAG, agent layer, access control, credits, debug panel, notifications — plus structural prompt-injection defenses and a minimal eval seed set. |
-| **Phase 2 — Evaluation Suite & Billing** | Full Promptfoo + DeepEval + Ragas, **answer-groundedness self-correction** (CRAG/Self-RAG node — grade → re-retrieve / `web_search` / abstain, see [research §17](specs/001-contextengine-mvp/research.md)), agent `web_search` (per-search HITL), context compression (Headroom seam), audio ingestion (Whisper), and the **billing & payments** layer (Stripe / Polar / PayPal adapters, checkout, webhooks, subscriptions — see [billing-payments-design.md](specs/001-contextengine-mvp/billing-payments-design.md)). |
+| **Phase 2 — Evaluation Suite & Billing** | Full Promptfoo + DeepEval + Ragas, **answer-groundedness self-correction** (CRAG/Self-RAG node — grade → re-retrieve / `web_search` / abstain, see [research §17](specs/001-contextengine-mvp/research.md)), agent `web_search` (per-search HITL), context compression (Headroom seam), audio ingestion (Whisper), and the **billing & payments** layer (Stripe / Polar / PayPal adapters, checkout, webhooks, subscriptions — see [draft-plan.md — Phase 2](specs/draft-plan.md#phase-2-billing-and-payments)). |
 | **Phase 3 — Security Hardening** | Automated red-teaming (NVIDIA Garak), expanded abuse controls. |
 
 ---

@@ -74,7 +74,7 @@ Blocked-operation responses: `402 payment_required` (balance exhausted, with upg
 
 ## Billing & payments (Phase 2, US4-ext)
 
-> Out of Phase 1 scope (see [spec.md](../spec.md) "Out of Scope"); full design in [billing-payments-design.md](../billing-payments-design.md). Additive to the credit backbone — consumption endpoints above are unchanged. All authenticated and workspace-scoped unless noted; mutating endpoints accept `Idempotency-Key`.
+> Out of Phase 1 scope (see [spec.md](../spec.md) "Out of Scope"); full design in [draft-plan.md — Phase 2 Billing & Payments](../../draft-plan.md#phase-2-billing-and-payments). Additive to the credit backbone — consumption endpoints above are unchanged. All authenticated and workspace-scoped unless noted; mutating endpoints accept `Idempotency-Key`.
 
 | Method | Path | Purpose | Notes |
 |--------|------|---------|-------|

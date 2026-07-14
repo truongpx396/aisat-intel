@@ -99,7 +99,7 @@ Recipient-scoped record of a workspace event, surfaced in-app and optionally by 
 
 ### Billing & payments (Phase 2, US4-ext)
 
-> Out of Phase 1 scope (see [spec.md](./spec.md) "Out of Scope"); full schema in [billing-payments-design.md](./billing-payments-design.md). **Additive** to the credit backbone — `workspace_credits`, `credit_ledger`, and the consumption hot path are unchanged. A provider only converts fiat → credits (one-time top-up) or grants a recurring allotment (subscription), then appends a `credit_ledger` grant row keyed by `idem_key` (reuses the SC-006 double-debit guard). Money is integer minor units (`BIGINT` + ISO-4217 `currency`), never floats.
+> Out of Phase 1 scope (see [spec.md](./spec.md) "Out of Scope"); full schema in [draft-plan.md — Phase 2 Billing & Payments](../draft-plan.md#phase-2-billing-and-payments). **Additive** to the credit backbone — `workspace_credits`, `credit_ledger`, and the consumption hot path are unchanged. A provider only converts fiat → credits (one-time top-up) or grants a recurring allotment (subscription), then appends a `credit_ledger` grant row keyed by `idem_key` (reuses the SC-006 double-debit guard). Money is integer minor units (`BIGINT` + ISO-4217 `currency`), never floats.
 
 - `plans` (K) — **supersedes the stub above**: purchasable credit pack or subscription tier (`code`, `kind`, `price_minor`, `currency`, `credit_allotment`, `billing_interval`, `is_active`).
 - `plan_provider_prices` (K) — maps one logical plan to each provider's external price/product ID (`stripe`|`polar`|`paypal`).
