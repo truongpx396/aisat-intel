@@ -353,7 +353,7 @@ Access control is **structural**, enforced at multiple layers — not by trustin
 
 - **PostgreSQL RLS** — every tenant-scoped table carries `workspace_id NOT NULL` with a policy `USING (workspace_id = current_setting('app.workspace_id')::uuid)`, set per-request via `SET LOCAL` by the Tenant middleware.
 - **Qdrant payload pre-filters** — retrieval is filtered by `workspace_id`, `user_id`, and `access_level` *before* vectors are scored.
-- **5-level clearance ladder** — a member sees their own docs plus shared docs at or below their clearance; an uploader can never set a doc above their own level.
+- **5-level clearance ladder** — a member sees their own docs plus shared docs at or below their clearance; an uploader can never set a doc above their own level. *(Phase 1 stores the level as an integer and never persists a level **name**, so Phase 2 adds configurable labels and an orthogonal group axis without a migration — see the [roadmap](#-roadmap).)*
 - **Memory access-control invariant** — Mem0 memories carry the clearance of the data that produced them; a memory distilled from a now-restricted doc is never re-injected (survives clearance demotion).
 - **Existence privacy** — cross-clearance / cross-workspace lookups return `not_found`, never `forbidden`, so restricted resources aren't probeable.
 - **Prompt-injection defense** — disallowed/injection inputs are refused *before* retrieval or credit spend; retrieved documents are treated as inert reference material.
@@ -615,7 +615,7 @@ This repository is **spec-driven** (GitHub Spec Kit). The design package is the 
 | 🗄️ [data-model.md](specs/001-contextengine-mvp/data-model.md) | Entity catalog, RLS policies, partitions, access-control invariants. |
 | 🚀 [quickstart.md](specs/001-contextengine-mvp/quickstart.md) | Local development and run instructions. |
 | ✅ [tasks.md](specs/001-contextengine-mvp/tasks.md) | Dependency-ordered, TDD-first task breakdown by user story. |
-| 💳 [draft-plan.md](specs/draft-plan.md) | Phase 2+ later-phase design notes (billing & payments, scale/resilience hardening) held for future planning. |
+| 💳 [draft-plan.md](specs/draft-plan.md) | Phase 2+ later-phase design notes held for future planning — billing & payments, response rating, workspace mind map, enterprise knowledge layer, tenancy & delegated administration, agent access & accountability, and Phase 4 scale/resilience hardening. Every open decision in it is resolved; each section links back to the Phase 1 doc it defers from. |
 | ☑️ [checklists/requirements.md](specs/001-contextengine-mvp/checklists/requirements.md) | Spec-quality checklist. |
 
 ### 📜 Contracts (contract-first boundaries)
@@ -654,7 +654,9 @@ Open `.excalidraw` files at [excalidraw.com](https://excalidraw.com) or with the
 A dark-first developer/observability aesthetic — *"code dark + run green"* (slate-900 canvas, run-green primary, semantic cyan/amber/red for status and scores), with Fira Code / Fira Sans typography and WCAG 2.1 AA targets.
 
 - 🎨 Master tokens & components: [design-system/aisat-studio/MASTER.md](design-system/aisat-studio/MASTER.md)
-- 📄 Per-page specs: [chat](design-system/aisat-studio/pages/chat.md) · [library](design-system/aisat-studio/pages/library.md) · [workspace](design-system/aisat-studio/pages/workspace.md) · [agents](design-system/aisat-studio/pages/agents.md) · [credits](design-system/aisat-studio/pages/credits.md) · [notifications](design-system/aisat-studio/pages/notifications.md) · [admin](design-system/aisat-studio/pages/admin.md)
+- 📄 Per-page specs: [chat](design-system/aisat-studio/pages/chat.md) · [library](design-system/aisat-studio/pages/library.md) · [workspace](design-system/aisat-studio/pages/workspace.md) · [agents](design-system/aisat-studio/pages/agents.md) · [credits](design-system/aisat-studio/pages/credits.md) · [notifications](design-system/aisat-studio/pages/notifications.md) · [admin](design-system/aisat-studio/pages/admin.md) · [organization](design-system/aisat-studio/pages/organization.md) *(Phase 2)*
+- 🖼️ Rendered mockups live in [`.stitch/designs/`](.stitch/designs/) — one HTML file per page spec. Future-phase affordances are staged there behind a muted `Phase 2` / `Phase 4` chip so shipped Phase-1 surface stays distinguishable from design intent.
+- 🔧 The shared app shell (sidebar, org/workspace switcher, primary nav) is generated for every mockup by [`.stitch/build.py`](.stitch/build.py) — edit it there, not per file. `python3 .stitch/build.py --check` fails on drift.
 
 ---
 
@@ -664,7 +666,9 @@ A dark-first developer/observability aesthetic — *"code dark + run green"* (sl
 |---|---|
 | **Phase 1 — Core App** *(current)* | Ingestion, 7-pattern RAG, agent layer, access control, credits, debug panel, notifications — plus structural prompt-injection defenses and a minimal eval seed set. |
 | **Phase 2 — Evaluation Suite & Billing** | Full Promptfoo + DeepEval + Ragas, **answer-groundedness self-correction** (CRAG/Self-RAG node — grade → re-retrieve / `web_search` / abstain, see [research §17](specs/001-contextengine-mvp/research.md)), agent `web_search` (per-search HITL), context compression (Headroom seam), audio ingestion (Whisper), the **billing & payments** layer (Stripe / Polar / PayPal adapters, checkout, webhooks, subscriptions — see [draft-plan.md — Phase 2](specs/draft-plan.md#phase-2-billing-and-payments)), **AI response rating** (thumbs up/down per answer, feeds eval pipeline — see [draft-plan.md](specs/draft-plan.md#phase-2--ai-response-rating-thumbs-up--down)), and a **workspace knowledge mind map** (seed from any doc/note/query, edge-verified retrieval, progressive SSE streaming — see [draft-plan.md](specs/draft-plan.md#phase-2--workspace-knowledge-mind-map)). |
+| **Phase 2 — Enterprise & Access** | A second **access axis** — the L1–L5 ladder joined by group/principal ACLs, with the ladder's labels and level count becoming workspace config (see [draft-plan.md — Access model](specs/draft-plan.md#access-model-decided)); an **enterprise knowledge layer** (typed artifacts, a provenance-carrying knowledge graph, an agent registry, and Git/Jira/Confluence connectors — [draft-plan.md](specs/draft-plan.md#phase-2--enterprise-knowledge-layer-typed-artifacts-knowledge-graph--agent-context-api)); an **organization** above workspace for consolidated billing, SSO/SCIM and policy defaults, plus delegated group administration ([draft-plan.md](specs/draft-plan.md#phase-2--tenancy--delegated-administration)); and **agent access & accountability** — agents as principals bounded by their owner, explicit write scope, and resource-level audit visible to the agent's owner ([draft-plan.md](specs/draft-plan.md#phase-2--agent-access--accountability)). |
 | **Phase 3 — Security Hardening** | Automated red-teaming (NVIDIA Garak), expanded abuse controls. |
+| **Phase 4 — Scale & Resilience** | Worker autoscaling (KEDA on NATS lag), SSE connection ceilings and backpressure, PgBouncer, Qdrant/Redis HA, load & soak testing, per-tenant fairness — [draft-plan.md — Phase 4](specs/draft-plan.md#phase-4-scalability-and-resilience-hardening). |
 
 ---
 
