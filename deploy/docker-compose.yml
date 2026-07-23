@@ -1,0 +1,169 @@
+
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: aisat-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aisat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aisat}
+      POSTGRES_DB: ${POSTGRES_DB:-aisat}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aisat -d aisat"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: aisat-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    container_name: aisat-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:6333/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  nats:
+    image: nats:2.10-alpine
+    container_name: aisat-nats
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    command: -js -m 8222
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: aisat-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  casdoor:
+    image: casbin/casdoor:3.113.0
+    container_name: aisat-casdoor
+    ports:
+      - "8000:8000"
+    environment:
+      RUNNING_IN_DOCKER: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: aisat-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    # depends_on:
+    #   - api  # Uncomment when Go BFF service is ready
+    restart: unless-stopped
+
+  # api (Go BFF)
+  # Uncomment when backend-go/Dockerfile is ready
+  # api:
+  #   build:
+  #     context: ../backend-go
+  #     dockerfile: Dockerfile
+  #   container_name: aisat-api
+  #   ports:
+  #     - "8080:8080"
+  #   environment:
+  #     DATABASE_URL: postgresql://aisat:aisat@postgres:5432/aisat
+  #     REDIS_URL: redis://redis:6379
+  #     QDRANT_URL: http://qdrant:6333
+  #     NATS_URL: nats://nats:4222
+  #     S3_ENDPOINT: http://minio:9000
+  #     S3_BUCKET: aisat
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #     qdrant:
+  #       condition: service_healthy
+  #     nats:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+
+  # worker (Python LangGraph tier)
+  # Uncomment when backend-python is ready
+  # worker:
+  #   build:
+  #     context: ../backend-python
+  #     dockerfile: Dockerfile
+  #   container_name: aisat-worker
+  #   environment:
+  #     DATABASE_URL: postgresql://aisat:aisat@postgres:5432/aisat
+  #     REDIS_URL: redis://redis:6379
+  #     QDRANT_URL: http://qdrant:6333
+  #     NATS_URL: nats://nats:4222
+  #     S3_ENDPOINT: http://minio:9000
+  #     S3_BUCKET: aisat
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #     qdrant:
+  #       condition: service_healthy
+  #     nats:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  minio_data:
+  caddy_data:
+  caddy_config:
