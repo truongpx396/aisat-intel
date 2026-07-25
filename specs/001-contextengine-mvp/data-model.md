@@ -54,6 +54,7 @@ A member's conversational thread with remembered context. Partitioned by `HASH (
 - `workspace_credits` (K-adjacent): PK `workspace_id`, `balance` INT, `updated_at` — authoritative copy is the Redis hot key; this row is the durable mirror.
 - `credit_ledger`: `id`, `workspace_id`, `user_id`, `operation_type` (includes `reconcile`), `credits_used` INT, `idem_key` TEXT, `trace_id`, `created_at`. Partitioned by `created_at`. **`UNIQUE (idem_key) WHERE idem_key IS NOT NULL`** prevents double-debit (FR-019, SC-006).
 - Rules: append-only; Redis balance = `SUM(ledger.delta) + grants`; rehydrate-on-cold-start + hourly reconciliation (research §3). The **Go kernel billing worker is the sole `credit_ledger` writer** (`backend-go/kernel/billing/`); Python spend producers only publish `billing.deduct` events and never write the ledger.
+- **Reusability seam**: this table is the durable backing of the domain-agnostic `Ledger`/`LedgerWriter` ports — `workspace_id` is the reference binding of the opaque `Scope`, `operation_type` = the port's `Reason`, and cost is produced by a `Pricer` (LLM-token pricing is one implementation). See [contracts/metering-ports.md](./contracts/metering-ports.md) for the ports + generalization checklist.
 
 ### AI Operation Record / LLM Call Log (P)
 Per-metered-call record for cost dashboard. Partitioned by `created_at`.

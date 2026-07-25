@@ -599,7 +599,9 @@ HOT PATH (api · per request, sub-ms)          ASYNC DRAIN (cmd/worker · sole l
 
 > **Phase 1 ships credit *metering*, not payments.** Credits are the single internal unit and the consumption hot path (Redis `DECRBY` + outbox + ledger) is fully implemented now. The fiat **payment/provider layer** — Stripe / Polar / PayPal adapters, checkout, webhooks-as-source-of-truth, subscriptions — is an **additive Phase 2** layer that only converts money → credits; it never changes consumption. `plans` / `subscriptions` exist as stubs in Phase 1. See [draft-plan.md — Phase 2 Billing & Payments](specs/draft-plan.md#phase-2-billing-and-payments) (Phase 2 design draft).
 
-📄 Billing & payments design (Phase 2): [draft-plan.md — Phase 2](specs/draft-plan.md#phase-2-billing-and-payments) · 📐 [credit-metering-swimlane](specs/001-contextengine-mvp/diagrams/credit-metering-swimlane.excalidraw) · [billing-payment-flow](specs/001-contextengine-mvp/diagrams/addition/billing-payment-flow.excalidraw)
+> **Built to extract & reuse.** The consumption engine is factored behind three domain-agnostic ports — `Pricer` (cost, the *only* product-specific piece), `Ledger`/`LedgerWriter` (the single-writer account of record), and a `Meter` orchestrator over an opaque `Scope` (workspace / org / user / account) — so the same ledger + outbox + reconcile + idempotency machinery drops into another system by writing one `Pricer` and binding one `Scope`, with no change to the money path. ContextEngine's LLM-token metering is just one implementation. See [contracts/metering-ports.md](specs/001-contextengine-mvp/contracts/metering-ports.md) for the port interfaces + the generalization checklist.
+
+📄 Billing & payments design (Phase 2): [draft-plan.md — Phase 2](specs/draft-plan.md#phase-2-billing-and-payments) · 🔌 Reusable ports: [metering-ports.md](specs/001-contextengine-mvp/contracts/metering-ports.md) · 📐 [credit-metering-swimlane](specs/001-contextengine-mvp/diagrams/credit-metering-swimlane.excalidraw) · [billing-payment-flow](specs/001-contextengine-mvp/diagrams/addition/billing-payment-flow.excalidraw)
 
 ---
 
@@ -799,6 +801,7 @@ Source of truth for every system boundary and the target of contract tests — [
 | [nats-subjects.md](specs/001-contextengine-mvp/contracts/nats-subjects.md) | NATS subject schema (ingestion / query / billing) |
 | [mcp-tools.md](specs/001-contextengine-mvp/contracts/mcp-tools.md) | 8 MCP tools across 3 categories |
 | [llm-gateway.md](specs/001-contextengine-mvp/contracts/llm-gateway.md) | Standalone LLM gateway service (LiteLLM · Bifrost-swappable) + per-runtime client |
+| [metering-ports.md](specs/001-contextengine-mvp/contracts/metering-ports.md) | Reusable `Meter`/`Pricer`/`Ledger` ports — the credit backbone as a domain-agnostic, extractable engine |
 | [sse-events.md](specs/001-contextengine-mvp/contracts/sse-events.md) | SSE event taxonomy (BFF ↔ frontend) |
 
 ---
