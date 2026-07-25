@@ -13,6 +13,7 @@ These contracts define the external/internal interfaces the system exposes. They
 | [nats-subjects.md](./nats-subjects.md) | NATS subject schema | Go BFF ↔ Python workers |
 | [mcp-tools.md](./mcp-tools.md) | 8 MCP tools across 3 categories | LangGraph agent, local agents |
 | [llm-gateway.md](./llm-gateway.md) | Standalone LLM gateway service (LiteLLM, Bifrost-swappable) + per-runtime client | All Go/Python LLM call sites |
+| [metering-ports.md](./metering-ports.md) | Reusable `Meter`/`Pricer`/`Ledger` ports for the credit backbone (domain-agnostic) | Go kernel `metering`/`billing`, all spend producers |
 | [sse-events.md](./sse-events.md) | SSE event taxonomy | Go BFF ↔ React SPA |
 
 ## Conventions
