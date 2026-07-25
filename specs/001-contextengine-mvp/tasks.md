@@ -33,9 +33,9 @@ description: "Task list for AISAT-INTEL MVP (Phase 1) implementation"
 
 - [ ] T001 Create the three-runtime directory structure per plan.md: `backend-go/{cmd/api,kernel,internal,migrations,tests}`, `backend-python/{src,tests,evals,prompts}`, `frontend/{src,tests}`, `deploy/`
 - [ ] T002 [P] Initialize Go module in `backend-go/go.mod` (Go 1.23) with Gin, GORM, nats.go, go-redis, OpenTelemetry, zerolog, Sentry, and `testcontainers-go` (integration-test deps) dependencies
-- [ ] T003 [P] Initialize Python project in `backend-python/pyproject.toml` (Python 3.12) with FastAPI, LangGraph, Mem0, BAML, FastMCP, MarkItDown, Crawl4AI, qdrant-client, openai, cohere, structlog, Langfuse SDK, and `testcontainers` (pytest integration deps)
+- [ ] T003 [P] Initialize Python project in `backend-python/pyproject.toml` (Python 3.12) with FastAPI, LangGraph, Mem0, BAML, FastMCP, MarkItDown, Crawl4AI, qdrant-client, `openai` (client pointed at the LLM gateway URL — provider SDKs live in the gateway service, not here), structlog, Langfuse SDK, and `testcontainers` (pytest integration deps)
 - [ ] T004 [P] Initialize React SPA in `frontend/package.json` (React 19, Vite, TypeScript 5.x, native EventSource, PostHog) with Vitest (unit/component) and Playwright (cross-browser E2E) test tooling
-- [ ] T005 [P] Create `deploy/docker-compose.yml` with postgres, redis, qdrant, nats, minio (S3), casdoor, and caddy services
+- [ ] T005 [P] Create `deploy/docker-compose.yml` with postgres, redis, qdrant, nats, minio (S3), casdoor, caddy, and the **llm-gateway** (LiteLLM on `:4000`, config from `deploy/llm-gateway/`) services
 - [ ] T006 [P] Create `deploy/Caddyfile` for reverse proxy, automatic TLS, and static SPA serving in front of the BFF
 - [ ] T007 [P] Create root `Makefile` with `up`, `down`, `migrate`, `dev`, `build`, `test`, `lint`, `eval` targets across all three runtimes
 - [ ] T008 [P] Configure Go linting/formatting in `backend-go/.golangci.yml` including `depguard` to forbid `kernel/` importing `internal/` (Principle I/II)
@@ -76,8 +76,9 @@ description: "Task list for AISAT-INTEL MVP (Phase 1) implementation"
 
 ### Python tier chokepoints (LLM gateway, MCP server, access filter)
 
-- [ ] T025 [P] Contract test for LLM gateway (idempotency, one-hop fallback, embed-no-fallback, PII scrub) in `backend-python/tests/contract/test_llm_gateway.py` per [llm-gateway.md](./contracts/llm-gateway.md)
-- [ ] T026 Implement LLM gateway single chokepoint (`LLMRequest`/`LLMResponse`, alias resolution `fast`/`smart`/`embed`/`rerank`, idempotency, budget check, semantic cache, PII scrub via the shared `pii_scrub.py` of T123, trace + `llm_call_log` write) in `backend-python/src/services/llm_gateway.py` (FR-024, FR-029, SC-006)
+- [ ] T024b [P] Deploy the **standalone LLM gateway service** (LiteLLM on `:4000`) via `deploy/docker-compose.yml` + `deploy/llm-gateway/config.yaml`: map aliases (`fast`/`smart`/`embed`/`rerank`) → provider models, hold provider keys, configure multi-key load-balancing + one-hop fallback + circuit breaker; **disable** its built-in budget/spend and response cache; swappable to Bifrost via `LLM_GATEWAY_KIND` (research §21, §4)
+- [ ] T025 [P] Contract test for the LLM gateway-client + service (idempotency, clearance-scoped cache, one-hop fallback via the gateway, embed-no-fallback, PII scrub, OpenAI-wire swappability) in `backend-python/tests/contract/test_llm_gateway.py` per [llm-gateway.md](./contracts/llm-gateway.md)
+- [ ] T026 Implement the LLM **gateway-client** wrapper (`LLMRequest`/`LLMResponse`; forwards to the standalone gateway `:4000` via `LLM_GATEWAY_URL`; idempotency, budget gate, clearance-scoped semantic cache, PII scrub via the shared `pii_scrub.py` of T123, cost computation + `billing.deduct` emit, trace + `llm_call_log` write — alias resolution/fallback live in the gateway config of T024b, **not** here) in `backend-python/src/services/llm_gateway.py` (FR-024, FR-029, SC-006, research §21)
 - [ ] T027 [P] Implement Qdrant access-control pre-filter helper in `backend-python/src/services/retrieval/filter.py` with **two filter builders** (FR-007, SC-001):
   - `personal_filter(workspace_id, user_id)` → `must = [workspace_id == ctx, user_id == requester_user_id]` (personal collection — owner-only, clearance irrelevant)
   - `workspace_filter(workspace_id, access_level)` → `must = [workspace_id == ctx, access_level <= effective_access_level]` (workspace collection — shared docs)
@@ -230,7 +231,7 @@ description: "Task list for AISAT-INTEL MVP (Phase 1) implementation"
 - [ ] T095 [US4] Implement the Go kernel billing worker as the **sole `credit_ledger` writer**, running in the `cmd/worker` role (not `cmd/api`): consume `billing.deduct.<ws>` spend events + **atomic** Redis-outbox pop (`LPOP`/Stream consumer-group) → ledger drain + cold-start rehydration (per-workspace lock); hourly reconciliation triggered by the external `billing.reconcile.tick` (pluggable: k8s `CronJob` / DO scheduled component / cron / single-owner `worker` ticker) and guarded by `SET NX reconcile:lock:{shard}:{hour_bucket}` so duplicate/concurrent ticks run once — in `backend-go/kernel/billing/reconcile.go` (FR-019, SC-006, research §15)
 - [ ] T096 [P] [US4] Implement new-account/per-IP cumulative ceilings (relaxed only after `email_verified_at`) in `backend-go/internal/credits/service/abuse_guard.go` (FR-020)
 - [ ] T097 [US4] Implement credits HTTP transport (`GET /credits`) + `SetupModule` in `backend-go/internal/credits/infra/transport/http/handler.go` and `backend-go/internal/credits/module.go`
-- [ ] T098 [P] [US4] Implement the Python spend-event emitter (query/ingest/agent workers publish `billing.deduct.<ws>` with the cost computed by the LLM gateway; **never** writes `credit_ledger` or the Redis balance) in `backend-python/src/services/billing/emitter.py`
+- [ ] T098 [P] [US4] Implement the Python spend-event emitter (query/ingest/agent workers publish `billing.deduct.<ws>` with the cost computed at the call site from the standalone gateway's returned token usage; **never** writes `credit_ledger` or the Redis balance) in `backend-python/src/services/billing/emitter.py`
 - [ ] T099 [P] [US4] Implement credit balance UI + near-limit warning banner with upgrade CTA in `frontend/src/features/chat/components/CreditBalance.tsx`
 
 **Checkpoint**: US1–US4 work; credit accounting is exact, observable, and abuse-guarded.
@@ -296,7 +297,7 @@ description: "Task list for AISAT-INTEL MVP (Phase 1) implementation"
 - [ ] T113 [US7] Create `devices`, `agent_policies`, `agent_audit_log`, `agent_run` migrations (partitioned where noted; `agent_run` checkpoint `state` JSONB, `credits_cap`/`credits_spent`) in `backend-go/migrations/0014_agents.sql` (FR-025–FR-028)
 - [ ] T114 [P] [US7] Implement device + policy + agent-run models in `backend-go/internal/policy/model/device.go`, `policy.go`, and `agent_run.go`
 - [ ] T115 [US7] Implement device registration service (issue scoped 90d PAT, list/revoke, `workspace_id` from PAT only) in `backend-go/internal/policy/service/device.go` (FR-025, FR-027)
-- [ ] T116 [US7] Implement LLM proxy + policy chain (`POST /llm/proxy`: authenticate PAT, enforce `allowed_tools`/token budget, deduct credits, resolve alias, forward, trace; admin-disableable BYOK) in `backend-go/internal/policy/service/llm_proxy.go` (FR-026, FR-027)
+- [ ] T116 [US7] Implement LLM proxy + policy chain (`POST /llm/proxy`: authenticate PAT, enforce `allowed_tools`/token budget, deduct credits, resolve alias, forward **as a synchronous HTTP streaming pass-through to the standalone LLM gateway `:4000`** — `stream:true` relays provider SSE verbatim, flush-per-chunk, no buffering; client disconnect cancels `request.Context()` → forwarded HTTP request → gateway stream; not gRPC/NATS, research §20/§21 — then trace; admin-disableable BYOK) in `backend-go/internal/policy/service/llm_proxy.go` (FR-026, FR-027)
 - [ ] T117 [US7] Implement agent-run service (cancel propagation, per-step `credits_cap` check independent of daily budget) in `backend-go/internal/policy/service/agent_run.go` (FR-028, SC-009)
 - [ ] T118 [P] [US7] Implement policy repository + `agent_audit_log` writer (`tool_called`, `token_cost`, `result_hash`, `trace_id`) in `backend-go/internal/policy/infra/repo/policy_repo.go` (FR-023)
 - [ ] T119 [US7] Implement policy HTTP transport (`/devices/*`, `/llm/proxy`, `/agent-runs/*`) + `SetupModule` in `backend-go/internal/policy/infra/transport/http/handler.go` and `backend-go/internal/policy/module.go`
@@ -347,7 +348,7 @@ description: "Task list for AISAT-INTEL MVP (Phase 1) implementation"
 
 **Purpose**: Reliability, observability, retention, evaluation gate, and final validation across all stories
 
-- [ ] T122 [P] Implement provider one-hop fallback + circuit breaker + `llm.fallback.count` metric (never on low-quality output) in `backend-python/src/services/llm_gateway.py` (FR-029)
+- [ ] T122 [P] Configure provider one-hop fallback + multi-key load-balancing + circuit breaker (never on low-quality output) in the **standalone LLM gateway** (`deploy/llm-gateway/config.yaml`, LiteLLM router; Bifrost-swappable) and export `llm.fallback.count`; verified via the gateway, not application code (FR-029, research §21)
 - [ ] T123 [P] Implement the canonical PII scrubber in `backend-python/src/services/pii_scrub.py` (single implementation; the LLM gateway T026 is its only caller, covering both primary and one-hop-fallback calls) applied before any trace/eval write + 30-day raw-body retention via partition `DROP` job in `backend-go/migrations/0015_retention_jobs.sql` (FR-024, Clarification Q5)
 - [ ] T124 [P] Implement generic `audit_log` writer (tamper-evident fingerprint) for workspace/member actions in `backend-go/kernel/audit/audit.go` (FR-023)
 - [ ] T125 Implement Phase 1 eval seed set + runner (`evals/run.py`: ≥20 prompt cases; `prompts/retrieval/eval.py`: ≥30 golden queries) with the hard access-filter assertion (query at level N never returns doc > N) in `backend-python/evals/run.py` and `backend-python/prompts/retrieval/eval.py` (FR-030, SC-002, SC-003)

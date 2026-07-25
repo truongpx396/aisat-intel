@@ -257,9 +257,13 @@ wired in cmd/worker (research §18).
 ```
 [preamble]
 T025 (test FIRST, must fail) contract test for LLM gateway per contracts/llm-gateway.md.
-T026 LLM gateway single chokepoint (aliases fast/smart/embed/rerank, idempotency, budget check,
-     semantic cache, PII scrub, trace + llm_call_log). NOTE: pii_scrub.py (T123) may be a thin
-     stub now; gateway is its only caller.
+T024b deploy the standalone LLM gateway service (LiteLLM :4000, deploy/llm-gateway/config.yaml —
+     aliases fast/smart/embed/rerank → provider models, keys, LB + one-hop fallback; built-in
+     budget/cache DISABLED; Bifrost-swappable). research §21.
+T026 LLM gateway-CLIENT wrapper (forwards to :4000; idempotency, budget gate, clearance-scoped
+     semantic cache, PII scrub, cost→billing.deduct, trace + llm_call_log). Alias/fallback live in
+     the gateway config (T024b), NOT here. NOTE: pii_scrub.py (T123) may be a thin stub now; the
+     gateway-client is its only caller.
 T027 Qdrant access-control pre-filter — TWO builders:
      personal_filter(workspace_id,user_id) and workspace_filter(workspace_id,access_level).
      DENY-BY-DEFAULT: any Qdrant search with no workspace_id (and, for workspace collection, no

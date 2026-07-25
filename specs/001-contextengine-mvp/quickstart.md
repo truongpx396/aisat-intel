@@ -9,7 +9,7 @@ This guide describes how to bring up the system locally and validate the Phase 1
 - Docker + Docker Compose
 - Go 1.23, Python 3.12, Node 20+ (for local non-container development)
 - Caddy (reverse proxy + automatic TLS / static SPA host) and Casdoor (auth provider) run as compose services; no separate install needed for local dev
-- Environment variables (never committed; loaded from env): `OPENAI_API_KEY`, `COHERE_API_KEY`, optional `ANTHROPIC_API_KEY` / `VOYAGE_API_KEY` (fallbacks), `LANGFUSE_*`, `S3_*`, `TURNSTILE_SECRET`, `JWT_SECRET`, `CASDOOR_*` (endpoint, client id/secret, org/app).
+- Environment variables (never committed; loaded from env): provider keys `OPENAI_API_KEY`, `COHERE_API_KEY`, optional `ANTHROPIC_API_KEY` / `VOYAGE_API_KEY` (fallbacks) — **consumed by the standalone `llm-gateway` service, not the app tiers**; `LLM_GATEWAY_URL` (default `http://llm-gateway:4000`) + `LLM_GATEWAY_KIND` (`litellm`|`bifrost`); `LANGFUSE_*`, `S3_*`, `TURNSTILE_SECRET`, `JWT_SECRET`, `CASDOOR_*` (endpoint, client id/secret, org/app).
 
 ## Bring up the stack
 
@@ -17,7 +17,7 @@ A top-level `Makefile` wraps the common tasks across all three runtimes (preferr
 
 ```bash
 # from repo root
-make up        # docker compose up -d: postgres, redis, qdrant, nats, minio(s3), casdoor, caddy
+make up        # docker compose up -d: postgres, redis, qdrant, nats, minio(s3), casdoor, caddy, llm-gateway (:4000)
 make migrate   # apply Postgres migrations (RLS policies, partitions) + create Qdrant collections
 make dev       # run BFF (:8080), Python workers + MCP (:8000/:8002), and SPA (:5173) together
 # ...
@@ -28,7 +28,7 @@ Equivalent explicit commands (what the Makefile targets run under the hood):
 
 ```bash
 # from repo root
-docker compose -f deploy/docker-compose.yml up -d   # postgres, redis, qdrant, nats, minio(s3), casdoor, caddy
+docker compose -f deploy/docker-compose.yml up -d   # postgres, redis, qdrant, nats, minio(s3), casdoor, caddy, llm-gateway(:4000)
 # backend-go
 cd backend-go && go run ./cmd/api            # BFF on :8080
 # backend-python

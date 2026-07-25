@@ -98,7 +98,7 @@ Billing responses:
 |--------|------|---------|-------|
 | POST | `/devices/authorize` | Device registration approval (browser) | Issues scoped PAT (user+workspace, 90d) (FR-025) |
 | GET | `/devices` / DELETE `/devices/{id}` | List / revoke connected devices | FR-025 |
-| POST | `/llm/proxy` | OpenAI-compatible LLM pass-through (proxy sub-mode) | Authenticates PAT, enforces token budget, deducts credits, resolves alias, forwards, traces (FR-026). BYOK devices do not use this. |
+| POST | `/llm/proxy` | OpenAI-compatible LLM pass-through (proxy sub-mode) | Authenticates PAT, enforces token budget, deducts credits, resolves alias, forwards, traces (FR-026). BYOK devices do not use this. **Transport**: synchronous HTTP streaming pass-through to the standalone LLM gateway (`:4000`, LiteLLM/Bifrost) — `stream:true` relayed verbatim as SSE, flush-per-chunk, context-cancel chained; not gRPC/NATS (research §20, §21). |
 | GET | `/agent-runs` / POST `/agent-runs/{id}/cancel` | List / cancel long-horizon runs | Cancel → `cancelling`→`cancelled` (FR-028, SC-009) |
 
 ## Notifications (US8)

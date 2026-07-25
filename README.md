@@ -26,6 +26,7 @@ Access control is enforced at the **data layer**, never by prompt. Every AI oper
 - ✨ [Core Capabilities](#-core-capabilities)
 - 🧩 [The RAG Agent — 7+1 Node LangGraph](#-the-rag-agent--71-node-langgraph)
 - 🔐 [Security & Access Control](#-security--access-control)
+- 🔌 [Connectors & External-Agent Access (Phase 2)](#-connectors--external-agent-access-phase-2)
 - 💳 [Credit Metering & Billing](#-credit-metering--billing)
 - ⚡ [Redis — the Production Hot Path](#-redis--the-production-hot-path)
 - 🔔 [Notification System](#-notification-system)
@@ -65,7 +66,7 @@ This is not a toy RAG demo. It is designed around the constraints real productio
 | 🛡️ **Prompt-injection resistance** | Access enforced at the data layer, *never* by prompt. Injection / disallowed inputs are **refused before retrieval or spend** (SC-007). Embedded "ignore previous instructions" in documents is treated as inert reference text. |
 | 💸 **Exact cost accounting** | Redis hot-path credit ledger + PostgreSQL durable ledger with **idempotency keys** — no double-charge (SC-006), rehydrate-on-cold-start + hourly reconciliation. |
 | ⚡ **Performance budgets** | API **p95 < 200ms** (non-LLM paths); retrieval `recall@10 ≥ 0.85`, `MRR@10 ≥ 0.70`; first upload → cited answer **< 5 min**. |
-| 🔌 **Vendor resilience** | All LLM access funneled through a **single gateway** with `fast`/`smart`/`embed`/`rerank` aliases and **one-hop provider fallback** — a single-vendor outage degrades, never downs, the product. |
+| 🔌 **Vendor resilience** | All LLM access funneled through a **standalone gateway service** (LiteLLM, Bifrost-swappable) with `fast`/`smart`/`embed`/`rerank` aliases, **multi-key load-balancing**, and **one-hop provider fallback** — a single-vendor outage degrades, never downs, the product. |
 | 🔭 **Full observability** | Langfuse + OpenTelemetry tracing; a per-answer **debug panel** exposes intent, tool, index tier, access-filter result, rerank scores, model, tokens, and credits. |
 | 🧪 **Verifiable quality** | **TDD is NON-NEGOTIABLE**; contract-first boundaries; **Testcontainers** for real-infra integration tests; **Playwright** E2E; 80% coverage floor per runtime; a hard access-filter assertion in the eval seed set. |
 | 📈 **Scalability** | Stateless Go BFF replicas, horizontally-scaled Python worker pods per NATS subject, partitioned Postgres, Redis hot path, hybrid-vector Qdrant. |
@@ -97,12 +98,15 @@ flowchart TB
     subgraph PY["🐍 Python ML / Agent Tier (3.12) · deploy roles: ingest · query · enrich · janitor"]
         Ingest["Ingestion Pipeline<br/>convert · caption · chunk · tag · embed"]
         Agent["LangGraph RAG Agent<br/>7+1 nodes · Mem0 · semantic cache"]
-        Gateway["LLM Gateway — single chokepoint<br/>fast/smart/embed/rerank + fallback"]
         MCP["MCP Tool Server — 8 tools / 3 categories"]
     end
 
     subgraph CRAWL["🕷️ Crawl4AI — separate single deployment"]
         Crawl["crawl worker<br/>headless browser · SSRF-guarded fetch"]
+    end
+
+    subgraph GATEWAY["🔌 LLM Gateway — standalone service (LiteLLM · Bifrost-swappable)"]
+        Gateway["aliases · multi-key LB · one-hop fallback<br/>only holder of provider keys"]
     end
 
     subgraph DATA["🗄️ Backing Stores"]
@@ -136,7 +140,7 @@ flowchart TB
 **Coordination seams**
 - **NATS** is the async bus between Go and Python (ingestion / query / billing subjects).
 - **Redis** is the low-latency control plane: credit fast-path, idempotency guards, rate limits / quotas, security throttling, LangGraph checkpoints, semantic answer-cache, and the outbox queue (see [Redis — the Production Hot Path](#-redis--the-production-hot-path)).
-- **The LLM Gateway** (`llm_gateway.py`) is the *only* place model IDs exist — business code uses aliases.
+- **The LLM Gateway** is a **standalone OpenAI-wire service** (LiteLLM, Bifrost-swappable) — the *only* place model IDs + provider keys live; both runtimes call it by alias through a thin client. Its own budget + cache are **off**: credit metering stays single-writer in Go, and the clearance-scoped answer-cache stays in the app (SC-006 / SC-001).
 - **The MCP server** is the *only* tool surface — every dispatch is allowlist-checked.
 
 #### Deployable runtimes at a glance
@@ -153,6 +157,7 @@ The system builds into **three images**, each deployed as one or more independen
 | | **`enrich`** | `enrich.note.*` subject | note-enrichment orchestration (distill → draft) | consumer lag |
 | | **`janitor`** | `agent.janitor.tick` | single-owner stale-`agent_run` re-queue | single-owner |
 | **`crawl` / Crawl4AI** (**separate image**) | **`crawl`** | `ingestion.crawl.*` subject | headless-browser (Chromium) fetch, SSRF-guarded | its own deployment |
+| **`llm-gateway`** (LiteLLM · Bifrost-swappable) | **standalone service** | `:4000` (OpenAI-wire) | aliases · multi-key LB · one-hop fallback · sole holder of provider keys | in-flight requests |
 
 > **Note the two things people usually get wrong here:** the **email/notification** worker and the **billing** worker are **Go** (`cmd/worker`) roles — not Python — because they carry no ML; and the **crawl** worker is peeled out into its **own separate deployment** rather than living on the shared Python pods (see below). The two subsections that follow expand the Go and Python splits.
 
@@ -301,7 +306,7 @@ Shared middleware lives in `backend-go/internal/shared/middleware/`; the **kerne
 An external or local agent (Cursor, Claude Code, Cline, a custom script) integrates through **two ingresses**, and the security posture is the whole point: whatever the agent does, it hits an **enforcement point (PEP)** that reads the **one** authoritative policy the Go kernel owns.
 
 - **LLM calls** go one of two ways — this is the **only** thing the mode changes:
-  - **`proxy` (default)** — the agent points `LLM_BASE_URL` at the OpenAI-compatible **`POST /llm/proxy`** (Go BFF). Every call passes the middleware chain above: PAT auth, rate limit, `413` body cap, **moderation**, token budget, and **credit deduction** — then the LLM Gateway resolves an alias and forwards to the provider.
+  - **`proxy` (default)** — the agent points `LLM_BASE_URL` at the OpenAI-compatible **`POST /llm/proxy`** (Go BFF). Every call passes the middleware chain above: PAT auth, rate limit, `413` body cap, **moderation**, token budget, and **credit deduction** — then forwards to the standalone LLM Gateway (LiteLLM, `:4000`), which resolves the alias, load-balances across keys, and calls the provider (falling over one hop on failure).
   - **`byok`** — the agent calls **its own provider directly**; the server never sees the call, so it is **not moderated and not metered**. Admins can disable BYOK per workspace.
 - **Tool / knowledge calls** go **one way, always** — the **MCP server on `:8002`** (Python), regardless of LLM mode. External agents reach it *directly*, bypassing the Go chain, so the MCP endpoint is its **own PEP** that re-applies the same request-level controls, reading the **same** policy stores.
 
@@ -315,7 +320,7 @@ flowchart TB
     MODE -->|"proxy · default"| PROXY["POST /llm/proxy · Go BFF PEP<br/>• PAT auth → ws from PAT (never body)<br/>• rate limit · 413 body cap<br/>• moderation (Node 0)<br/>• token budget · credit deduct"]
     MODE -->|"byok"| BYOK["agent's own provider key<br/>bypasses the server entirely<br/>❌ no moderation · ❌ no metering<br/>admin-disableable per workspace"]
 
-    PROXY --> GW["🐍 LLM Gateway<br/>alias · one-hop fallback · trace · llm_call_log"] --> PROV["☁️ LLM provider"]
+    PROXY --> GW["🔌 LLM Gateway (LiteLLM · Bifrost-swappable)<br/>alias · multi-key LB · one-hop fallback"] --> PROV["☁️ LLM provider"]
     BYOK -.-> PROV
 
     MCP["🐍 MCP server :8002 · Python PEP<br/>• PAT validate + instant revocation<br/>• rate limit · 413 body cap<br/>• allowed_tools allowlist<br/>• SET app.workspace_id / user_id / clearance<br/>• agent_audit_log"] --> DATA[("Postgres RLS<br/>Qdrant payload pre-filter")]
@@ -486,6 +491,89 @@ sequenceDiagram
 
 ---
 
+## 🔌 Connectors & External-Agent Access *(Phase 2)*
+
+> **Phase 2 — a superset, not a pivot.** It reuses the Phase-1 engine unchanged (MCP server, NATS bus, hybrid search, Postgres RLS + Qdrant payload filters) and adds a connector-sync layer plus a second access axis. Full design: [draft-plan.md — Enterprise Knowledge Layer](specs/draft-plan.md#phase-2--enterprise-knowledge-layer-typed-artifacts-knowledge-graph--agent-context-api).
+
+Phase 1 makes uploaded files queryable by **people**. Phase 2 widens the same substrate into a **centralized knowledge base that external AI agents query** — pulling from Git, Jira, Confluence, Notion, Google Drive, Slack — while **preserving each source's permissions end-to-end**, so an agent (or a person) only ever sees connector data it is authorized to see in *both* systems.
+
+### How data is imported, processed, and stored
+
+A connector is a **sync source, never an editing surface** — the external system stays the source of truth for *mirrored* artifacts; AISAT indexes them with a back-link and re-embeds from a normalized **canonical record**:
+
+| Stage | What happens |
+|---|---|
+| **1 · Sync** | Per-workspace OAuth/token auth to the source; incremental pull (webhook or poll + cursor). Each item becomes a **canonical record** with a metadata envelope — `source_ref`, `source_version`, `synced_at`, `stale`, `origin=mirrored`, `artifact_type`, **`access_level`**, **`allowed_principals`**, `tags`, `summary`. |
+| **2 · Route by shape** | **Prose** (Confluence/Notion pages, docs, READMEs) → normalized Markdown → structure-aware parent/child chunk → embed (**Tier-1**). **Structured** (Jira issues, rows, metrics) → **typed fields** + a hand-written scoped `query_*` tool (**Tier-2**, never Text-to-SQL). **Binary** (images/diagrams) → caption → embed the caption. |
+| **3 · Store** | **Canonical** (Markdown body / typed fields + envelope) is authoritative in Postgres `documents`; **Derived** (Qdrant chunks + vectors + `knowledge_edges`) is rebuilt from it. **Metadata rides as columns + Qdrant payload, never inside the embedded text** — retrieval *enforces* on it (RLS, ACL overlap, staleness), and folding ACLs into the vector would be a leak/injection surface. |
+
+The raw artifact stays re-fetchable via `source_ref` (a cold copy is kept only for rate-limited or delete-before-resync sources); *mirrored* artifacts never enter the authored-lifecycle machine — they carry `synced_at` + `source_version` + a `stale` flag instead.
+
+### Permission-preserving access — the crux
+
+The connector's real job is to **map each source's native permissions onto AISAT's two access axes** so nothing widens on import:
+
+- **`access_level`** — the L1–L5 clearance ladder (*how sensitive*).
+- **`allowed_principals`** — a **group ACL** (*which domain / which teams*), populated from the source's own groups (a Confluence space restricted to `eng`, a private repo's team) → the mapped principals.
+
+A document is visible only when **both** axes pass — the same predicate chat already uses:
+
+```
+visible  ⟺  doc.access_level ≤ principal.clearance
+       AND  ( doc.allowed_principals = '{}'  OR  doc.allowed_principals && principal.principals )
+```
+
+Group ACLs (not IC-style compartments) are the right shape precisely because Git/Jira/Confluence all express access as group ACLs — the mapping is 1:1. An out-of-scope item is **omitted, never shown locked** (SC-001).
+
+### How an external AI agent gets scoped access
+
+An external agent reaches the knowledge base **only** through the MCP server (`:8002`) with a device PAT — the same PEP first-party chat uses ([one policy, many enforcement points](#external--local-agents--two-entry-modes-one-policy)). Two properties make its access safe by construction:
+
+1. **The agent is its own principal, bounded by its owner.** `agent:<uuid>` carries its own clearance + group grants, **clamped to the owner** at token-mint:
+   ```
+   effective_clearance(agent)  = min(agent.clearance, owner.clearance)
+   effective_principals(agent) = agent.principals ∩ owner.principals
+   ```
+   So an agent that needs only L2 marketing never inherits its owner's L5 board access (no confused deputy), and **revocation follows the human** — demote the owner or revoke their group and the agent loses it on its next token, no cleanup job.
+2. **The same data-layer filter runs on connector data.** Every tool call sets `app.workspace_id / user_id / clearance / principals` from the PAT and runs the **RLS + Qdrant payload pre-filter with the ACL-overlap predicate above** — *inside* the vector search, before scoring — plus `allowed_tools` gating and one `agent_audit_log` row per call.
+
+Net: an agent asking "our auth service's rate-limit design" gets answers drawn only from the Confluence/Git content **its principal is cleared for**, cited back to `source_ref`, and never a token from a space or repo it (or its owner) cannot see.
+
+```mermaid
+flowchart TB
+    subgraph SRC["🌐 External sources (source of truth)"]
+        S["Git · Jira · Confluence<br/>Notion · Drive · Slack<br/>(+ their native group ACLs)"]
+    end
+
+    subgraph SYNC["🔌 Connector sync (per workspace)"]
+        C["OAuth/token · incremental (webhook / poll+cursor)<br/>map source ACLs → access_level + allowed_principals<br/>emit canonical record + source_ref"]
+    end
+
+    subgraph PIPE["🐍 Existing ingestion pipeline — route by shape"]
+        P["prose → Markdown → parent/child chunk → embed<br/>structured → typed fields + query_* tool<br/>binary → caption → embed"]
+    end
+
+    subgraph STORE["🗄️ Stores — metadata as columns/payload, not embedded text"]
+        PG[("Postgres documents<br/>access_level · allowed_principals · source_ref · RLS")]
+        QD[("Qdrant chunks<br/>payload: access_level · allowed_principals")]
+    end
+
+    AGENT["🤖 External AI agent<br/>device PAT · principal agent:&lt;uuid&gt;"]
+    PEP["🐍 MCP server :8002 — PEP<br/>principal = min(agent,owner) clearance ∩ groups<br/>allowed_tools · agent_audit_log"]
+    FILTER{{"access filter (in-search)<br/>access_level ≤ clearance<br/>AND allowed_principals overlap"}}
+    OUT["cited, access-scoped results<br/>out-of-scope items omitted, not locked"]
+
+    S --> C --> P --> PG & QD
+    AGENT --> PEP --> FILTER
+    QD --> FILTER
+    PG --> FILTER
+    FILTER --> OUT --> AGENT
+```
+
+📄 Design: [Enterprise Knowledge Layer](specs/draft-plan.md#phase-2--enterprise-knowledge-layer-typed-artifacts-knowledge-graph--agent-context-api) · [Access model (decided)](specs/draft-plan.md#access-model-decided) · [Agent Access & Accountability](specs/draft-plan.md#phase-2--agent-access--accountability)
+
+---
+
 ## 💳 Credit Metering & Billing
 
 - **Two-tier ledger** — Redis holds the authoritative hot balance; PostgreSQL `credit_ledger` (append-only, partitioned) is the durable mirror.
@@ -587,6 +675,7 @@ Every answer is fully traceable. The **debug panel** (US5) surfaces, per query: 
 |---|---|
 | **Go BFF / Gateway / Kernel** | Go 1.23 · Gin · GORM · nats.go · go-redis · OpenTelemetry · zerolog · Sentry |
 | **Python ML / Agent Tier** | Python 3.12 · FastAPI · LangGraph · Mem0 · BAML · FastMCP · MarkItDown · Crawl4AI · qdrant-client · Langfuse SDK |
+| **LLM Gateway** | LiteLLM (standalone, OpenAI-wire) · Bifrost-swappable · aliases · multi-key LB · one-hop fallback · sole provider-key holder |
 | **Frontend** | React 19 · Vite · TypeScript 5.x · native EventSource/SSE · PostHog |
 | **Data** | PostgreSQL (RLS) · Redis · Qdrant (hybrid BM25/SPLADE + dense) · S3 |
 | **Async / Edge** | NATS · Caddy (reverse proxy + auto TLS) · CloudFront (prod CDN) |
@@ -642,7 +731,7 @@ aisat-intel/
 │   ├── src/
 │   │   ├── routers/                   #   ingest · query · crawl · admin (FastAPI)
 │   │   ├── services/
-│   │   │   ├── llm_gateway.py         #     single LLM chokepoint (aliases · fallback · budget · trace)
+│   │   │   ├── llm_gateway.py         #     thin client to the standalone LLM gateway (LiteLLM/Bifrost): clearance-cache · PII scrub · budget gate · spend emit · trace
 │   │   │   ├── ingestion/             #     pipeline · chunker · captioner · markitdown · crawler · tagger
 │   │   │   ├── retrieval/             #     hybrid · reranker · hot_cold · filter
 │   │   │   └── agent/                 #     graph (7+1 nodes) · memory (Mem0) · semantic cache · suggestions
@@ -662,7 +751,8 @@ aisat-intel/
 │   └── tests/                         #   vitest (unit/component) + Playwright (e2e/)
 │
 ├── deploy/
-│   ├── docker-compose.yml             # local dev: postgres · redis · qdrant · nats · casdoor · caddy
+│   ├── docker-compose.yml             # local dev: postgres · redis · qdrant · nats · casdoor · caddy · llm-gateway
+│   ├── llm-gateway/                   # standalone LLM gateway config (LiteLLM config.yaml; Bifrost-swappable) — aliases · keys · LB
 │   └── Caddyfile                      # reverse proxy · automatic TLS · static SPA serving
 │
 ├── specs/001-contextengine-mvp/       # 📋 the full design package (source of truth)
@@ -708,7 +798,7 @@ Source of truth for every system boundary and the target of contract tests — [
 | [bff-rest.md](specs/001-contextengine-mvp/contracts/bff-rest.md) | Go BFF public REST + SSE endpoints |
 | [nats-subjects.md](specs/001-contextengine-mvp/contracts/nats-subjects.md) | NATS subject schema (ingestion / query / billing) |
 | [mcp-tools.md](specs/001-contextengine-mvp/contracts/mcp-tools.md) | 8 MCP tools across 3 categories |
-| [llm-gateway.md](specs/001-contextengine-mvp/contracts/llm-gateway.md) | Python LLM gateway interface, aliases, fallback |
+| [llm-gateway.md](specs/001-contextengine-mvp/contracts/llm-gateway.md) | Standalone LLM gateway service (LiteLLM · Bifrost-swappable) + per-runtime client |
 | [sse-events.md](specs/001-contextengine-mvp/contracts/sse-events.md) | SSE event taxonomy (BFF ↔ frontend) |
 
 ---
@@ -746,7 +836,7 @@ A dark-first developer/observability aesthetic — *"code dark + run green"* (sl
 | Phase | Scope |
 |---|---|
 | **Phase 1 — Core App** *(current)* | Ingestion, 7-pattern RAG, agent layer, access control, credits, debug panel, notifications — plus structural prompt-injection defenses and a minimal eval seed set. |
-| **Phase 2 — Evaluation Suite & Billing** | Full Promptfoo + DeepEval + Ragas, **answer-groundedness self-correction** (CRAG/Self-RAG node — grade → re-retrieve / `web_search` / abstain, see [research §17](specs/001-contextengine-mvp/research.md)), agent `web_search` (per-search HITL), context compression (Headroom seam), audio ingestion (Whisper), the **billing & payments** layer (Stripe / Polar / PayPal adapters, checkout, webhooks, subscriptions — see [draft-plan.md — Phase 2](specs/draft-plan.md#phase-2-billing-and-payments)), **AI response rating** (thumbs up/down per answer, feeds eval pipeline — see [draft-plan.md](specs/draft-plan.md#phase-2--ai-response-rating-thumbs-up--down)), and a **workspace knowledge mind map** (seed from any doc/note/query, edge-verified retrieval, progressive SSE streaming — see [draft-plan.md](specs/draft-plan.md#phase-2--workspace-knowledge-mind-map)). |
+| **Phase 2 — Evaluation Suite & Billing** | Full Promptfoo + DeepEval + Ragas, **answer-groundedness self-correction** (CRAG/Self-RAG node — grade → re-retrieve / `web_search` / abstain, see [research §17](specs/001-contextengine-mvp/research.md)), agent `web_search` (per-search HITL), context compression (Headroom seam), **complexity-based model routing** (RouteLLM-style strong/cheap selection — app-side decision, eval-gated, see [research §22](specs/001-contextengine-mvp/research.md)), audio ingestion (Whisper), the **billing & payments** layer (Stripe / Polar / PayPal adapters, checkout, webhooks, subscriptions — see [draft-plan.md — Phase 2](specs/draft-plan.md#phase-2-billing-and-payments)), **AI response rating** (thumbs up/down per answer, feeds eval pipeline — see [draft-plan.md](specs/draft-plan.md#phase-2--ai-response-rating-thumbs-up--down)), and a **workspace knowledge mind map** (seed from any doc/note/query, edge-verified retrieval, progressive SSE streaming — see [draft-plan.md](specs/draft-plan.md#phase-2--workspace-knowledge-mind-map)). |
 | **Phase 2 — Enterprise & Access** | A second **access axis** — the L1–L5 ladder joined by group/principal ACLs, with the ladder's labels and level count becoming workspace config (see [draft-plan.md — Access model](specs/draft-plan.md#access-model-decided)); an **enterprise knowledge layer** (typed artifacts, a provenance-carrying knowledge graph, an agent registry, and Git/Jira/Confluence connectors — [draft-plan.md](specs/draft-plan.md#phase-2--enterprise-knowledge-layer-typed-artifacts-knowledge-graph--agent-context-api)); an **organization** above workspace for consolidated billing, SSO/SCIM and policy defaults, plus delegated group administration ([draft-plan.md](specs/draft-plan.md#phase-2--tenancy--delegated-administration)); and **agent access & accountability** — agents as principals bounded by their owner, explicit write scope, and resource-level audit visible to the agent's owner ([draft-plan.md](specs/draft-plan.md#phase-2--agent-access--accountability)). |
 | **Phase 3 — Trust & Knowledge Health** | Makes the Phase 2 substrate trustworthy and self-maintaining. **Agent orientation & business scope** — a bounded, per-caller `get_workspace_context` briefing (charter, domain map, governing rules, the agent's *own* effective scope) plus a `list_changes` cursor, so an agent knows what the organization does instead of only what it may read ([draft-plan.md](specs/draft-plan.md#phase-3--agent-orientation--business-scope)). **Knowledge health** — lifecycle-aware retrieval ranking (deprecated/stale/superseded demoted, not just badged), knowledge-usage telemetry with a coverage-gap backlog, and steward-driven recertification prioritized by what is actually load-bearing ([draft-plan.md](specs/draft-plan.md#phase-3--knowledge-health-lifecycle-aware-retrieval-usage-telemetry--recertification)). **Enterprise compliance & data lifecycle** — provable erasure across every derived store, per-workspace provider/residency policy at the LLM gateway, SIEM audit export, legal hold, access recertification, and isolation tiering ([draft-plan.md](specs/draft-plan.md#phase-3--enterprise-compliance--data-lifecycle)). **The expression layer** — grounded drafting, decision records, and change digests, so the corpus produces artifacts and not only answers ([draft-plan.md](specs/draft-plan.md#phase-3--the-expression-layer)). Plus **automated red-teaming** (NVIDIA Garak), principal anomaly detection, and expanded abuse controls. |
 | **Phase 4 — Scale & Resilience** | Worker autoscaling (KEDA on NATS lag), SSE connection ceilings and backpressure, PgBouncer, Qdrant/Redis HA, load & soak testing, per-tenant fairness — [draft-plan.md — Phase 4](specs/draft-plan.md#phase-4-scalability-and-resilience-hardening). |

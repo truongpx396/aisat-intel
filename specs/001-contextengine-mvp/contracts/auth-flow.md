@@ -89,7 +89,7 @@ sequenceDiagram
     participant CD as Casdoor (Auth)
     participant PG as Postgres (RLS)
     participant RD as Redis<br/>(budgets · credits)
-    participant LLM as LLM Gateway (Python)
+    participant LLM as LLM Gateway (LiteLLM svc :4000)
 
     Note over LA,U: Phase 1 — Device registration (user-approved in browser)
     LA->>BFF: start device authorization (request code)
@@ -109,7 +109,7 @@ sequenceDiagram
     alt over budget / balance exhausted
         BFF-->>LA: 429 limit_reached / 402 payment_required
     else within policy
-        BFF->>LLM: forward request (resolve model alias)
+        BFF->>LLM: forward to gateway :4000 (alias resolved there)
         LLM-->>BFF: completion + token usage
         BFF->>RD: deduct credits (atomic DECRBY)
         BFF->>PG: append credit_ledger + agent_audit_log

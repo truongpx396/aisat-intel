@@ -12,7 +12,7 @@ These contracts define the external/internal interfaces the system exposes. They
 | [auth-flow.md](./auth-flow.md) | Browser OIDC (PKCE) + device PAT auth sequences | React SPA, local agents |
 | [nats-subjects.md](./nats-subjects.md) | NATS subject schema | Go BFF ↔ Python workers |
 | [mcp-tools.md](./mcp-tools.md) | 8 MCP tools across 3 categories | LangGraph agent, local agents |
-| [llm-gateway.md](./llm-gateway.md) | Python LLM gateway interface | All Python LLM call sites |
+| [llm-gateway.md](./llm-gateway.md) | Standalone LLM gateway service (LiteLLM, Bifrost-swappable) + per-runtime client | All Go/Python LLM call sites |
 | [sse-events.md](./sse-events.md) | SSE event taxonomy | Go BFF ↔ React SPA |
 
 ## Conventions

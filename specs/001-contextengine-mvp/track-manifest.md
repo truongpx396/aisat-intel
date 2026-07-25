@@ -51,7 +51,7 @@ files change, update this manifest.
 
 - **SC-001 access control** — every retrieval/cache/memory/RLS path denies-by-default and fails loudly on a missing filter; search results NEVER exceed caller clearance (zero-above-clearance). Release blocker at 100%.
 - **Kernel/product separation** (Principle I/II) — `kernel/` must never import `internal/`.
-- **LLM single chokepoint** (Principle IV) — all model calls go through `llm_gateway.py`; no direct provider calls.
+- **LLM single chokepoint** (Principle IV) — all model calls go through the `llm_gateway.py` client → the standalone LLM gateway service (LiteLLM/Bifrost, research §21); no direct provider SDK calls in app code.
 - Retrieved/external content is DELIMITED UNTRUSTED DATA (prompt-injection defense, SC-007).
 
 ## Tracks
