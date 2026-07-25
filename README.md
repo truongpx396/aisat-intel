@@ -26,6 +26,7 @@ Access control is enforced at the **data layer**, never by prompt. Every AI oper
 - ✨ [Core Capabilities](#-core-capabilities)
 - 🧩 [The RAG Agent — 7+1 Node LangGraph](#-the-rag-agent--71-node-langgraph)
 - 🔐 [Security & Access Control](#-security--access-control)
+- 🔌 [Connectors & External-Agent Access (Phase 2)](#-connectors--external-agent-access-phase-2)
 - 💳 [Credit Metering & Billing](#-credit-metering--billing)
 - ⚡ [Redis — the Production Hot Path](#-redis--the-production-hot-path)
 - 🔔 [Notification System](#-notification-system)
@@ -487,6 +488,89 @@ sequenceDiagram
 📐 Auth contract + sequences: [contracts/auth-flow.md](specs/001-contextengine-mvp/contracts/auth-flow.md) · OIDC sequence: [auth-oidc-sequence.excalidraw](specs/001-contextengine-mvp/diagrams/addition/auth-oidc-sequence.excalidraw) · device/PAT: [local-agent-flow.excalidraw](specs/001-contextengine-mvp/diagrams/addition/local-agent-flow.excalidraw)
 
 📐 Diagrams: [access-control-isolation](specs/001-contextengine-mvp/diagrams/addition/access-control-isolation.excalidraw) · [mcp-tool-allowlist](specs/001-contextengine-mvp/diagrams/addition/mcp-tool-allowlist.excalidraw) · [llm-gateway-chokepoint](specs/001-contextengine-mvp/diagrams/addition/llm-gateway-chokepoint.excalidraw)
+
+---
+
+## 🔌 Connectors & External-Agent Access *(Phase 2)*
+
+> **Phase 2 — a superset, not a pivot.** It reuses the Phase-1 engine unchanged (MCP server, NATS bus, hybrid search, Postgres RLS + Qdrant payload filters) and adds a connector-sync layer plus a second access axis. Full design: [draft-plan.md — Enterprise Knowledge Layer](specs/draft-plan.md#phase-2--enterprise-knowledge-layer-typed-artifacts-knowledge-graph--agent-context-api).
+
+Phase 1 makes uploaded files queryable by **people**. Phase 2 widens the same substrate into a **centralized knowledge base that external AI agents query** — pulling from Git, Jira, Confluence, Notion, Google Drive, Slack — while **preserving each source's permissions end-to-end**, so an agent (or a person) only ever sees connector data it is authorized to see in *both* systems.
+
+### How data is imported, processed, and stored
+
+A connector is a **sync source, never an editing surface** — the external system stays the source of truth for *mirrored* artifacts; AISAT indexes them with a back-link and re-embeds from a normalized **canonical record**:
+
+| Stage | What happens |
+|---|---|
+| **1 · Sync** | Per-workspace OAuth/token auth to the source; incremental pull (webhook or poll + cursor). Each item becomes a **canonical record** with a metadata envelope — `source_ref`, `source_version`, `synced_at`, `stale`, `origin=mirrored`, `artifact_type`, **`access_level`**, **`allowed_principals`**, `tags`, `summary`. |
+| **2 · Route by shape** | **Prose** (Confluence/Notion pages, docs, READMEs) → normalized Markdown → structure-aware parent/child chunk → embed (**Tier-1**). **Structured** (Jira issues, rows, metrics) → **typed fields** + a hand-written scoped `query_*` tool (**Tier-2**, never Text-to-SQL). **Binary** (images/diagrams) → caption → embed the caption. |
+| **3 · Store** | **Canonical** (Markdown body / typed fields + envelope) is authoritative in Postgres `documents`; **Derived** (Qdrant chunks + vectors + `knowledge_edges`) is rebuilt from it. **Metadata rides as columns + Qdrant payload, never inside the embedded text** — retrieval *enforces* on it (RLS, ACL overlap, staleness), and folding ACLs into the vector would be a leak/injection surface. |
+
+The raw artifact stays re-fetchable via `source_ref` (a cold copy is kept only for rate-limited or delete-before-resync sources); *mirrored* artifacts never enter the authored-lifecycle machine — they carry `synced_at` + `source_version` + a `stale` flag instead.
+
+### Permission-preserving access — the crux
+
+The connector's real job is to **map each source's native permissions onto AISAT's two access axes** so nothing widens on import:
+
+- **`access_level`** — the L1–L5 clearance ladder (*how sensitive*).
+- **`allowed_principals`** — a **group ACL** (*which domain / which teams*), populated from the source's own groups (a Confluence space restricted to `eng`, a private repo's team) → the mapped principals.
+
+A document is visible only when **both** axes pass — the same predicate chat already uses:
+
+```
+visible  ⟺  doc.access_level ≤ principal.clearance
+       AND  ( doc.allowed_principals = '{}'  OR  doc.allowed_principals && principal.principals )
+```
+
+Group ACLs (not IC-style compartments) are the right shape precisely because Git/Jira/Confluence all express access as group ACLs — the mapping is 1:1. An out-of-scope item is **omitted, never shown locked** (SC-001).
+
+### How an external AI agent gets scoped access
+
+An external agent reaches the knowledge base **only** through the MCP server (`:8002`) with a device PAT — the same PEP first-party chat uses ([one policy, many enforcement points](#external--local-agents--two-entry-modes-one-policy)). Two properties make its access safe by construction:
+
+1. **The agent is its own principal, bounded by its owner.** `agent:<uuid>` carries its own clearance + group grants, **clamped to the owner** at token-mint:
+   ```
+   effective_clearance(agent)  = min(agent.clearance, owner.clearance)
+   effective_principals(agent) = agent.principals ∩ owner.principals
+   ```
+   So an agent that needs only L2 marketing never inherits its owner's L5 board access (no confused deputy), and **revocation follows the human** — demote the owner or revoke their group and the agent loses it on its next token, no cleanup job.
+2. **The same data-layer filter runs on connector data.** Every tool call sets `app.workspace_id / user_id / clearance / principals` from the PAT and runs the **RLS + Qdrant payload pre-filter with the ACL-overlap predicate above** — *inside* the vector search, before scoring — plus `allowed_tools` gating and one `agent_audit_log` row per call.
+
+Net: an agent asking "our auth service's rate-limit design" gets answers drawn only from the Confluence/Git content **its principal is cleared for**, cited back to `source_ref`, and never a token from a space or repo it (or its owner) cannot see.
+
+```mermaid
+flowchart TB
+    subgraph SRC["🌐 External sources (source of truth)"]
+        S["Git · Jira · Confluence<br/>Notion · Drive · Slack<br/>(+ their native group ACLs)"]
+    end
+
+    subgraph SYNC["🔌 Connector sync (per workspace)"]
+        C["OAuth/token · incremental (webhook / poll+cursor)<br/>map source ACLs → access_level + allowed_principals<br/>emit canonical record + source_ref"]
+    end
+
+    subgraph PIPE["🐍 Existing ingestion pipeline — route by shape"]
+        P["prose → Markdown → parent/child chunk → embed<br/>structured → typed fields + query_* tool<br/>binary → caption → embed"]
+    end
+
+    subgraph STORE["🗄️ Stores — metadata as columns/payload, not embedded text"]
+        PG[("Postgres documents<br/>access_level · allowed_principals · source_ref · RLS")]
+        QD[("Qdrant chunks<br/>payload: access_level · allowed_principals")]
+    end
+
+    AGENT["🤖 External AI agent<br/>device PAT · principal agent:&lt;uuid&gt;"]
+    PEP["🐍 MCP server :8002 — PEP<br/>principal = min(agent,owner) clearance ∩ groups<br/>allowed_tools · agent_audit_log"]
+    FILTER{{"access filter (in-search)<br/>access_level ≤ clearance<br/>AND allowed_principals overlap"}}
+    OUT["cited, access-scoped results<br/>out-of-scope items omitted, not locked"]
+
+    S --> C --> P --> PG & QD
+    AGENT --> PEP --> FILTER
+    QD --> FILTER
+    PG --> FILTER
+    FILTER --> OUT --> AGENT
+```
+
+📄 Design: [Enterprise Knowledge Layer](specs/draft-plan.md#phase-2--enterprise-knowledge-layer-typed-artifacts-knowledge-graph--agent-context-api) · [Access model (decided)](specs/draft-plan.md#access-model-decided) · [Agent Access & Accountability](specs/draft-plan.md#phase-2--agent-access--accountability)
 
 ---
 
