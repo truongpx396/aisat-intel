@@ -14,6 +14,7 @@ These contracts define the external/internal interfaces the system exposes. They
 | [mcp-tools.md](./mcp-tools.md) | 8 MCP tools across 3 categories | LangGraph agent, local agents |
 | [llm-gateway.md](./llm-gateway.md) | Standalone LLM gateway service (LiteLLM, Bifrost-swappable) + per-runtime client | All Go/Python LLM call sites |
 | [metering-ports.md](./metering-ports.md) | Reusable `Meter`/`Pricer`/`Ledger` ports for the credit backbone (domain-agnostic) | Go kernel `metering`/`billing`, all spend producers |
+| [notification-ports.md](./notification-ports.md) | Reusable `Notifier`/`Channel`/`Store` ports for the multi-channel notification backbone (domain-agnostic) | Go kernel `notify`, all notification producers |
 | [sse-events.md](./sse-events.md) | SSE event taxonomy | Go BFF ↔ React SPA |
 
 ## Conventions

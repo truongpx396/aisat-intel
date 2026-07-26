@@ -645,27 +645,34 @@ A fully **event-driven, multi-channel** notification subsystem (US8): any backen
 
 > **Where it runs (independent scale-out).** The fan-out consumer (`notify.<ws>`) and the Go **email worker** (`notify.email.<ws>`) are **JetStream queue-group consumers hosted in `cmd/worker`** — N idempotent replicas that scale per-subject on consumer lag, fully independent of the request-serving `api`/`relay` tiers *and* of the single-owner scheduled jobs (`*.tick`/`*.refresh`). The email worker is plain Go (no AI/ML), so it lives in the Go tier on the same `kernel/mailer.go` port the rest of the kernel uses — not in the Python ML tier.
 
-> **Why exactly-once needs two guards (the same defense-in-depth as billing).** The notify handler does more than insert a row — it also pushes in-app (Redis pub/sub) and re-enqueues email, and those side-effects are **not** transactional with the DB write. So a cheap `SET NX notify:applied:{idem_key}` short-circuits the *entire* duplicate handler before any work, while the durable `UNIQUE (user_id, idem_key)` constraint is the permanent backstop that guarantees at-most-one row even if Redis evicted/expired the guard or two replicas raced. Redis = fast early-exit (ephemeral); Postgres UNIQUE = durable proof of SC-013.
+> **Why exactly-once needs a transactional outbox, not just two guards (the same defense-in-depth as billing).** The notify handler does more than insert a row — it must also push in-app (Redis pub/sub) and send email, and those side-effects are **not** transactional with the DB write. A naive "`SET NX notify:applied:{idem_key}` then short-circuit the whole handler" is unsafe here: if a replica sets the guard, inserts the row, then crashes *before* the email send, the JetStream redelivery hits the guard and skips — the email is silently lost. So the persist step writes the inbox row **and one `notification_outbox` row per enabled channel in a single transaction**; the `Dispatcher` then drains that outbox at-least-once, with each channel idempotent on `idem_key`. The Redis `SET NX` is only a **fast pre-check to skip the DB round-trip** on an obvious duplicate — it gates the durable write, **never** channel delivery — and the durable `UNIQUE (user_id, idem_key)` is the permanent backstop for at-most-one row (SC-013). Redis = fast early-exit (ephemeral); Postgres UNIQUE + outbox = durable proof and crash-safe fan-out.
 
 ```text
-PRODUCERS (ingest · billing · invite · agent · admin)
-        │  publish notify.<ws> { recipient, category, idem_key, … }
+PRODUCERS (ingest · billing · invite · agent · admin)   ← thin: publish one Notification
+        │  publish notify.<ws> { recipient, topic, idem_key, … }
         ▼
-notify.<ws> queue group ── cmd/worker (N replicas, idempotent) ──┐
-   SET NX notify:applied:{idem_key}   ← fast dup gate            │
-   INSERT … UNIQUE(user_id, idem_key) ← durable backstop (SC-013)│
-        ├── in-app:  PUBLISH notify:user:<id> ──▶ cmd/relay ──▶ browser (SSE, live unread count)
-        └── email?   if pref enabled → notify.email.<ws> ──▶ Go email worker (cmd/worker)
-                                                              kernel/mailer.go (Resend) · retry · DLQ
-                                                              suppression-list check (bounce/complaint/unsubscribe)
+notify.<ws> queue group ── cmd/worker (N replicas, idempotent) ── Notifier ──┐
+   prefs.Channels(recipient, topic)           ← which channels are enabled     │
+   SET NX notify:applied:{idem_key}           ← fast pre-check (skip DB round) │
+   ┌─ ONE TRANSACTION ──────────────────────────────────────────────────────┐ │
+   │  INSERT notifications        UNIQUE(user_id, idem_key)  ← durable backstop │
+   │  INSERT notification_outbox  (one row per enabled channel)                │
+   └────────────────────────────────────────────────────────────────────────┘ │
+        ▼  notification_outbox (per channel)
+Dispatcher drain ── cmd/worker ──▶ ChannelRegistry.Get(kind).Deliver(...)  ← at-least-once
+        ├── in_app  Channel → PUBLISH notify:user:<id> ─▶ cmd/relay ─▶ browser (SSE; badge recomputed from DB on connect)
+        ├── email   Channel → kernel/mailer.go (Resend) · suppression check (bounce/complaint/unsubscribe) · unsubscribe link
+        └── sms · push · slack · webhook …  ← register another Channel, no fan-out edit
 
 DLQ DRAIN (dlq.sweep.tick · single-owner cmd/worker)
-  for each msg in *.dlq.<ws>:
-     dlq_attempts < MAX ?  ──yes─▶ re-publish to owning subject (dlq_attempts+1, backoff) ─▶ owning worker reprocesses idempotently
-                          └─no─▶ INSERT dead_letters + emit dlq.dead.count (terminal, admin-replayable)
+  for each parked entry (attempts ≥ MAX or non-retryable):
+     attempts < MAX ?  ──yes─▶ re-drive under backoff ─▶ Channel re-delivers idempotently (dedup on idem_key)
+                       └─no─▶ INSERT dead_letters + emit dlq.dead.count (terminal, admin-replayable)
 ```
 
-📐 Flow diagram: [notification-flow.excalidraw](specs/001-contextengine-mvp/diagrams/addition/notification-flow.excalidraw) · 📄 Subjects: [nats-subjects.md](specs/001-contextengine-mvp/contracts/nats-subjects.md) · UI: [notifications.md](design-system/aisat-intel/pages/notifications.md)
+> **Built to extract & reuse.** The engine is factored behind domain-agnostic ports — a pluggable **`Channel`** registry (in-app + email today; SMS/push/Slack/webhook by registering one more, no fan-out edit), a **`Topic`** registry (a registered string with data-driven defaults, not a Postgres enum), an opaque **`Recipient`**/**`Tenant`** pair (not a hard-coded `(workspace_id, user_id)`), a **`TemplateRenderer`** (the one home for copy · i18n · per-tenant branding), a **`PreferenceStore`**, and a transactional-outbox **`Store`** + **`Dispatcher`** — so the same persist + exactly-once fan-out + DLQ + retention machinery drops into another system by registering its channels, topics, and templates and binding one `Recipient`/`Tenant`, with no change to the delivery core. ContextEngine's in-app + email delivery is just two `Channel` implementations. Same library↔service move as metering: start embedded, extract to a co-located `NotificationService` (gRPC, same ports) the moment a second product needs it.
+
+📐 Flow diagram: [notification-flow.excalidraw](specs/001-contextengine-mvp/diagrams/addition/notification-flow.excalidraw) · 🔌 Reusable ports: [notification-ports.md](specs/001-contextengine-mvp/contracts/notification-ports.md) · 📄 Subjects: [nats-subjects.md](specs/001-contextengine-mvp/contracts/nats-subjects.md) · UI: [notifications.md](design-system/aisat-intel/pages/notifications.md)
 
 ---
 
@@ -724,7 +731,7 @@ aisat-intel/
 │   ├── cmd/worker/                    #   main.go (background/scheduled role — queue-group consumers, no timers)
 │   ├── kernel/                        #   template-level — never imports product (depguard-enforced)
 │   │   ├── auth.go bus.go storage.go meter.go flags.go cache.go …
-│   │   └── identity/ tenancy/ billing/ notifications/ audit/ files/ observability/ admin/
+│   │   └── identity/ tenancy/ billing/ notify/ audit/ files/ observability/ admin/
 │   ├── internal/                      #   product tier — feature-first
 │   │   ├── platform/                  #     concrete infra: postgres/ redis/ qdrant/ nats/ otel/ logger/
 │   │   ├── shared/                    #     cross-cutting: dto/ errors/ middleware/ model/
