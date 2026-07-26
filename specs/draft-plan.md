@@ -740,6 +740,13 @@ request-context plumbing changes.
 - **Backfill: none.** `allowed_principals = '{}'` is inert, so every existing Phase-1 row
   behaves exactly as today and authored artifacts default to ladder-only.
 
+> **One predicate, not two copies.** The RLS clause and the Qdrant filter above are the same
+> boolean written for two stores; kept in agreement by hand they are a latent leak. The
+> reusable [`Authorizer`/`Policy`/`Lowerer` ports](./001-contextengine-mvp/contracts/authorizer-ports.md)
+> factor this model into one `Predicate` that *lowers* to both, with a mandatory differential
+> test proving RLS ⇔ Qdrant admit the identical set — and make the access model itself a
+> swappable port (as `Auth` already is for authentication).
+
 #### Rules that fall out of this (all decided, not open)
 
 1. **Both conjuncts always.** Clearance never bypasses ACL; ACL never bypasses clearance.
@@ -840,6 +847,51 @@ security review will ask you to quantify.
   no cached "allow" to expire. A caller who lost a group stops matching the instant *either*
   copy updates, so whichever path is faster wins; the lag above is the worst case, not the
   typical one.
+
+#### Declared non-goals (deliberate boundaries, not gaps)
+
+These are the things a security review will ask about; each is **out by decision**, with the
+stated reason and — where one exists — the additive path if it is ever genuinely needed. Naming
+them here is what stops a reviewer from reading a deliberate scope line as an oversight.
+
+1. **No conjunctive / compartment (AND-of-groups) semantics.** The principal axis is a
+   *permissive* group ACL — *any* listed principal may read (`&&` overlap). It cannot express
+   "must hold **security AND legal**, both required." Conjunctive need-to-know is an
+   intelligence-community requirement, not a software-company one, and modelling it would force
+   one compartment per space/repo/project — defeating the small controlled label set. *Additive
+   path if it appears:* a separate `required_principals` (subset/`@>` semantics) field ANDed onto
+   the predicate — a new conjunct, never a rewrite.
+2. **No ABAC / attribute-condition policies.** There is no time-boxed access, no IP/geo
+   condition, no purpose-based access, and no tag predicate ("contractors may not see docs tagged
+   `pii`"). Arbitrary attribute predicates are exactly what a general policy engine (Cedar/OPA)
+   does, and exactly what does **not** compile to one cheap in-search pre-filter — the property
+   SC-001 depends on. This is the deliberate trade: a fixed, compilable model over an expressive,
+   per-object one. A coarse tag exclusion, if ever required, rides as one more `Predicate` node,
+   not an engine.
+3. **No per-object collaboration grants (ReBAC).** Read scoping is first-class; fine-grained
+   per-*document* management (Google-Docs-style editor/viewer/commenter, "member A may edit doc X
+   but not doc Y") is not. Write/manage authority is `role` + `scope='personal'` ownership + the
+   Phase-2 agent write-scope — not an object-relationship graph. A product that later needs true
+   ReBAC for *management* ops can back the `Authorizer` port's point-check (`Policy.Permit`) with
+   Cedar/OpenFGA **while keeping retrieval on the compiled pre-filter** — the two paths are
+   separated in [authorizer-ports.md](./001-contextengine-mvp/contracts/authorizer-ports.md) for
+   precisely this reason.
+4. **No custom roles.** Roles are fixed enums (`owner`/`admin`/`member`; the org roles; the four
+   `agent_role`s). This is RBAC, not *customizable* RBAC. Note what **is** customizable and
+   deliberately so — clearance labels and level count are workspace config
+   ([above](#the-clearance-scheme-is-workspace-configurable)); the *role set* is not. Custom
+   role definitions are a larger surface (a permission catalog + role-editor UI) and are declined
+   until a customer need is concrete.
+5. **No cross-workspace / federated sharing.** Workspace is the hard isolation boundary; a single
+   document visible across two workspaces is impossible by construction, which is what keeps the
+   hot path a single `workspace_id` equality rather than a set membership
+   ([Tenancy decision 2](#decision-2--organization-above-workspace)). Genuinely shared knowledge
+   domains run as **one** workspace separated by clearance + groups — not a workspace per team.
+6. **No negative / explicit-deny grants.** Access is allow-list overlap; there is no per-principal
+   `must_not` that revokes what a positive grant would allow. Overlap semantics require
+   enumerating the caller's side (the `used_principals` intersection *is* that bound); a deny axis
+   would reintroduce per-object evaluation. Revocation is modelled as *removing* a grant, not
+   *adding* a deny.
 
 ### Data model
 
