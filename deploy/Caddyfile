@@ -1,0 +1,31 @@
+# Caddy reverse proxy configuration for AISAT-STUDIO local development
+# This config runs on port 80 for local dev (HTTP only).
+# For HTTPS with a real domain, add a domain block and let Caddy provision certificates.
+# For production HTTPS with mkcert locally:
+#   1. Install mkcert: https://github.com/FiloSottile/mkcert
+#   2. mkcert localhost 127.0.0.1
+#   3. Add a block like: localhost { tls /path/to/localhost.crt /path/to/localhost.key }
+
+:80 {
+  # Serve SPA frontend from /srv directory with fallback to index.html
+  root * /srv
+  file_server
+  try_files {path} /index.html
+
+  # Reverse proxy for API routes (Go BFF)
+  # Forwards all /api/* requests to the api service on port 8080
+  @api path /api/*
+  reverse_proxy @api api:8080
+
+  # Reverse proxy for Server-Sent Events (SSE)
+  # Forwards all /sse/* requests to the api service
+  # flush_interval -1 disables response buffering to enable real-time streaming
+  @sse path /sse/*
+  reverse_proxy @sse api:8080 {
+    flush_interval -1
+  }
+
+  # Health check endpoint for monitoring
+  @health path /healthz
+  respond @health "OK" 200
+}
