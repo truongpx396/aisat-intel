@@ -390,12 +390,16 @@ US2. You OWN backend-go/migrations/0011_query_structured.sql only. Consume FROZE
   T069 [P] semantic+exact cache keyed workspace+user+access_level+model+query w/ cacheable_scope (research §2)
   T070 MCP knowledge tools (search_personal/workspace_knowledge, get_document_by_id, list_documents)
   T071 [P] MCP structured tools (parameterized SQL ONLY) · T072 [P] MCP utility (get_current_datetime)
-  T073 LangGraph 7-node graph (Node 0 moderation gate → router → rewrite → retrieve → rerank/expand
-       → memory → generate+cite); retrieved content is DELIMITED UNTRUSTED DATA. FR-010/011, SC-007.
-  T074 [P] prompt assets · T075 query router (query.agent.<ws> → graph → Redis pub/sub by stream_id)
+  T073 LangGraph graph per contracts/agent-graph.md (guard→route→rewrite→retrieve→rerank→assemble
+       →memory→generate→suggest); AgentState + pure (state,config) nodes w/ DI; route is the sole branch;
+       per-node retry/degrade; one StateGraph, two compiled forms. DELIMITED UNTRUSTED DATA. FR-010/011, SC-007.
+  T060b [P] agent-graph contract tests (state immutability, node isolation, streaming decoupling,
+       fail-closed guard, additivity, reliability degradation) — agent-graph.md
+  T074 [P] prompt assets · T075 query router + stream ADAPTER (sole Redis pub/sub publisher; graph emits
+       via astream_events, nodes never touch Redis) by stream_id
   T076 Go query service + SSE relay (POST /query, moderation short-circuit, GET /query/{streamId}[/debug])
        + self-registering module.go (registry.Register; cmd/api/main.go is FROZEN — do NOT edit it)
-  T077 [P] chat UI · T077a [P] follow-up generator (Node 7) · T077b [P] suggestions SSE contract test
+  T077 [P] chat UI · T077a [P] follow-up generator (the `suggest` node) · T077b [P] suggestions SSE contract test
 Make all US2 tests pass GREEN in-worktree and paste the output. Return STATUS.
 ```
 

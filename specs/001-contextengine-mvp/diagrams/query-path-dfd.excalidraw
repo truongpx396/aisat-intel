@@ -318,13 +318,13 @@
       "link": null,
       "locked": false,
       "type": "text",
-      "text": "P3: LangGraph\nNode 0-1\n(guard + rewrite)",
+      "text": "P3: LangGraph\nguard + route + rewrite",
       "fontSize": 15,
       "fontFamily": 5,
       "textAlign": "center",
       "verticalAlign": "middle",
       "containerId": "el_392004",
-      "originalText": "P3: LangGraph\nNode 0-1\n(guard + rewrite)",
+      "originalText": "P3: LangGraph\nguard + route + rewrite",
       "autoResize": true,
       "lineHeight": 1.25
     },
@@ -702,10 +702,10 @@
     },
     {
       "id": "el_863587",
-      "x": 668,
+      "x": 667.6807576005231,
       "y": 443,
       "width": 173,
-      "height": 82,
+      "height": 104,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "#e9ecef",
@@ -721,8 +721,8 @@
         "type": 3
       },
       "seed": 728646788,
-      "version": 1,
-      "versionNonce": 1719259321,
+      "version": 3,
+      "versionNonce": 2085965298,
       "isDeleted": false,
       "boundElements": [
         {
@@ -730,17 +730,17 @@
           "id": "el_214576"
         }
       ],
-      "updated": 1738195200000,
+      "updated": 1785056706491,
       "link": null,
       "locked": false,
       "type": "rectangle"
     },
     {
       "id": "el_214576",
-      "x": 685,
-      "y": 456,
-      "width": 139,
-      "height": 56,
+      "x": 678.4383030717145,
+      "y": 448.125,
+      "width": 151.4849090576172,
+      "height": 93.75,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -754,15 +754,15 @@
       "index": "aK",
       "roundness": null,
       "seed": 533985411,
-      "version": 1,
-      "versionNonce": 411436545,
+      "version": 4,
+      "versionNonce": 733465710,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1738195200000,
+      "updated": 1785056707204,
       "link": null,
       "locked": false,
       "type": "text",
-      "text": "D1: Redis\n(semantic cache: scoped\nworkspace+clearance,\nrate limits)",
+      "text": "D1: Redis\n(semantic cache:\nscoped\nworkspace+clearance,\nrate limits)",
       "fontSize": 15,
       "fontFamily": 5,
       "textAlign": "center",
@@ -2521,12 +2521,19 @@
       "groupIds": [],
       "frameId": null,
       "index": "b6",
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "seed": 301007,
       "version": 1,
       "versionNonce": 401007,
       "isDeleted": false,
-      "boundElements": [{ "type": "text", "id": "el_mcp_kn_txt" }],
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "el_mcp_kn_txt"
+        }
+      ],
       "updated": 1738195200001,
       "link": null,
       "locked": false
@@ -2586,12 +2593,19 @@
       "groupIds": [],
       "frameId": null,
       "index": "b8",
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "seed": 301009,
       "version": 1,
       "versionNonce": 401009,
       "isDeleted": false,
-      "boundElements": [{ "type": "text", "id": "el_mcp_ac_txt" }],
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "el_mcp_ac_txt"
+        }
+      ],
       "updated": 1738195200001,
       "link": null,
       "locked": false
@@ -2651,12 +2665,19 @@
       "groupIds": [],
       "frameId": null,
       "index": "bA",
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "seed": 301011,
       "version": 1,
       "versionNonce": 401011,
       "isDeleted": false,
-      "boundElements": [{ "type": "text", "id": "el_mcp_pol_txt" }],
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "el_mcp_pol_txt"
+        }
+      ],
       "updated": 1738195200001,
       "link": null,
       "locked": false
