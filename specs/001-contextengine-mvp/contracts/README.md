@@ -10,6 +10,7 @@ These contracts define the external/internal interfaces the system exposes. They
 |----------|---------|-----------|
 | [bff-rest.md](./bff-rest.md) | Go BFF public REST + SSE endpoints | React SPA, local agents |
 | [auth-flow.md](./auth-flow.md) | Browser OIDC (PKCE) + device PAT auth sequences | React SPA, local agents |
+| [authorizer-ports.md](./authorizer-ports.md) | Reusable `Authorizer`/`Policy`/`Lowerer` ports — one predicate lowered to RLS **and** Qdrant (parity), the swappable access-model seam | Go BFF middleware, Python retrieval tier, MCP PEP |
 | [nats-subjects.md](./nats-subjects.md) | NATS subject schema | Go BFF ↔ Python workers |
 | [mcp-tools.md](./mcp-tools.md) | 8 MCP tools across 3 categories | LangGraph agent, local agents |
 | [agent-graph.md](./agent-graph.md) | LangGraph agent internal contract — `AgentState`, node I/O, checkpointing, streaming, Phase-2 seams | Python agent tier (`services/agent/`) |
