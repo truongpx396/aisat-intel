@@ -490,6 +490,38 @@ sequenceDiagram
 
 📐 Diagrams: [access-control-isolation](specs/001-contextengine-mvp/diagrams/addition/access-control-isolation.excalidraw) · [mcp-tool-allowlist](specs/001-contextengine-mvp/diagrams/addition/mcp-tool-allowlist.excalidraw) · [llm-gateway-chokepoint](specs/001-contextengine-mvp/diagrams/addition/llm-gateway-chokepoint.excalidraw)
 
+#### Identity-provider portability
+
+Authorization is decoupled from *whichever* identity provider an org runs. **Authentication** (*who you are* — Auth0, Casdoor, Ory, Okta, WorkOS…) sits behind the swappable kernel `Auth` interface; **authorization** (*what you may see/do*) is a separate, provider-agnostic decision engine. One seam — the `PrincipalResolver` — bridges them, turning a verified `Identity` into the `Actor` the engine reasons over:
+
+```mermaid
+flowchart TD
+    IDP["🔑 Identity provider<br/>Auth0 · Casdoor · Ory · Okta · WorkOS"]
+    AUTH["🔌 kernel Auth interface<br/>verify token · OIDC exchange · issue opaque session"]
+    ID["Identity<br/>subject · group claims · roles"]
+    RES["🔌 PrincipalResolver<br/>Identity → Actor"]
+    ACT["Actor<br/>clearance · principals · roles"]
+    AZ["Authorizer · Policy · Lowerer · Predicate<br/>pure decision → lowers to Postgres RLS + Qdrant filter"]
+
+    IDP -->|OIDC / SCIM / PAT| AUTH --> ID --> RES --> ACT --> AZ
+
+    class IDP provider
+    class AUTH,RES adapter
+    class AZ core
+    classDef provider fill:#0f172a,stroke:#475569,color:#e2e8f0
+    classDef adapter fill:#78350f,stroke:#f59e0b,color:#fde68a
+    classDef core fill:#064e3b,stroke:#10b981,color:#a7f3d0
+```
+
+🟠 **per-provider seams** — one thin adapter each (or just config for OIDC) · 🟢 **fully provider-agnostic** — never sees the IdP
+
+- **The decision engine never sees the provider.** `Policy` / `Predicate` / `Lowerer` and the RLS↔Qdrant parity test operate only on an `Actor` — swapping Casdoor → Auth0 → Ory changes *nothing* here.
+- **Clearance & roles are app-owned**, resolved from `workspace_members` at session-mint — never carried in the IdP token. The IdP only has to **authenticate** and (for Phase-2 group ACLs) **supply group membership**; the ladder, personal scope, and the whole decision are your data.
+- **The only per-provider work is one `PrincipalResolver` adapter** mapping that IdP's group/SCIM claims → `Actor.principals` — typically the same provider package that implements the `Auth` verify (e.g. `kernel/identity/auth0/`), kept out of the decision core by `depguard`.
+- **Phase 1 needs zero mapping** — `SingleAxisPolicy` uses only app-owned clearance, so it runs behind any OIDC provider with no resolver work at all.
+
+📐 Full boundary + per-provider guidance: [authorizer-ports.md § Identity-provider portability](specs/001-contextengine-mvp/contracts/authorizer-ports.md)
+
 ---
 
 ## 🔌 Connectors & External-Agent Access *(Phase 2)*

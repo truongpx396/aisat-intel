@@ -429,6 +429,51 @@ Both are `Lower(TwoAxisPolicy.Visibility(actor, {Collection:"workspace"}))`. The
 
 ---
 
+## Identity-provider portability (Auth0 / Casdoor / Ory / Okta / WorkOS / …)
+
+This port is **authorization** (*what may they see/do?*). *Authentication* (*who are they?* — the IdP: Auth0, Casdoor, Ory, Okta, WorkOS) stays in the kernel `Auth` interface. The two compose through exactly one seam — `PrincipalResolver` — and that composition is what makes the decision engine independent of whichever provider an organization runs.
+
+```text
+Auth0 / Casdoor / Ory / Okta / WorkOS          ← the org's choice
+        │   OIDC / SCIM / PAT
+        ▼
+kernel Auth interface    ── authN adapter: verify token, OIDC exchange, issue opaque session
+        │   → Identity { Subject, RawGroups (claims), Roles }
+        ▼
+PrincipalResolver        ── the ONE provider-touching seam in authz: Identity → Actor
+        │   → Actor { Clearance, Principals, Roles }
+        ▼
+Authorizer · Policy · Lowerer · Predicate  ── pure decision + lowering to RLS/Qdrant; NEVER sees the IdP
+```
+
+### What a provider swap costs
+
+| Layer | Provider-dependent? | Cost of swapping the IdP |
+|---|---|---|
+| `Policy` / `Predicate` / `Lowerer` / `Eval` / the parity test | **No — zero** | Nothing. It only ever sees an `Actor`. Casdoor → Auth0 → Ory changes not one line. |
+| kernel **`Auth`** interface (token verify / OIDC) | Yes, but **already abstracted** ([auth-flow.md](./auth-flow.md)) | Config, or a thin adapter for a non-OIDC quirk. `casdoor.Auth` today; `jwt`/`workos` interchangeable. |
+| **`PrincipalResolver`** (claims → `Actor`) | Yes — **one isolated adapter** | The only real per-provider work: map that IdP's *group membership* claim/SCIM into `Actor.Principals`. |
+
+### Why the engine is genuinely portable
+
+**Clearance and roles are app-owned, not carried in the IdP token.** The BFF resolves `(role, clearance)` from `workspace_members` at session-mint and mints its **own** opaque session (auth-flow §Session model) — it never asks the IdP to express "clearance L4". So a provider only has to do two things:
+
+1. **Authenticate** — every OIDC provider does this identically (the `Auth` adapter is config-shaped), and
+2. **(Phase 2 only) supply group membership** — for the `ext:` principals.
+
+Everything else — the ladder, personal scope, the whole decision — is your data, so it cannot depend on a provider's feature set.
+
+### Per-provider guidance
+
+- **One package per provider implements both halves.** A provider adapter directory (e.g. `kernel/identity/auth0/`, `.../ory/`, `.../casdoor/`) implements the `Auth` verify **and** its `PrincipalResolver` claim-mapping. "Add Auth0" = one directory; `depguard` (`kernel/authz/**` ⊄ `internal/**`, and provider packages ⊄ the decision core) keeps the specifics from leaking inward.
+- **Group-claim shapes are the substance.** Auth0 `groups`, Okta groups, **Azure AD app-roles vs. groups**, Ory identity-schema traits, SCIM 2.0 `Groups` — these differ; the resolver adapter normalizes them to `group:<id>` / `ext:<source>:<id>` principals, then the port's own `∩ used_principals` + `min(owner)` bounds (invariant 8) apply uniformly regardless of source.
+- **Freshness is a provider property, handled once.** Whether group-revocation propagates by webhook (fast) or poll (Drive-style, lossy) is per-source and already an SLO in [draft-plan.md § ACL freshness and revocation lag](../../draft-plan.md#access-model-decided) — the resolver adapter picks the path; the engine and its deny-on-read semantics are unchanged.
+- **Phase 1 needs zero mapping.** `SingleAxisPolicy` uses only app-owned clearance, so it runs behind **any** OIDC provider with no `PrincipalResolver` group work at all — the group-claim adapter is only required when the Phase-2 group-ACL axis is switched on.
+
+> Net: adopting Auth0/Casdoor/Ory/Okta is a config-or-one-adapter change at the *edge* of the system; the authorization decision engine, the RLS↔Qdrant parity guarantee, and every invariant above are untouched.
+
+---
+
 ## Contract-test skeleton (the crown jewel: parity)
 
 Validates *any* `Policy`+`Lowerer` set against the invariants. The parity suite is the one that directly buys down the "three copies drift" leak — it fuzzes a corpus and asserts every backend agrees with the in-memory oracle.
