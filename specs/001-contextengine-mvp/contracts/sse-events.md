@@ -18,6 +18,7 @@ type SSEEventType =
   | { event: "error";       data: { code: string; message: string } }
   | { event: "done";        data: { usage: { input: number; output: number }; credits_deducted: number } }
   | { event: "suggestions"; data: { questions: string[] } }  // FR-031: 2–3 follow-up chips, only when source_count > 0 and answer was not refused
+  | { event: "approval_request"; data: ApprovalRequest }      // FR-040: a durable run paused for a human decision (HITL)
   | { event: "notification";  data: Notification }            // FR-034: a new notification for the connected recipient
   | { event: "unread_count";  data: { unread: number } }      // FR-034: updated bell badge count
 ```
@@ -28,7 +29,7 @@ interface Notification {
   category:
     | "ingestion_complete" | "ingestion_failed"
     | "invite_received" | "invite_accepted" | "invite_revoked"
-    | "credit_warning" | "credit_exhausted" | "task_halted"
+    | "credit_warning" | "credit_exhausted" | "task_halted" | "approval_requested"
     | "doc_shared" | "clearance_changed" | "member_joined" | "admin_broadcast";
   priority: "info" | "warning" | "critical";
   title: string;
@@ -38,6 +39,15 @@ interface Notification {
   created_at: string;
 }
 
+interface ApprovalRequest {           // FR-040 — a human-in-the-loop gate awaiting the connected member
+  id: string;
+  kind: "enrich_accept" | "long_horizon_action" | "sensitivity_confirm" | "web_search" | "note_edit";  // FR-040/FR-041
+  subject_ref: Record<string, unknown>;  // what is gated: { note_id } | { run_id, step } | { doc_id }
+  prompt: string;                     // human-readable "what am I approving?"
+  payload: Record<string, unknown>;   // detail for the UI: { suggested_level } | draft ref | step description
+  expires_at: string | null;          // fail-closed deadline; null = no expiry
+}
+
 ## Streams
 
 ### Query stream — `GET /query/{streamId}` (US2)
@@ -45,6 +55,7 @@ interface Notification {
 - `suggestions` is emitted after `done` only when `source_count > 0` and the answer was not refused; contains 2–3 clearance-scoped follow-up question strings. Omitted entirely on moderation block or zero-source answer.
 - On moderation block: a single `error` with code `injection_blocked` or `disallowed`, no `token`/`done`/`suggestions`, no credit spend (FR-010, SC-007).
 - `done.credits_deducted` reflects the exact charge (must reconcile to the ledger, SC-006).
+- **Durable (`long_horizon`) runs only** may additionally emit an `approval_request` event when the graph pauses at the `human_gate` node (FR-040): a `status.stage='paused'` precedes it, no further `token`/spend follows until the member resolves it (`POST /approvals/{id}/resolve`), and a `status.stage='resumed'` marks the run continuing past the gate. Interactive queries never pause, so they never emit `approval_request` ([agent-graph.md](./agent-graph.md) Human-in-the-loop).
 
 ### Ingestion stream — `GET /ingest/{jobId}/status` (US1)
 - `status.stage` progression: `received` → `converting` → `extracting_metadata` → `chunking` → `embedding` → `indexed`.
@@ -90,5 +101,6 @@ interface DebugTrace {
 
 - Every completed query produces a `DebugTrace` with all fields populated, including `access_filter` (count of docs filtered by clearance) and `credits_deducted` (FR-021, SC-005).
 - A moderation-blocked query emits exactly one `error` event and no `done`/`token` events and zero credit spend (SC-007).
+- A `long_horizon` run that pauses at the human-gate emits exactly one `approval_request` event (after `status.stage='paused'`) and no further `token`/`done`/spend until resolved; on approve it emits `status.stage='resumed'` and continues, on reject it ends without indexing (FR-040, SC-014).
 - An oversize/unsupported ingestion emits a terminal `error` stage, not an indefinite `status` (FR-003, SC-010).
 - The notification stream emits an initial `unread_count` on connect and a `notification` + `unread_count` pair per new event, and never emits another member's or another workspace's notification (FR-034, SC-012).

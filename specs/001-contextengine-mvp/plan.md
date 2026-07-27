@@ -36,7 +36,7 @@ Technical approach: a three-runtime system — a Go BFF/gateway (kernel + agent 
 
 **Constraints**: 100% access-control correctness (SC-001, release blocker); injection/disallowed inputs refused before retrieval/spend (SC-007); exact credit accounting, no double-charge (SC-006); per-file upload size limit admin-configurable per workspace, default 50 MB; raw prompt/response retention 30 days; near-limit warning at admin-configurable threshold (default 80%); one-hop provider fallback only
 
-**Scale/Scope**: Phase 1 capacity — Go BFF 2 replicas, 3 Python worker pods per NATS subject (plus the Crawl4AI `crawl` worker and the standalone LLM gateway (LiteLLM) as their **own deployments**), single Qdrant/NATS cluster, Postgres primary + 1 read replica; 8 user stories, ~39 functional requirements, 12+ key entities, 8 MCP tools. **Scale-forward seams locked in Phase 1 (rework-risk, research §14–§15):** NATS runs in **JetStream** mode (durable pull consumers + per-subject queue groups); the SSE relay is a logically separable tier from the request-handling BFF; the Redis credit outbox is workspace-partitionable; Qdrant stays payload-isolated with a documented re-shard/replication trigger; scheduled/background work runs single-owner in a dedicated `cmd/worker` role (external CronJob → NATS tick → queue group, idempotent atomic claims — no in-process timers). Horizontal-scale *provisioning* (KEDA autoscaling, PgBouncer, Redis/Qdrant HA, SSE connection ceilings, load testing) is deferred to **Phase 4** ([draft-plan.md — Phase 4](../draft-plan.md#phase-4-scalability-and-resilience-hardening)).
+**Scale/Scope**: Phase 1 capacity — Go BFF 2 replicas, 3 Python worker pods per NATS subject (plus the Crawl4AI `crawl` worker and the standalone LLM gateway (LiteLLM) as their **own deployments**), single Qdrant/NATS cluster, Postgres primary + 1 read replica; 8 user stories, ~39 functional requirements, 13+ key entities, 10 MCP tools. **Scale-forward seams locked in Phase 1 (rework-risk, research §14–§15):** NATS runs in **JetStream** mode (durable pull consumers + per-subject queue groups); the SSE relay is a logically separable tier from the request-handling BFF; the Redis credit outbox is workspace-partitionable; Qdrant stays payload-isolated with a documented re-shard/replication trigger; scheduled/background work runs single-owner in a dedicated `cmd/worker` role (external CronJob → NATS tick → queue group, idempotent atomic claims — no in-process timers). Horizontal-scale *provisioning* (KEDA autoscaling, PgBouncer, Redis/Qdrant HA, SSE connection ceilings, load testing) is deferred to **Phase 4** ([draft-plan.md — Phase 4](../draft-plan.md#phase-4-scalability-and-resilience-hardening)).
 
 ## Constitution Check
 
@@ -76,7 +76,7 @@ specs/001-contextengine-mvp/
 │   ├── README.md            # Contract index + conventions
 │   ├── bff-rest.md          # Go BFF public REST + SSE endpoints
 │   ├── nats-subjects.md     # NATS subject schema (ingestion/query/billing)
-│   ├── mcp-tools.md         # 8 MCP tools across 3 categories
+│   ├── mcp-tools.md         # 10 MCP tools across 4 categories
 │   ├── llm-gateway.md       # LLM gateway service (LiteLLM/Bifrost-swappable) + per-runtime client
 │   └── sse-events.md        # SSE event taxonomy (BFF ↔ frontend)
 ├── checklists/

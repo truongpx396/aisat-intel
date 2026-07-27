@@ -19,6 +19,7 @@ inline citations, and every answer is fully observable in a debug panel.
 - **Suggested follow-ups**: after the Sources strip, render 2–3 clickable question chips (FR-031). Style: `border border-line bg-surface hover:border-primary hover:bg-primary/5` pill buttons, prefix icon (sparkle/arrow), short question text truncated to one line. Clicking a chip fills the composer and submits immediately — no extra confirmation. Chips are hidden when the answer was refused (injection-blocked) or returned zero sources. Chips appear with a fade-in after streaming completes to avoid layout shift during generation.
 - **No-answer state**: when no authorized docs are relevant, assistant clearly says it has no relevant information — never fabricates (edge case).
 - **Refusal state**: disallowed input / prompt-injection is refused **before** retrieval/credit spend, shown as a distinct system notice (FR-010).
+- **Approval state (human-in-the-loop, FR-040/FR-041)**: a query the router runs as a durable long-horizon task can **pause** for a human decision — most often an agent **`web_search`** that wants to reach out for fresh info. Render the MASTER **approval card** inline in the thread (intended query + target host; **Approve** runs the fetch, **Reject** continues without web), with a muted "paused — nothing fetched or charged yet" line. On approve the stream resumes (`resumed`); on reject it continues. Plain interactive queries never pause (read-only, no action tools) — this state appears only for the durable form.
 - **Response rating** *(Phase 2)*: a thumbs-up / thumbs-down pair in the answer footer, placed **between the Sources strip and the suggested follow-ups** — the rating belongs to the answer, follow-ups move the conversation on. One rating per answer turn, keyed to that turn's `llm_call_log_id`. Clicking records immediately (re-clicking clears; last write wins) and shows a "Recorded" confirmation stating aggregates are admin-only. A **dislike** additionally reveals an *optional* free-text reason (≤ 500 chars, live counter, Skip + Submit) — never forced, never shown on a thumbs-up. No vote counts, no per-user score, no other member's feedback is ever visible.
 - **Service-busy state** *(Phase 4)*: when the BFF sheds load or hits its SSE connection ceiling, show a cyan `503 · retry in Ns` notice stating the query never started and **no credits were deducted**, with a *Retry now* action. The composer stays enabled and keeps the user's text — unlike the exhausted state, this is transient and self-clearing.
 
@@ -50,7 +51,7 @@ Use status colors: cache hit = cyan, access-filtered = amber note, fallback prov
 
 ## Phase 2+ affordances on this screen
 
-Marked with the muted `Phase 2` / `Phase 4` chip convention (same as `web_search` on the Agents screen) so mockup reviewers can tell shipped Phase-1 surface from staged future-phase surface:
+Marked with the muted `Phase 2` / `Phase 4` chip convention so mockup reviewers can tell shipped Phase-1 surface from staged future-phase surface (note: `web_search` is **Phase 1** now — an FR-041 HITL-gated action tool, not a staged affordance):
 
 | Affordance | Phase | Backing contract |
 |---|---|---|

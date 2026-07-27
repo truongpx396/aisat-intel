@@ -29,6 +29,19 @@ audit trail.
 - **Invite by email** (FR-015): modal with email + role + clearance (clearance ≤ inviter's). Pending invites show a `pending` pill with **Revoke**.
 - Sensitive actions (remove member, change role) prompt re-auth (security best practice / AZ6).
 
+## Agent policies (per role)
+Admins set the per-role agent policy (`GET|PATCH /admin/policies/{role}`) — the
+`allowed_tools` list, daily token budget, and the Phase-1 **write scope**:
+- **`can_write` toggle** (off by default) and **`write_ops`** — Phase 1 offers only
+  `note_update`, which enables the HITL-gated **`edit_note`** action tool. Show it as a
+  clearly-bounded switch, not an open write grant: copy states every edit still needs
+  per-commit human approval and is capped at the agent's `min(agent, owner)` clearance and
+  the source-derived floor (FR-041, SC-015).
+- **`web_search`** enablement for the `user`/`admin` roles (per-fetch human approval).
+- Both action tools carry an inline `HITL` marker so the policy never implies an
+  unattended capability the server will refuse. The *broad* write scope (create, artifact
+  writes, `write_memory`, arbitrary `write_ops`) stays **Phase 2**.
+
 ## Groups tab *(Phase 2)*
 Administration surface for the second access axis (see
 [specs/draft-plan.md](../../../specs/draft-plan.md) "Access model (decided)").
