@@ -2426,6 +2426,17 @@ before high-concurrency production load.
   active-connection count, not just CPU; add SSE keep-alive/heartbeat + server
   idle timeout to reclaim dead connections; load-test concurrent
   chat+ingest+notification streams to find the real per-pod ceiling.
+- **Interaction with item 6 (resolve together, not as separate phases)**: the
+  relay's fan-out rides Redis pub/sub keyed by `stream_id`, and classic Redis
+  Cluster pub/sub **broadcasts across the whole cluster bus**. So the
+  connection-scaling work here and the Redis-Cluster move in
+  [item 6](#6-redis-high-availability) are one coupled workstream — the streaming
+  hop switches to **sharded pub/sub** (`SPUBLISH`/`SSUBSCRIBE`, Redis 7+) on a
+  slot-hash-tagged `stream_id` ([contracts/sse-events.md](./001-contextengine-mvp/contracts/sse-events.md),
+  [research §10](./001-contextengine-mvp/research.md)). Because any relay replica
+  already serves any stream with no sticky sessions, this is a keying change, not
+  a re-architecture — but it must land **with** the HA move, or Cluster mode
+  silently degrades streaming.
 
 #### 3. Postgres connection pooling (PgBouncer)
 - **Gap**: No connection pooler is specified. RLS uses `SET LOCAL
@@ -2468,6 +2479,14 @@ before high-concurrency production load.
   the Cluster-specific work is: hash-tag each workspace's keys onto one slot,
   accept `DECRBY` balance drift as an RPO/reconcile concern, and treat
   rate-limit counters + the opaque session store as fail-safe.
+- **SSE fan-out on Cluster (couples to item 2)**: classic `PUBLISH`/`SUBSCRIBE`
+  is broadcast across the whole cluster bus, so the streaming hop
+  ([contracts/sse-events.md](./001-contextengine-mvp/contracts/sse-events.md))
+  must move to **sharded pub/sub** (`SPUBLISH`/`SSUBSCRIBE`, Redis 7+) keyed by a
+  slot-hash-tagged `stream_id` — a token then reaches only the relay replicas on
+  that shard. This is the **same decision** as the SSE-tier split in
+  [item 2](#2-sse-connection-ceiling--backpressure); do them together
+  ([research §10](./001-contextengine-mvp/research.md), residual requirement (d)).
 
 #### 7. Operational resilience primitives
 - **Gap**: No readiness/liveness probes, graceful drain (esp. for in-flight SSE
@@ -2496,6 +2515,21 @@ before high-concurrency production load.
   - Concurrent streaming chat (sustained open SSE + token streaming).
   - Media-upload bursts (presign → S3 → ingestion fan-in).
   - Mixed steady-state (chat + ingest + notifications + credit deducts).
+  - **Concurrent-streams SLO is the primary AI-path number** — the meaningful
+    capacity target is *simultaneous open streams* (order tens of thousands),
+    **not** new query RPS. A streaming chat holds a connection for seconds-to-
+    minutes, so "thousands of RPS" is the wrong unit for this path; state both,
+    but budget the stream ceiling first ([contracts/sse-events.md](./001-contextengine-mvp/contracts/sse-events.md)).
+  - **Carry the per-query LLM-call multiplier** — one query ≈ **4–5 gateway
+    calls** (`route`/`rewrite`/`rerank`/`generate`,
+    [contracts/agent-graph.md](./001-contextengine-mvp/contracts/agent-graph.md)),
+    so provider-quota, key-pool, and rate-limit sizing multiply the query rate by
+    this factor before comparing against provider limits
+    ([research §21](./001-contextengine-mvp/research.md)).
+  - **Add a `$/QPS` (cost-per-throughput) budget** — at high LLM RPS the dollar
+    burn is the real ceiling; credits *meter* it but add no capacity. The harness
+    reports `$/1k-queries` alongside p95/p99, so every load target is also an
+    explicit spend target.
   Run soak tests to surface connection leaks, queue growth, and replica-lag.
 
 #### 10. Per-tenant fairness / noisy-neighbor isolation
@@ -2503,6 +2537,14 @@ before high-concurrency production load.
   share of *compute* (worker slots, Qdrant CPU, DB connections) under contention.
 - **Do**: Add per-workspace concurrency fairness (e.g., per-tenant in-flight
   query cap or weighted queueing) so one heavy tenant can't starve others.
+- **Interim guard (do NOT wait for the rest of Phase 4)**: the noisy-neighbor
+  risk is present the moment there is more than one active tenant — well before
+  the HA/autoscale machinery in this phase exists. Land a cheap guard early: a
+  **per-workspace in-flight `query.agent.<ws>` cap** enforced at `POST /query`
+  via a Redis counter (reject/queue with `429` past the cap). It needs none of
+  the autoscaling/HA work here and closes the "one heavy tenant starves the
+  fixed 3-pod pool" gap for the MVP. Full weighted-fair queueing across worker
+  slots / Qdrant CPU / DB connections stays the Phase-4 item above.
 
 ### Cross-references
 - Existing strengths to preserve: async query path
