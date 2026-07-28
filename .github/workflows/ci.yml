@@ -42,11 +42,20 @@ jobs:
         with:
           filters: |
             go:
-              - 'backend-go/**'
+              - 'backend-go/**/*.go'
+              - 'backend-go/go.mod'
+              - 'backend-go/go.sum'
             python:
-              - 'backend-python/**'
+              - 'backend-python/**/*.py'
+              - 'backend-python/pyproject.toml'
+              - 'backend-python/uv.lock'
             frontend:
-              - 'frontend/**'
+              - 'frontend/**/*.[jt]s'
+              - 'frontend/**/*.[jt]sx'
+              - 'frontend/**/*.css'
+              - 'frontend/package.json'
+              - 'frontend/pnpm-lock.yaml'
+              - 'frontend/package-lock.json'
             docker:
               - '**/Dockerfile'
               - '**/Dockerfile.*'

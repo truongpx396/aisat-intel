@@ -52,12 +52,22 @@ jobs:
       - uses: actions/checkout@v4
       - id: set
         run: |
+          # A component is buildable only when BOTH its Dockerfile AND its code
+          # manifest exist — so this repo stays inert until real source lands.
           items=()
           add() { items+=("$1"); }
-          [ -f backend-go/Dockerfile ]         && add '{"name":"backend-go","context":"backend-go","dockerfile":"backend-go/Dockerfile"}'
-          [ -f backend-python/Dockerfile ]     && add '{"name":"backend-python","context":"backend-python","dockerfile":"backend-python/Dockerfile"}'
-          [ -f backend-python/Dockerfile.crawl ] && add '{"name":"crawl","context":"backend-python","dockerfile":"backend-python/Dockerfile.crawl"}'
-          [ -f frontend/Dockerfile ]           && add '{"name":"frontend","context":"frontend","dockerfile":"frontend/Dockerfile"}'
+          if [ -f backend-go/Dockerfile ] && [ -f backend-go/go.mod ]; then
+            add '{"name":"backend-go","context":"backend-go","dockerfile":"backend-go/Dockerfile"}'
+          fi
+          if [ -f backend-python/Dockerfile ] && [ -f backend-python/pyproject.toml ]; then
+            add '{"name":"backend-python","context":"backend-python","dockerfile":"backend-python/Dockerfile"}'
+          fi
+          if [ -f backend-python/Dockerfile.crawl ] && [ -f backend-python/pyproject.toml ]; then
+            add '{"name":"crawl","context":"backend-python","dockerfile":"backend-python/Dockerfile.crawl"}'
+          fi
+          if [ -f frontend/Dockerfile ] && [ -f frontend/package.json ]; then
+            add '{"name":"frontend","context":"frontend","dockerfile":"frontend/Dockerfile"}'
+          fi
           if [ ${#items[@]} -eq 0 ]; then
             echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
             echo 'any=false' >> "$GITHUB_OUTPUT"
