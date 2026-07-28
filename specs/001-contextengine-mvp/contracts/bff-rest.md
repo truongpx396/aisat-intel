@@ -101,6 +101,18 @@ Billing responses:
 | POST | `/llm/proxy` | OpenAI-compatible LLM pass-through (proxy sub-mode) | Authenticates PAT, enforces token budget, deducts credits, resolves alias, forwards, traces (FR-026). BYOK devices do not use this. **Transport**: synchronous HTTP streaming pass-through to the standalone LLM gateway (`:4000`, LiteLLM/Bifrost) — `stream:true` relayed verbatim as SSE, flush-per-chunk, context-cancel chained; not gRPC/NATS (research §20, §21). |
 | GET | `/agent-runs` / POST `/agent-runs/{id}/cancel` | List / cancel long-horizon runs | Cancel → `cancelling`→`cancelled` (FR-028, SC-009) |
 
+## Approvals — human-in-the-loop (FR-040)
+
+The resolve surface for the reusable human-gate ([approval-ports.md](./approval-ports.md)). All recipient-scoped: a caller sees and resolves only approvals addressed to them (RLS on `approval_request.user_id`).
+
+| Method | Path | Purpose | Notes |
+|--------|------|---------|-------|
+| GET | `/approvals` | List the caller's approvals (newest first) | Recipient-scoped via RLS (SC-014). Paginated `?limit=&cursor=`; `?status=pending` and `?kind=` filter. Returns `{ id, kind, subject_ref, prompt, payload, status, created_at, expires_at }[]` |
+| GET | `/approvals/{id}` | Approval detail | `404` (not `403`) if the caller is not the approver — existence privacy (SC-014) |
+| POST | `/approvals/{id}/resolve` | Record the human decision | Body `{ verdict: "approve"\|"reject"\|"edit", resume_value?, note? }`. **Idempotent** (first decision wins; a replay returns the recorded decision). `404` for a non-approver. On **approve/edit** of a durable-run gate (`long_horizon_action` / `web_search` / `note_edit`, FR-041) → publishes `agent.resume.<ws>` to resume the paused run via `Command(resume)` (a `note_edit` commits the note update + re-index, a `web_search` runs the fetch); on **reject**/expiry the run ends cleanly and the action never runs. Credit-affecting only *after* approve (the gated step's spend), never while pending (FR-040, SC-014) |
+
+The note-enrichment accept (`POST /notes/{id}`, above) is the **enrich-instance of resolve** for `kind='enrich_accept'` — the same gate, surfaced on the note flow rather than the generic inbox.
+
 ## Notifications (US8)
 
 | Method | Path | Purpose | Notes |
@@ -119,6 +131,7 @@ Billing responses:
 ## Contract test obligations
 
 - Access-control: a member never receives a document above clearance or outside workspace via `/documents` or `/query` (SC-001, hard).
+- Approvals: `GET /approvals` and `POST /approvals/{id}/resolve` never expose or accept another member's approval — a non-approver gets `404` (existence privacy), not the gate (SC-014, hard); a repeated `resolve` with the same decision is a no-op returning the recorded decision (idempotent); approving a paused `long_horizon_action` resumes the run exactly once (no re-spend), and no credit is deducted while the gate is pending (FR-040, SC-014).
 - Oversize: `/ingest/presign` with `content_length` > limit → `413 oversize` before any spend.
 - Unsupported type: video/audio → `501 unsupported_type` (not silent).
 - Blocked credits: exhausted balance → `402` with upgrade path; daily limit → `429`; both with actionable message (SC-010).

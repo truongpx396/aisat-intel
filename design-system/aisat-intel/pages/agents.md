@@ -25,18 +25,41 @@ screen must communicate that agents are *additive* — every core feature works 
   token metering; admin-disableable). **Revoke credentials** action.
 - **Register agent** flow: generates a one-time device credential; if the user picks
   BYOK mode, require an explicit acceptance of the metering/moderation gap (FR-026).
-- **Task row**: title, status pill (`running`/`checkpointed`/`resumed`/`cancelled`/
-  `completed`/`halted-cost-cap`), a **step/checkpoint** indicator, **spend meter**
-  (credits used vs per-task cap, turns red near the cap), and **Cancel**.
+- **Task row**: title, status pill (`running`/`checkpointed`/`resumed`/`awaiting-approval`/
+  `cancelled`/`completed`/`halted-cost-cap`), a **step/checkpoint** indicator, **spend meter**
+  (credits used vs per-task cap, turns red near the cap), and **Cancel**. A row in
+  `awaiting-approval` (amber) exposes the **approval card** inline (see below) and shows
+  "no credits spent while paused".
 - **Resume note**: visibly show when a task auto-resumed from its last checkpoint after
   a worker interruption (FR-028) and when a stale worker was re-queued.
 - **Cost-cap halt**: a distinct halted state explaining the task stopped at its per-task
   cap independent of the daily budget (US7 scenario 5), with an option to raise the cap.
 
+## Agent actions & human-in-the-loop (Phase 1, FR-041)
+Phase 1 gives the agent two **action** tools beyond read-only retrieval, each gated by the
+human-in-the-loop approval card (MASTER "Approval card"); both run only inside a durable
+long-horizon run, so the gate can pause and resume it.
+- **`web_search` (user + admin roles)**: when a task needs fresh external info, the run
+  pauses (`awaiting-approval`) and the approval card shows the **intended query + target
+  host** for a **per-fetch** confirm. Approve → the fetch runs (SSRF-guarded `web_distill`);
+  Reject → the run continues without web. No fetch and no spend happen before approval.
+- **`edit_note` (access-bounded write)**: the agent proposes an edit to an **existing**
+  note; the approval card shows a **red/green diff** of the proposed `body`, the acting
+  agent's effective clearance (`min(agent, owner)`), and the target note. Approve → the note
+  updates + re-indexes; Reject → unchanged. The UI must reflect the server bounds: the agent
+  can edit only the owner's own personal notes or shared workspace notes ≤ its clearance, can
+  never raise the note's clearance above its source floor, and **cannot create** a note — an
+  attempt outside scope shows the denial reason (`not_found` / `envelope_widens`), never a
+  silent success. The Library's agent-authored view links here.
+- **Both are off by default per role** — enabled from the Admin agent-policy controls
+  (`can_write` / `write_ops`, allowed-tools). Surface the enablement state on the device card.
+
 ## States to show
 - One connected server-routed agent + one BYOK agent (with the warning).
 - A running task with checkpoint progress and spend meter.
 - A task halted at its cost cap (danger), and one resumed-after-interruption (info).
+- A task **awaiting approval** (amber) with the approval card open — one showing a
+  `web_search` confirm, one showing a `note_edit` diff — so both gated actions are legible.
 
 ## Don'ts
 - Don't say "run on agent" for a long-horizon task. It runs on the AISAT worker under that
@@ -178,9 +201,12 @@ figure must show tool operations only and say why — a warning banner above a s
 still counts LLM tokens is worse than no banner, because one of the two is lying.
 
 ## Allowed-tools picker
-Write-capable tools (`ingest_document`, `write_memory`) carry the `Phase 2` chip because
-Phase 1's MCP surface is **read-only** by contract (FR-012). The picker must never imply a
-capability the server will refuse.
+Phase 1's MCP surface is **read-only by default** plus the two HITL-gated Category-D action
+tools: **`web_search`** (user+admin) and **`edit_note`** (requires `can_write` +
+`note_update ∈ write_ops`). These two appear as toggleable Phase-1 tools with a small
+`HITL` marker (every use is human-approved). The *broader* write tools (`ingest_document`,
+`write_memory`, artifact writes, document creation) keep the `Phase 2` chip. The picker must
+never imply a capability the server will refuse (FR-012, FR-041).
 
 ---
 
@@ -211,4 +237,4 @@ one is connected. See [specs/draft-plan.md](../../../specs/draft-plan.md)
 | Access scope panel (clearance, groups, write mode) | 2 | `agent_registry.clearance`, `agent_policies` write scope |
 | Agent activity: health, tool calls, denials, writes, spend | 2 | Resource-level audit (Agent Access & Accountability, Decision 5) |
 | Cross-link to the Library agent-definition facet | 2 | `agent_registry`; `get_agent_registry(capability)` |
-| Category D tools in the allowed-tools list | 2 | `get_artifact_by_type`, `search_biz_rules`, `get_agent_registry`, `resolve_dependency_chain` |
+| Category E tools in the allowed-tools list (typed knowledge) | 2 | `get_artifact_by_type`, `search_biz_rules`, `get_agent_registry`, `resolve_dependency_chain` |

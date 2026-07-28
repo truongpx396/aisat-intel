@@ -98,7 +98,7 @@ flowchart TB
     subgraph PY["🐍 Python ML / Agent Tier (3.12) · deploy roles: ingest · query · enrich · janitor"]
         Ingest["Ingestion Pipeline<br/>convert · caption · chunk · tag · embed"]
         Agent["LangGraph RAG Agent<br/>7+1 nodes · Mem0 · semantic cache"]
-        MCP["MCP Tool Server — 8 tools / 3 categories"]
+        MCP["MCP Tool Server — 10 tools / 4 categories"]
     end
 
     subgraph CRAWL["🕷️ Crawl4AI — separate single deployment"]
@@ -337,7 +337,7 @@ flowchart TB
 | PAT auth + instant revocation | ✅ Go, shared Redis PAT store | ❌ server never sees it | ✅ Python, **same** Redis PAT store |
 | Rate limit / daily quota | ✅ shared Redis counters | ❌ | ✅ **same** Redis counters |
 | Body-size cap (`413`) | ✅ | ❌ | ✅ |
-| Moderation / injection gate | ✅ before any spend | ❌ agent's own concern | n/a — tools are read-only, args are typed |
+| Moderation / injection gate | ✅ before any spend | ❌ agent's own concern | n/a — read tools are typed/read-only; the two action tools (`web_search`/`edit_note`) are HITL-gated + access-bounded |
 | Credit metering | ✅ budget gate → `billing.deduct` | ❌ not metered | ✅ per AI op (embed/rerank) → `billing.deduct` |
 | Tool ACL (`allowed_tools`) | — (LLM pass-through) | — | ✅ allowlist per dispatch, shared `agent_policies` |
 | RLS + clearance pre-filter | — | — | ✅ `app.*` GUCs → Postgres RLS + Qdrant filter (SC-001) |
@@ -411,9 +411,10 @@ These are the patterns mature AI teams converge on for enterprise RAG — each i
 | **Semantic answer-cache** | Cache whole answers, not just chunks | Redis, keyed by `workspace + clearance + authorized doc set` |
 | **Grounded generation + citations** | Eval-gated faithfulness (MRR/recall/citation accuracy) | Node 7 + `evals/run.py` gate (Ragas/DeepEval/Promptfoo) |
 | **Stateful, durable orchestration** | Checkpointed graph that survives interruption | LangGraph + Redis checkpoints (long-horizon `agent_run`) |
+| **Human-in-the-loop gate** | Approve index-mutating / outward-reaching actions before they run (durable interrupt → resume) | kernel `approval` port + `human_gate` node — `interrupt()`/`Command(resume)`, no-spend-while-paused, fail-closed ([contracts/approval-ports.md](specs/001-contextengine-mvp/contracts/approval-ports.md)) |
 | **Full LLMOps observability** | Trace every step, score, token, credit | Langfuse + OpenTelemetry + per-answer debug panel |
 
-> **Planned (Phase 2) — answer groundedness & self-correction.** The Phase-1 graph is deterministic and linear by design (a release-blocking posture for access-control + refuse-before-spend). A **CRAG-style** ("Corrective RAG") groundedness node — grade retrieval relevance, then re-retrieve / route to `web_search` (per-search HITL) / **abstain** rather than answer from weak context — plus an optional Self-RAG faithfulness check, slot in as a **single additive node** between rerank/expand and generate. The graph and the `web_search` seam are built in Phase 1 so this is no refactor (research §17).
+> **Planned (Phase 2) — answer groundedness & self-correction.** The Phase-1 graph is deterministic and linear by design (a release-blocking posture for access-control + refuse-before-spend). A **CRAG-style** ("Corrective RAG") groundedness node — grade retrieval relevance, then re-retrieve / route to the (Phase-1) `web_search` tool / **abstain** rather than answer from weak context — plus an optional Self-RAG faithfulness check, slot in as a **single additive node** between rerank/expand and generate. The stable `AgentState` makes this no refactor (research §17). Note the agent `web_search` tool itself — and its per-fetch HITL confirmation — is **already Phase 1** (a caller of the `human_gate` primitive, `interrupt()`/resume; [contracts/approval-ports.md](specs/001-contextengine-mvp/contracts/approval-ports.md)); what remains for Phase 2 is only the *grading node that decides when to invoke it*.
 
 ### Intent routing (the semantic router)
 
@@ -444,8 +445,23 @@ Access control is **structural**, enforced at multiple layers — not by trustin
 - **Memory access-control invariant** — Mem0 memories carry the clearance of the data that produced them; a memory distilled from a now-restricted doc is never re-injected (survives clearance demotion).
 - **Existence privacy** — cross-clearance / cross-workspace lookups return `not_found`, never `forbidden`, so restricted resources aren't probeable.
 - **Prompt-injection defense** — disallowed/injection inputs are refused *before* retrieval or credit spend; retrieved documents are treated as inert reference material.
+- **Human-in-the-loop gate** — any action that mutates the index, raises a document's clearance, or reaches outside the workspace pauses for an explicit human decision recorded *before* the action and *before* any spend; the gate is **fail-closed** (unresolved/rejected ⇒ never proceeds) and the decision is human-authored, never derived from model/tool output — so a poisoned page can at worst influence a *draft the human reviews*. One reusable port backs every such confirmation (see [contracts/approval-ports.md](specs/001-contextengine-mvp/contracts/approval-ports.md)).
 
 These are aligned with **OWASP Top 10 (2025)** — see the repo-wide [security & OWASP instructions](.github/instructions/security-and-owasp.instructions.md).
+
+#### Human-in-the-loop — a standard pattern, not a bespoke gate
+
+The approval mechanism ([contracts/approval-ports.md](specs/001-contextengine-mvp/contracts/approval-ports.md)) is built from patterns large durable-workflow and agentic systems already run in production — not a one-off:
+
+| Our piece | The production pattern it is |
+|---|---|
+| `interrupt()` + `Command(resume=…)` over the Redis checkpointer | The **canonical LangGraph HITL pattern** — literally what the framework's docs prescribe, not an invention |
+| `approval_request.id` → pause → `POST /approvals/{id}/resolve` → `agent.resume.<ws>` | **Task-token / callback pattern** — AWS Step Functions `.waitForTaskToken`, Temporal **signals**, Azure Durable Functions external events. Same shape: durable wait, opaque handle, external actor resumes it |
+| durable `approval_request` + idempotent resolve + exactly-once resume + no-re-spend | **Saga / transactional-outbox / idempotency-key** discipline from payments & workflow engines |
+| refuse-before-spend, fail-closed, **human-authored decision never from tool output** | Directly against **OWASP LLM "excessive agency" (LLM08)**; the "decision can't come from model/tool output" rule is the **dual-LLM / CaMeL** injection-containment idea (Willison / Google DeepMind) |
+| `WriteEnvelope` — a derived write can't widen access above its sources | **Information-flow / label propagation** — most systems don't do this; it's ahead of the typical bar |
+
+So at the **framework** level (LangGraph), the **distributed-systems** level (durable pause/resume + idempotency), and the **agent-security** level, this is a strong, current standard — and it is a **design, reviewed against written invariants**, which is the right altitude for a spec. The one implementation sharp edge — LangGraph re-executes an interrupted node's prefix on resume, so the durable `Create` must be idempotent and no spend/mutation may precede `interrupt()` — is called out in [approval-ports.md](specs/001-contextengine-mvp/contracts/approval-ports.md). What separates this from a full enterprise *approval platform* (multi-approver quorum, delegation, SLA escalation, segregation-of-duties, risk-based selective gating) layers on top of the same port without changing it.
 
 #### Authentication flow (OIDC + PKCE)
 
@@ -684,13 +700,13 @@ A fully **event-driven, multi-channel** notification subsystem (US8): any backen
 PRODUCERS (ingest · billing · invite · agent · admin)   ← thin: publish one Notification
         │  publish notify.<ws> { recipient, topic, idem_key, … }
         ▼
-notify.<ws> queue group ── cmd/worker (N replicas, idempotent) ── Notifier ──┐
-   prefs.Channels(recipient, topic)           ← which channels are enabled     │
-   SET NX notify:applied:{idem_key}           ← fast pre-check (skip DB round) │
-   ┌─ ONE TRANSACTION ──────────────────────────────────────────────────────┐ │
+notify.<ws> queue group ── cmd/worker (N replicas, idempotent) ── Notifier ─────┐
+   prefs.Channels(recipient, topic)           ← which channels are enabled      │
+   SET NX notify:applied:{idem_key}           ← fast pre-check (skip DB round)  │
+   ┌─ ONE TRANSACTION ────────────────────────────────────────────────────────┐ │
    │  INSERT notifications        UNIQUE(user_id, idem_key)  ← durable backstop │
-   │  INSERT notification_outbox  (one row per enabled channel)                │
-   └────────────────────────────────────────────────────────────────────────┘ │
+   │  INSERT notification_outbox  (one row per enabled channel)                 │
+   └──────────────────────────────────────────────────────────────────────────┘ │
         ▼  notification_outbox (per channel)
 Dispatcher drain ── cmd/worker ──▶ ChannelRegistry.Get(kind).Deliver(...)  ← at-least-once
         ├── in_app  Channel → PUBLISH notify:user:<id> ─▶ cmd/relay ─▶ browser (SSE; badge recomputed from DB on connect)
@@ -843,7 +859,7 @@ Source of truth for every system boundary and the target of contract tests — [
 |---|---|
 | [bff-rest.md](specs/001-contextengine-mvp/contracts/bff-rest.md) | Go BFF public REST + SSE endpoints |
 | [nats-subjects.md](specs/001-contextengine-mvp/contracts/nats-subjects.md) | NATS subject schema (ingestion / query / billing) |
-| [mcp-tools.md](specs/001-contextengine-mvp/contracts/mcp-tools.md) | 8 MCP tools across 3 categories |
+| [mcp-tools.md](specs/001-contextengine-mvp/contracts/mcp-tools.md) | 10 MCP tools across 4 categories (A–C read-only; D = HITL-gated `web_search` + `edit_note`) |
 | [llm-gateway.md](specs/001-contextengine-mvp/contracts/llm-gateway.md) | Standalone LLM gateway service (LiteLLM · Bifrost-swappable) + per-runtime client |
 | [metering-ports.md](specs/001-contextengine-mvp/contracts/metering-ports.md) | Reusable `Meter`/`Pricer`/`Ledger` ports — the credit backbone as a domain-agnostic, extractable engine |
 | [sse-events.md](specs/001-contextengine-mvp/contracts/sse-events.md) | SSE event taxonomy (BFF ↔ frontend) |
@@ -883,8 +899,8 @@ A dark-first developer/observability aesthetic — *"code dark + run green"* (sl
 | Phase | Scope |
 |---|---|
 | **Phase 1 — Core App** *(current)* | Ingestion, 7-pattern RAG, agent layer, access control, credits, debug panel, notifications — plus structural prompt-injection defenses and a minimal eval seed set. |
-| **Phase 2 — Evaluation Suite & Billing** | Full Promptfoo + DeepEval + Ragas, **answer-groundedness self-correction** (CRAG/Self-RAG node — grade → re-retrieve / `web_search` / abstain, see [research §17](specs/001-contextengine-mvp/research.md)), agent `web_search` (per-search HITL), context compression (Headroom seam), **complexity-based model routing** (RouteLLM-style strong/cheap selection — app-side decision, eval-gated, see [research §22](specs/001-contextengine-mvp/research.md)), audio ingestion (Whisper), the **billing & payments** layer (Stripe / Polar / PayPal adapters, checkout, webhooks, subscriptions — see [draft-plan.md — Phase 2](specs/draft-plan.md#phase-2-billing-and-payments)), **AI response rating** (thumbs up/down per answer, feeds eval pipeline — see [draft-plan.md](specs/draft-plan.md#phase-2--ai-response-rating-thumbs-up--down)), and a **workspace knowledge mind map** (seed from any doc/note/query, edge-verified retrieval, progressive SSE streaming — see [draft-plan.md](specs/draft-plan.md#phase-2--workspace-knowledge-mind-map)). |
-| **Phase 2 — Enterprise & Access** | A second **access axis** — the L1–L5 ladder joined by group/principal ACLs, with the ladder's labels and level count becoming workspace config (see [draft-plan.md — Access model](specs/draft-plan.md#access-model-decided)); an **enterprise knowledge layer** (typed artifacts, a provenance-carrying knowledge graph, an agent registry, and Git/Jira/Confluence connectors — [draft-plan.md](specs/draft-plan.md#phase-2--enterprise-knowledge-layer-typed-artifacts-knowledge-graph--agent-context-api)); an **organization** above workspace for consolidated billing, SSO/SCIM and policy defaults, plus delegated group administration ([draft-plan.md](specs/draft-plan.md#phase-2--tenancy--delegated-administration)); and **agent access & accountability** — agents as principals bounded by their owner, explicit write scope, and resource-level audit visible to the agent's owner ([draft-plan.md](specs/draft-plan.md#phase-2--agent-access--accountability)). |
+| **Phase 2 — Evaluation Suite & Billing** | Full Promptfoo + DeepEval + Ragas, **answer-groundedness self-correction** (CRAG/Self-RAG node — grade → re-retrieve / abstain, see [research §17](specs/001-contextengine-mvp/research.md)), context compression (Headroom seam), **complexity-based model routing** (RouteLLM-style strong/cheap selection — app-side decision, eval-gated, see [research §22](specs/001-contextengine-mvp/research.md)), audio ingestion (Whisper), the **billing & payments** layer (Stripe / Polar / PayPal adapters, checkout, webhooks, subscriptions — see [draft-plan.md — Phase 2](specs/draft-plan.md#phase-2-billing-and-payments)), **AI response rating** (thumbs up/down per answer, feeds eval pipeline — see [draft-plan.md](specs/draft-plan.md#phase-2--ai-response-rating-thumbs-up--down)), and a **workspace knowledge mind map** (seed from any doc/note/query, edge-verified retrieval, progressive SSE streaming — see [draft-plan.md](specs/draft-plan.md#phase-2--workspace-knowledge-mind-map)). |
+| **Phase 2 — Enterprise & Access** | A second **access axis** — the L1–L5 ladder joined by group/principal ACLs, with the ladder's labels and level count becoming workspace config (see [draft-plan.md — Access model](specs/draft-plan.md#access-model-decided)); an **enterprise knowledge layer** (typed artifacts, a provenance-carrying knowledge graph, an agent registry, and Git/Jira/Confluence connectors — [draft-plan.md](specs/draft-plan.md#phase-2--enterprise-knowledge-layer-typed-artifacts-knowledge-graph--agent-context-api)); an **organization** above workspace for consolidated billing, SSO/SCIM and policy defaults, plus delegated group administration ([draft-plan.md](specs/draft-plan.md#phase-2--tenancy--delegated-administration)); and **agent access & accountability** — agents as principals bounded by their owner, the *broad* write scope (beyond the Phase-1 HITL-gated `note_edit`), and resource-level audit visible to the agent's owner ([draft-plan.md](specs/draft-plan.md#phase-2--agent-access--accountability)). |
 | **Phase 3 — Trust & Knowledge Health** | Makes the Phase 2 substrate trustworthy and self-maintaining. **Agent orientation & business scope** — a bounded, per-caller `get_workspace_context` briefing (charter, domain map, governing rules, the agent's *own* effective scope) plus a `list_changes` cursor, so an agent knows what the organization does instead of only what it may read ([draft-plan.md](specs/draft-plan.md#phase-3--agent-orientation--business-scope)). **Knowledge health** — lifecycle-aware retrieval ranking (deprecated/stale/superseded demoted, not just badged), knowledge-usage telemetry with a coverage-gap backlog, and steward-driven recertification prioritized by what is actually load-bearing ([draft-plan.md](specs/draft-plan.md#phase-3--knowledge-health-lifecycle-aware-retrieval-usage-telemetry--recertification)). **Enterprise compliance & data lifecycle** — provable erasure across every derived store, per-workspace provider/residency policy at the LLM gateway, SIEM audit export, legal hold, access recertification, and isolation tiering ([draft-plan.md](specs/draft-plan.md#phase-3--enterprise-compliance--data-lifecycle)). **The expression layer** — grounded drafting, decision records, and change digests, so the corpus produces artifacts and not only answers ([draft-plan.md](specs/draft-plan.md#phase-3--the-expression-layer)). Plus **automated red-teaming** (NVIDIA Garak), principal anomaly detection, and expanded abuse controls. |
 | **Phase 4 — Scale & Resilience** | Worker autoscaling (KEDA on NATS lag), SSE connection ceilings and backpressure, PgBouncer, Qdrant/Redis HA, load & soak testing, per-tenant fairness — [draft-plan.md — Phase 4](specs/draft-plan.md#phase-4-scalability-and-resilience-hardening). |
 
