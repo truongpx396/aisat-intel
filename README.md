@@ -449,6 +449,20 @@ Access control is **structural**, enforced at multiple layers — not by trustin
 
 These are aligned with **OWASP Top 10 (2025)** — see the repo-wide [security & OWASP instructions](.github/instructions/security-and-owasp.instructions.md).
 
+#### Human-in-the-loop — a standard pattern, not a bespoke gate
+
+The approval mechanism ([contracts/approval-ports.md](specs/001-contextengine-mvp/contracts/approval-ports.md)) is built from patterns large durable-workflow and agentic systems already run in production — not a one-off:
+
+| Our piece | The production pattern it is |
+|---|---|
+| `interrupt()` + `Command(resume=…)` over the Redis checkpointer | The **canonical LangGraph HITL pattern** — literally what the framework's docs prescribe, not an invention |
+| `approval_request.id` → pause → `POST /approvals/{id}/resolve` → `agent.resume.<ws>` | **Task-token / callback pattern** — AWS Step Functions `.waitForTaskToken`, Temporal **signals**, Azure Durable Functions external events. Same shape: durable wait, opaque handle, external actor resumes it |
+| durable `approval_request` + idempotent resolve + exactly-once resume + no-re-spend | **Saga / transactional-outbox / idempotency-key** discipline from payments & workflow engines |
+| refuse-before-spend, fail-closed, **human-authored decision never from tool output** | Directly against **OWASP LLM "excessive agency" (LLM08)**; the "decision can't come from model/tool output" rule is the **dual-LLM / CaMeL** injection-containment idea (Willison / Google DeepMind) |
+| `WriteEnvelope` — a derived write can't widen access above its sources | **Information-flow / label propagation** — most systems don't do this; it's ahead of the typical bar |
+
+So at the **framework** level (LangGraph), the **distributed-systems** level (durable pause/resume + idempotency), and the **agent-security** level, this is a strong, current standard — and it is a **design, reviewed against written invariants**, which is the right altitude for a spec. The one implementation sharp edge — LangGraph re-executes an interrupted node's prefix on resume, so the durable `Create` must be idempotent and no spend/mutation may precede `interrupt()` — is called out in [approval-ports.md](specs/001-contextengine-mvp/contracts/approval-ports.md). What separates this from a full enterprise *approval platform* (multi-approver quorum, delegation, SLA escalation, segregation-of-duties, risk-based selective gating) layers on top of the same port without changing it.
+
 #### Authentication flow (OIDC + PKCE)
 
 Browser auth is **OIDC Authorization Code + PKCE (S256)** against **Casdoor**, which sits behind the swappable kernel `Auth` interface (interchangeable with `jwt.Auth` / `workos.Auth`). The BFF verifies the `id_token` via JWKS (`iss`/`aud`/`exp`, pinned algorithm), then issues its **own opaque session token** — a high-entropy random ID in an **HttpOnly · Secure · SameSite** cookie, backed by a **Redis** session record. The cookie carries **no claims** (never the provider token, never `localStorage`), is **revoked instantly** on logout/clearance-change by deleting the Redis key, and forces every request to re-read current role/clearance (so a demotion takes effect immediately). Each request resolves the Actor server-side and pushes tenant + identity into Postgres so **RLS** is the real access boundary:
