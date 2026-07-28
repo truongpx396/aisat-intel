@@ -1,0 +1,219 @@
+# CD — build images, push to Docker Hub, then deploy to the DigitalOcean droplet.
+#
+# Flow:  discover present images -> build+push (matrix) -> [approval gate] -> deploy -> Telegram
+#
+#   build   : runs on every push to main. Builds each present component image,
+#             tags by immutable git SHA (+ :latest on main, + semver on tags),
+#             pushes to Docker Hub with SBOM + provenance.
+#   deploy  : targets the protected `production` environment, so it PAUSES for a
+#             required reviewer's approval before touching the droplet. It scp's
+#             deploy/ to the droplet, pulls the SHA-tagged images, migrates, and
+#             `docker compose up -d`. Telegram is notified on start/success/failure.
+#
+# Manual redeploy / rollback: run via "Run workflow" (workflow_dispatch) and pass an
+# existing image_tag (a prior commit SHA) to promote that exact build.
+#
+# See .github/workflows/ci.yml for the note on pinning actions to commit SHAs.
+name: CD
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Existing image tag to (re)deploy — defaults to this commit SHA'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false # never cancel a build/deploy that is mid-flight
+
+env:
+  REGISTRY: docker.io
+  IMAGE_PREFIX: aisat
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build a dynamic matrix of the component images that actually exist yet.
+  # ---------------------------------------------------------------------------
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+      any: ${{ steps.set.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: set
+        run: |
+          items=()
+          add() { items+=("$1"); }
+          [ -f backend-go/Dockerfile ]         && add '{"name":"backend-go","context":"backend-go","dockerfile":"backend-go/Dockerfile"}'
+          [ -f backend-python/Dockerfile ]     && add '{"name":"backend-python","context":"backend-python","dockerfile":"backend-python/Dockerfile"}'
+          [ -f backend-python/Dockerfile.crawl ] && add '{"name":"crawl","context":"backend-python","dockerfile":"backend-python/Dockerfile.crawl"}'
+          [ -f frontend/Dockerfile ]           && add '{"name":"frontend","context":"frontend","dockerfile":"frontend/Dockerfile"}'
+          if [ ${#items[@]} -eq 0 ]; then
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            echo 'any=false' >> "$GITHUB_OUTPUT"
+            echo "::notice::No buildable Dockerfiles yet — nothing to build or deploy."
+          else
+            printf -v joined '%s,' "${items[@]}"; joined="${joined%,}"
+            echo "matrix={\"include\":[$joined]}" >> "$GITHUB_OUTPUT"
+            echo 'any=true' >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Build + push each image once. Tag by git SHA (immutable) + :latest / semver.
+  # ---------------------------------------------------------------------------
+  build:
+    needs: discover
+    if: needs.discover.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Image metadata (tags + labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_PREFIX }}-${{ matrix.name }}
+          tags: |
+            type=sha,format=long,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          provenance: true
+          sbom: true
+      - name: Scan pushed image (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_PREFIX }}-${{ matrix.name }}@${{ steps.push.outputs.digest }}
+          format: sarif
+          output: trivy-${{ matrix.name }}.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '0' # report-only; see SETUP.md to make image CVEs blocking
+      - name: Upload scan (SARIF)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-${{ matrix.name }}
+          path: trivy-${{ matrix.name }}.sarif
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Deploy to the droplet. Protected `production` environment => approval gate.
+  # ---------------------------------------------------------------------------
+  deploy:
+    needs: [discover, build]
+    if: needs.discover.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://${{ vars.PRODUCTION_HOST }}
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: tag
+        run: echo "value=${{ github.event.inputs.image_tag || github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Notify — deploy started
+        uses: ./.github/actions/telegram-notify
+        with:
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          message: |
+            🚀 Deploy STARTED — aisat-intel
+            env: production
+            ref: ${{ github.ref_name }}
+            tag: ${{ steps.tag.outputs.value }}
+            by:  ${{ github.actor }}
+            run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Copy deploy/ to droplet
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DROPLET_HOST }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          port: ${{ secrets.DROPLET_SSH_PORT || 22 }}
+          source: 'deploy'
+          target: '/opt/aisat-intel'
+          overwrite: true
+          # .env.production is NOT in the repo, so it is never overwritten on the droplet.
+
+      - name: Deploy on droplet
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DROPLET_HOST }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          port: ${{ secrets.DROPLET_SSH_PORT || 22 }}
+          command_timeout: 25m
+          envs: IMAGE_TAG,REGISTRY,IMAGE_PREFIX,DOCKERHUB_USERNAME
+          script: |
+            set -euo pipefail
+            export IMAGE_TAG='${{ steps.tag.outputs.value }}'
+            export REGISTRY='${{ env.REGISTRY }}'
+            export IMAGE_PREFIX='${{ env.IMAGE_PREFIX }}'
+            export DOCKERHUB_USERNAME='${{ vars.DOCKERHUB_USERNAME }}'
+            cd /opt/aisat-intel/deploy
+            chmod +x deploy.sh
+            ./deploy.sh
+
+      - name: Notify — deploy succeeded
+        if: success()
+        uses: ./.github/actions/telegram-notify
+        with:
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          message: |
+            ✅ Deploy SUCCEEDED — aisat-intel
+            env: production  •  tag: ${{ steps.tag.outputs.value }}
+            url: https://${{ vars.PRODUCTION_HOST }}
+
+      - name: Notify — deploy failed
+        if: failure()
+        uses: ./.github/actions/telegram-notify
+        with:
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          message: |
+            ❌ Deploy FAILED — aisat-intel
+            env: production  •  tag: ${{ steps.tag.outputs.value }}
+            The droplet attempted an automatic rollback to the previous tag.
+            run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

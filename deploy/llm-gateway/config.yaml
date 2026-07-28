@@ -1,0 +1,43 @@
+# LiteLLM gateway config — the ONLY holder of provider keys.
+# Exposes four stable aliases (fast / smart / embed / rerank) that both runtimes
+# call over the OpenAI wire. Provider keys are read from the environment
+# (.env.production), never hard-coded here. Bifrost-swappable (plan research §21).
+
+model_list:
+  # --- fast: cheap/low-latency chat -----------------------------------------
+  - model_name: fast
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+  # --- smart: high-quality reasoning ----------------------------------------
+  - model_name: smart
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+  # one-hop fallback provider for `smart`
+  - model_name: smart
+    litellm_params:
+      model: anthropic/claude-sonnet-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+  # --- embed: embeddings -----------------------------------------------------
+  - model_name: embed
+    litellm_params:
+      model: openai/text-embedding-3-large
+      api_key: os.environ/OPENAI_API_KEY
+  # --- rerank: cross-encoder reranking --------------------------------------
+  - model_name: rerank
+    litellm_params:
+      model: cohere/rerank-english-v3.0
+      api_key: os.environ/COHERE_API_KEY
+
+litellm_settings:
+  drop_params: true
+  num_retries: 2
+  request_timeout: 60
+  # one-hop fallback only (matches the plan's constraint)
+  fallbacks:
+    - smart: ['smart']
+
+# The master key gates access to the gateway from the app tiers.
+general_settings:
+  master_key: os.environ/LLM_GATEWAY_MASTER_KEY

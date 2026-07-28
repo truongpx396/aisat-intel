@@ -1,0 +1,49 @@
+# Edge: automatic HTTPS (Let's Encrypt) + reverse proxy.
+# Requires PRODUCTION_HOST to resolve to this droplet and ports 80/443 open.
+
+{
+	email {$ACME_EMAIL}
+	# For staging certs while testing DNS, uncomment:
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$PRODUCTION_HOST} {
+	encode zstd gzip
+
+	# Streaming (SSE) routes -> the relay tier, with buffering OFF.
+	# NOTE: confirm these path prefixes against contracts/bff-rest.md + sse-events.md.
+	@stream path /api/v1/query/*/stream /api/v1/ingest/*/status /api/v1/events*
+	handle @stream {
+		reverse_proxy go-relay:8080 {
+			flush_interval -1
+			transport http {
+				versions 1.1
+			}
+		}
+	}
+
+	# REST API -> the BFF.
+	handle /api/* {
+		reverse_proxy go-api:8080
+	}
+
+	# Everything else -> the SPA. Assets are baked into this Caddy image at /srv;
+	# try_files gives client-side routing its index.html fallback.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

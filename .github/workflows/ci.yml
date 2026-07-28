@@ -1,0 +1,221 @@
+# CI gate — lint, test, and security-scan every PR and every push to main.
+#
+# Runtime jobs are PRESENCE- and CHANGE-guarded (dorny/paths-filter): a job only
+# runs when that runtime's code exists AND changed, so this pipeline is inert on a
+# specs-only repo and "lights up" per runtime (Go / Python / React) as code lands.
+#
+# NOTE: actions are pinned to major version tags for readability. Per
+# .github/instructions/devops-cicd.instructions.md they SHOULD be pinned to full
+# commit SHAs before production — use `ratchet`/`pin-github-action` or Dependabot
+# (see .github/dependabot.yml, which is configured to manage these pins).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Which runtimes changed? (dir absent => filter is false => downstream skips)
+  # ---------------------------------------------------------------------------
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      python: ${{ steps.filter.outputs.python }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      docker: ${{ steps.filter.outputs.docker }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            go:
+              - 'backend-go/**'
+            python:
+              - 'backend-python/**'
+            frontend:
+              - 'frontend/**'
+            docker:
+              - '**/Dockerfile'
+              - '**/Dockerfile.*'
+              - 'deploy/**'
+
+  # ---------------------------------------------------------------------------
+  # Secret scanning — always runs (cheap, catches leaked creds in any change).
+  # ---------------------------------------------------------------------------
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Go BFF / gateway / kernel  (backend-go)
+  # ---------------------------------------------------------------------------
+  go:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend-go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache-dependency-path: backend-go/go.sum
+      - name: Lint (golangci-lint)
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: backend-go
+      - name: Vet
+        run: go vet ./...
+      - name: Test (race + coverage)
+        run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
+      - name: Vulnerability scan (govulncheck)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+      - name: Build all entrypoints
+        run: |
+          for c in api relay worker; do
+            [ -d "./cmd/$c" ] && go build -o /dev/null "./cmd/$c" || true
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: go-coverage
+          path: backend-go/coverage.out
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Python ML / agent tier  (backend-python, UV)
+  # ---------------------------------------------------------------------------
+  python:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend-python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend-python/uv.lock
+      - name: Install (frozen)
+        run: uv sync --frozen --all-extras --dev
+      - name: Lint (ruff)
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: Type-check (mypy, non-blocking until typed)
+        run: uv run mypy src || echo "::warning::mypy reported issues"
+      - name: Test (coverage)
+        run: uv run pytest --cov=src --cov-report=xml
+      - name: Dependency audit (pip-audit)
+        run: uvx pip-audit || echo "::warning::pip-audit reported advisories"
+
+  # ---------------------------------------------------------------------------
+  # React 19 + Vite SPA  (frontend)
+  # ---------------------------------------------------------------------------
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Enable corepack (pnpm)
+        run: corepack enable
+      - name: Install
+        run: |
+          if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile
+          elif [ -f package-lock.json ]; then npm ci
+          else npm install; fi
+      - name: Lint
+        run: npm run lint --if-present
+      - name: Type-check
+        run: npm run typecheck --if-present
+      - name: Test
+        run: npm run test --if-present
+      - name: Build
+        run: npm run build --if-present
+      - name: Dependency audit
+        run: npm audit --omit=dev || echo "::warning::npm audit reported advisories"
+
+  # ---------------------------------------------------------------------------
+  # Dockerfile lint + IaC/config scan  (any Docker or deploy change)
+  # ---------------------------------------------------------------------------
+  docker-lint:
+    needs: changes
+    if: needs.changes.outputs.docker == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hadolint all Dockerfiles
+        run: |
+          shopt -s globstar nullglob
+          files=(**/Dockerfile **/Dockerfile.*)
+          [ ${#files[@]} -eq 0 ] && { echo "no Dockerfiles"; exit 0; }
+          for f in "${files[@]}"; do
+            echo "== $f =="
+            docker run --rm -i hadolint/hadolint hadolint --failure-threshold error - < "$f"
+          done
+      - name: Trivy config / IaC scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: '0' # report-only for now; flip to '1' to block (see SETUP.md)
+
+  # ---------------------------------------------------------------------------
+  # Aggregate gate — a single required check for branch protection.
+  # Passes only if no needed job failed (skipped is OK on a specs-only change).
+  # ---------------------------------------------------------------------------
+  ci-gate:
+    if: always()
+    needs: [secret-scan, go, python, frontend, docker-lint]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify no job failed
+        run: |
+          results='${{ join(needs.*.result, ' ') }}'
+          echo "job results: $results"
+          for r in $results; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::a required CI job did not pass"; exit 1
+            fi
+          done
+          echo "CI gate passed."

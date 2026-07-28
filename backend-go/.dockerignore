@@ -1,0 +1,17 @@
+# Keep the build context small and secret-free.
+.git
+.github
+.gitignore
+.env
+.env.*
+*.env
+README.md
+Dockerfile
+.dockerignore
+**/*_test.go
+**/testdata/
+tmp/
+bin/
+dist/
+coverage.out
+*.log

@@ -172,8 +172,12 @@ test-results/
 .env.local
 .env.development.local
 .env.test.local
+.env.production
 .env.production.local
 .env*.local
+# Real deploy secrets live only on the droplet — never commit them.
+deploy/.env.production
+**/.env.production
 
 # Package manager lockfiles (keep one, ignore others as needed)
 # yarn.lock
