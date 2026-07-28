@@ -124,7 +124,7 @@ jobs:
           provenance: true
           sbom: true
       - name: Scan pushed image (Trivy)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_PREFIX }}-${{ matrix.name }}@${{ steps.push.outputs.digest }}
           format: sarif
