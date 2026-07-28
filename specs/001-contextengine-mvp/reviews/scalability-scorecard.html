@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AISAT-INTEL — Scalability Scorecard</title>
+<style>
+  :root {
+    --bg: #f5f7f8;
+    --surface: #ffffff;
+    --surface-2: #eef1f4;
+    --ink: #14181f;
+    --ink-2: #3c4652;
+    --muted: #697382;
+    --line: #dbe0e7;
+    --line-strong: #c6ccd5;
+    --accent: #0d7284;
+    --accent-ink: #0a5c6b;
+    --accent-soft: rgba(13, 114, 132, 0.10);
+    --good: #1a7a45;
+    --good-soft: rgba(26, 122, 69, 0.12);
+    --warn: #a15c0c;
+    --warn-soft: rgba(161, 92, 12, 0.13);
+    --high: #bd4f14;
+    --high-soft: rgba(189, 79, 20, 0.12);
+    --crit: #bf2739;
+    --crit-soft: rgba(191, 39, 57, 0.11);
+    --shadow: 0 1px 2px rgba(20, 24, 31, 0.05), 0 6px 20px -12px rgba(20, 24, 31, 0.18);
+    --mono: ui-monospace, "SF Mono", "SFMono-Regular", "Cascadia Code", "Menlo", Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1217;
+      --surface: #161b22;
+      --surface-2: #1b222b;
+      --ink: #e7ebf0;
+      --ink-2: #aeb8c4;
+      --muted: #7a8492;
+      --line: #262e39;
+      --line-strong: #333d4a;
+      --accent: #38c1d6;
+      --accent-ink: #6fd6e6;
+      --accent-soft: rgba(56, 193, 214, 0.14);
+      --good: #4dc07d;
+      --good-soft: rgba(77, 192, 125, 0.14);
+      --warn: #e0a552;
+      --warn-soft: rgba(224, 165, 82, 0.15);
+      --high: #ef8f57;
+      --high-soft: rgba(239, 143, 87, 0.15);
+      --crit: #f26d7a;
+      --crit-soft: rgba(242, 109, 122, 0.15);
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 26px -14px rgba(0, 0, 0, 0.7);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f5f7f8; --surface: #ffffff; --surface-2: #eef1f4;
+    --ink: #14181f; --ink-2: #3c4652; --muted: #697382;
+    --line: #dbe0e7; --line-strong: #c6ccd5;
+    --accent: #0d7284; --accent-ink: #0a5c6b; --accent-soft: rgba(13,114,132,0.10);
+    --good: #1a7a45; --good-soft: rgba(26,122,69,0.12);
+    --warn: #a15c0c; --warn-soft: rgba(161,92,12,0.13);
+    --high: #bd4f14; --high-soft: rgba(189,79,20,0.12);
+    --crit: #bf2739; --crit-soft: rgba(191,39,57,0.11);
+    --shadow: 0 1px 2px rgba(20,24,31,0.05), 0 6px 20px -12px rgba(20,24,31,0.18);
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1217; --surface: #161b22; --surface-2: #1b222b;
+    --ink: #e7ebf0; --ink-2: #aeb8c4; --muted: #7a8492;
+    --line: #262e39; --line-strong: #333d4a;
+    --accent: #38c1d6; --accent-ink: #6fd6e6; --accent-soft: rgba(56,193,214,0.14);
+    --good: #4dc07d; --good-soft: rgba(77,192,125,0.14);
+    --warn: #e0a552; --warn-soft: rgba(224,165,82,0.15);
+    --high: #ef8f57; --high-soft: rgba(239,143,87,0.15);
+    --crit: #f26d7a; --crit-soft: rgba(242,109,122,0.15);
+    --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 8px 26px -14px rgba(0,0,0,0.7);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    font-size: 15px;
+  }
+  .page {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 32px 24px 56px;
+  }
+  .topline { height: 3px; background: linear-gradient(90deg, var(--accent), transparent 78%); border-radius: 3px; margin-bottom: 26px; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    margin: 0 0 10px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .eyebrow::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+  h1 {
+    font-size: clamp(27px, 4.4vw, 37px);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    margin: 0 0 12px;
+    text-wrap: balance;
+    font-weight: 720;
+  }
+  .thesis {
+    font-size: clamp(15px, 1.9vw, 17px);
+    color: var(--ink-2);
+    max-width: 66ch;
+    margin: 0 0 6px;
+  }
+  .thesis b { color: var(--ink); font-weight: 650; }
+  .metaline {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--muted);
+    margin-top: 14px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+  }
+  .metaline span { white-space: nowrap; }
+  .metaline .dot { color: var(--accent); }
+  .metaline .ok { color: var(--good); }
+
+  section { margin-top: 38px; }
+  h2 {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 16px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  h2 .num { color: var(--accent-ink); }
+  h2::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+  /* ---- verdict tiles ---- */
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-top: 26px;
+  }
+  .tile {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 15px 15px 16px;
+    box-shadow: var(--shadow);
+    position: relative;
+    overflow: hidden;
+  }
+  .tile::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: var(--tile-c, var(--accent));
+  }
+  .tile .t-label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 9px;
+  }
+  .tile .t-value {
+    font-size: 17px;
+    font-weight: 680;
+    letter-spacing: -0.01em;
+    color: var(--tile-c, var(--ink));
+    line-height: 1.15;
+  }
+  .tile .t-sub {
+    font-size: 12.5px;
+    color: var(--ink-2);
+    margin-top: 7px;
+    line-height: 1.4;
+  }
+  .tile.good  { --tile-c: var(--good); }
+  .tile.warn  { --tile-c: var(--warn); }
+  .tile.crit  { --tile-c: var(--crit); }
+  .tile.acc   { --tile-c: var(--accent); }
+
+  /* ---- scorecard table ---- */
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    background: var(--surface);
+  }
+  table { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 13.5px; }
+  thead th {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: left;
+    font-weight: 500;
+    padding: 12px 14px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line-strong);
+    white-space: nowrap;
+  }
+  tbody td {
+    padding: 13px 14px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+    color: var(--ink-2);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr { position: relative; }
+  td.cp {
+    position: relative;
+    padding-left: 18px;
+    color: var(--ink);
+    font-weight: 620;
+    min-width: 158px;
+  }
+  td.cp::before {
+    content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px;
+    border-radius: 3px; background: var(--sev, var(--muted));
+  }
+  td.cp .cp-id {
+    display: block;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    font-weight: 500;
+    margin-top: 3px;
+  }
+  td.breaks { min-width: 220px; }
+  tr.sev-crit { --sev: var(--crit); }
+  tr.sev-high { --sev: var(--high); }
+  tr.sev-mod  { --sev: var(--warn); }
+
+  .chip {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 5px;
+    white-space: nowrap;
+    font-weight: 600;
+    border: 1px solid transparent;
+  }
+  .chip.crit { color: var(--crit); background: var(--crit-soft); border-color: var(--crit-soft); }
+  .chip.high { color: var(--high); background: var(--high-soft); border-color: var(--high-soft); }
+  .chip.mod  { color: var(--warn); background: var(--warn-soft); border-color: var(--warn-soft); }
+  .chip.locked { color: var(--good); background: var(--good-soft); }
+  .chip.doc    { color: var(--accent-ink); background: var(--accent-soft); border-color: var(--accent-soft); }
+  .chip.phase  { color: var(--accent-ink); background: var(--accent-soft); }
+  .chip.ghost  { color: var(--muted); background: transparent; border-color: var(--line-strong); }
+
+  td.note { font-size: 12.5px; color: var(--muted); min-width: 200px; }
+  td.note b { color: var(--ink-2); }
+
+  /* ---- callout cards ---- */
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--good);
+    border-radius: 8px;
+    padding: 18px 20px;
+    box-shadow: var(--shadow);
+  }
+  .card h3 {
+    margin: 0 0 10px;
+    font-size: 15.5px;
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    flex-wrap: wrap;
+  }
+  .tag-resolved {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--good);
+    background: var(--good-soft);
+    border-radius: 5px;
+    padding: 3px 7px;
+  }
+  .card p { margin: 0; color: var(--ink-2); font-size: 13.8px; }
+  .card p + p { margin-top: 9px; }
+  .card code, .mono-inline {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--surface-2);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--ink);
+  }
+  .formula {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent-ink);
+    background: var(--accent-soft);
+    border-radius: 6px;
+    padding: 9px 11px;
+    margin: 12px 0 0;
+    line-height: 1.5;
+  }
+  .fixloc {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--line-strong);
+    line-height: 1.5;
+  }
+  .fixloc b { color: var(--accent-ink); font-weight: 600; }
+
+  /* ---- escalate ---- */
+  .escalate { display: grid; gap: 10px; }
+  .esc-item {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 16px;
+    box-shadow: var(--shadow);
+  }
+  .esc-rank {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--good);
+    background: var(--good-soft);
+    border-radius: 6px;
+    padding: 4px 11px;
+    line-height: 1.3;
+    flex-shrink: 0;
+  }
+  .esc-body p { margin: 0; font-size: 13.8px; color: var(--ink-2); }
+  .esc-body b { color: var(--ink); }
+  .esc-loc {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 7px;
+  }
+  .esc-loc b { color: var(--accent-ink); font-weight: 600; }
+
+  /* ---- legend / footer ---- */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 22px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+  }
+  .legend .k { display: inline-flex; align-items: center; gap: 7px; }
+  .legend .sw { width: 11px; height: 11px; border-radius: 3px; display: inline-block; flex-shrink: 0; }
+  .foot {
+    margin-top: 22px;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+  .foot b { color: var(--ink-2); font-weight: 600; }
+
+  a { color: var(--accent-ink); text-decoration: none; border-bottom: 1px solid var(--accent-soft); }
+  a:hover { border-bottom-color: var(--accent); }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  @media (max-width: 820px) {
+    .tiles { grid-template-columns: repeat(2, 1fr); }
+    .cards { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 460px) {
+    .tiles { grid-template-columns: 1fr; }
+    .page { padding: 24px 16px 44px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="topline"></div>
+
+  <header>
+    <p class="eyebrow">Architecture Review &nbsp;·&nbsp; Scalability</p>
+    <h1>Is it highly scalable at thousands of RPS?</h1>
+    <p class="thesis">
+      <b>Scalable by design — not yet by provisioning.</b> The rework-risk seams are correctly
+      locked in Phase&nbsp;1, so what's left is additive. But for the agentic paths, <b>“RPS” is
+      the wrong unit</b>: the ceiling is provider quota, cost, and model latency — think tens of
+      thousands of <b>concurrent streams</b>, not thousands of new LLM requests per second. The
+      two blind spots this review surfaced are now <b>written into the specs</b>; what remains is
+      Phase-4 provisioning.
+    </p>
+    <div class="metaline">
+      <span><span class="dot">◆</span> AISAT-INTEL / ContextEngine MVP</span>
+      <span>Phase 1 spec + Phase 4 backlog</span>
+      <span>Reviewed 2026-07-28</span>
+      <span class="ok">v2 · 2 gaps closed in-spec</span>
+    </div>
+  </header>
+
+  <section aria-label="Verdict">
+    <div class="tiles">
+      <div class="tile good">
+        <div class="t-label">By design</div>
+        <div class="t-value">Sound</div>
+        <div class="t-sub">Async NATS seam, stateless relay, idempotent-with-DB-backstop — the hard 20% is right.</div>
+      </div>
+      <div class="tile warn">
+        <div class="t-label">As provisioned</div>
+        <div class="t-value">Not yet</div>
+        <div class="t-sub">2 BFF replicas · 3 pods/subject · single Qdrant/Redis/NATS · no autoscale.</div>
+      </div>
+      <div class="tile acc">
+        <div class="t-label">Right unit</div>
+        <div class="t-value">Concurrent streams</div>
+        <div class="t-sub">Target ≈ tens of thousands of open streams — not 1000s of new RPS.</div>
+      </div>
+      <div class="tile crit">
+        <div class="t-label">Hard wall · AI path</div>
+        <div class="t-value">Provider quota + $</div>
+        <div class="t-sub">≈4–5 gateway calls per query — no architecture removes this ceiling.</div>
+      </div>
+    </div>
+  </section>
+
+  <section aria-label="Chokepoint scorecard">
+    <h2><span class="num">01</span> Chokepoint scorecard</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Chokepoint</th>
+            <th>What breaks under load</th>
+            <th>Risk</th>
+            <th>Seam status</th>
+            <th>Fix</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="sev-crit">
+            <td class="cp">SSE connections<span class="cp-id">relay / edge</span></td>
+            <td class="breaks">30k–100k+ long-lived streams on 2 replicas; no per-instance cap, FD budget, idle timeout, or heartbeat.</td>
+            <td><span class="chip crit">Critical</span></td>
+            <td><span class="chip locked">Locked</span></td>
+            <td><span class="chip phase">P4 · P0</span></td>
+            <td class="note">Stateless relay, any-replica-serves — no sticky sessions. Docs’ own “biggest risk”.</td>
+          </tr>
+          <tr class="sev-high">
+            <td class="cp">LLM gateway<span class="cp-id">litellm :4000</span></td>
+            <td class="breaks">Every LLM call funnels through one Tier-0 service; single async Python proxy.</td>
+            <td><span class="chip high">High</span></td>
+            <td><span class="chip locked">Locked</span></td>
+            <td><span class="chip ghost">P4 · infra</span></td>
+            <td class="note">Scale = replicas + multi-key LB. Real wall is provider quota, not compute.</td>
+          </tr>
+          <tr class="sev-high">
+            <td class="cp">Qdrant read path<span class="cp-id">vector search</span></td>
+            <td class="breaks">Single unreplicated cluster = SPOF; 2 hybrid searches/query (BM25/SPLADE+dense+rerank) is CPU/RAM-heavy.</td>
+            <td><span class="chip high">High</span></td>
+            <td><span class="chip locked">Locked</span></td>
+            <td><span class="chip phase">P4 · P1</span></td>
+            <td class="note">Payload-isolated, re-shard trigger documented. Semantic cache absorbs repeats only.</td>
+          </tr>
+          <tr class="sev-high">
+            <td class="cp">Postgres RLS<span class="cp-id">connections</span></td>
+            <td class="breaks"><span class="mono-inline">SET LOCAL app.workspace_id</span> per txn; connection exhaustion with no pooler.</td>
+            <td><span class="chip high">High</span></td>
+            <td><span class="chip locked">Locked</span></td>
+            <td><span class="chip phase">P4 · P0</span></td>
+            <td class="note">Needs PgBouncer (txn mode) + read/write split. 1 replica is thin.</td>
+          </tr>
+          <tr class="sev-mod">
+            <td class="cp">NATS flow control<span class="cp-id">jetstream</span></td>
+            <td class="breaks">No <span class="mono-inline">MaxAckPending</span>/<span class="mono-inline">ack_wait</span>/stream limits; an LLM-latency spike grows streams → redelivery storms.</td>
+            <td><span class="chip mod">Moderate</span></td>
+            <td><span class="chip locked">Locked</span></td>
+            <td><span class="chip phase">P4 · P0</span></td>
+            <td class="note">JetStream durability + queue groups in place; needs bounded in-flight + load shedding.</td>
+          </tr>
+          <tr class="sev-mod">
+            <td class="cp">Redis HA<span class="cp-id">shared cluster</span></td>
+            <td class="breaks">One cluster backs balance, checkpoints, cache, rate limits, pub/sub, sessions — loss degrades all at once.</td>
+            <td><span class="chip mod">Moderate</span></td>
+            <td><span class="chip locked">Locked</span></td>
+            <td><span class="chip phase">P4 · P1</span></td>
+            <td class="note">Correctness safe under failover (DB backstops everywhere). Availability concentration.</td>
+          </tr>
+          <tr class="sev-mod">
+            <td class="cp">Ledger writer<span class="cp-id">billing worker</span></td>
+            <td class="breaks">Single Go worker is sole <span class="mono-inline">credit_ledger</span> writer — serialized fan-in at high deduct rate.</td>
+            <td><span class="chip mod">Moderate</span></td>
+            <td><span class="chip locked">Locked</span></td>
+            <td><span class="chip ghost">P4 · shard</span></td>
+            <td class="note">Off the hot path (Redis DECRBY gates spend). Outbox workspace-partitionable → N drainers.</td>
+          </tr>
+          <tr class="sev-high">
+            <td class="cp">Redis pub/sub<span class="cp-id">SSE fan-out</span></td>
+            <td class="breaks">Under Redis Cluster, classic pub/sub broadcasts cluster-wide across the bus — scales poorly at high stream fan-out.</td>
+            <td><span class="chip high">High</span></td>
+            <td><span class="chip doc">Documented</span></td>
+            <td><span class="chip phase">P4 · 2+6</span></td>
+            <td class="note"><b>Now specified:</b> sharded pub/sub (<span class="mono-inline">SSUBSCRIBE</span>) on a slot-hash-tagged <span class="mono-inline">stream_id</span>, coupled to the relay split — research §10(d), sse-events, Phase 4 #2+#6.</td>
+          </tr>
+          <tr class="sev-mod">
+            <td class="cp">Tenant fairness<span class="cp-id">noisy neighbor</span></td>
+            <td class="breaks">Credits bound cost, nothing bounds a workspace’s share of worker slots / Qdrant CPU / DB connections.</td>
+            <td><span class="chip mod">Moderate</span></td>
+            <td><span class="chip doc">Documented</span></td>
+            <td><span class="chip phase">Interim + P4·P2</span></td>
+            <td class="note"><b>Now specified:</b> interim per-ws in-flight <span class="mono-inline">query.agent</span> cap (429 past cap) pre-Phase-4; full weighted-fair queueing stays P2 — draft-plan #10.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="legend">
+      <span class="k"><span class="sw" style="background:var(--crit)"></span>Critical</span>
+      <span class="k"><span class="sw" style="background:var(--high)"></span>High</span>
+      <span class="k"><span class="sw" style="background:var(--warn)"></span>Moderate</span>
+      <span class="k"><span class="sw" style="background:var(--good)"></span>Locked = rework-risk seam already in Phase 1 → fix is additive</span>
+      <span class="k"><span class="sw" style="background:var(--accent)"></span>Documented = gap now specified in-spec (design-closed; impl Phase 4)</span>
+    </div>
+  </section>
+
+  <section aria-label="Analysis">
+    <h2><span class="num">02</span> Two blind spots this review surfaced — now closed</h2>
+    <div class="cards">
+      <div class="card">
+        <h3>The per-query LLM multiplier <span class="tag-resolved">Documented</span></h3>
+        <p>
+          One user query is not one LLM call. The graph runs
+          <code>route → rewrite → retrieve → rerank → generate</code> — a routing call, a rewrite
+          call, a Cohere rerank call, and a generation call.
+        </p>
+        <p class="formula">1000 query/s  ≈  4000–5000 provider calls/s<br>×  key-pool quota  ×  $ per call  =  the real ceiling</p>
+        <p>Every provider-quota and cost estimate must carry this ~5× factor. Credits <b>meter</b> the burn; they add no capacity.</p>
+        <p class="fixloc">Now in: <b>agent-graph.md</b> (per-query call-count note) · <b>research §21</b> (provider-capacity math) · <b>draft-plan #9</b> (load/SLO plan).</p>
+      </div>
+      <div class="card">
+        <h3>Redis-Cluster pub/sub collision <span class="tag-resolved">Documented</span></h3>
+        <p>
+          The stateless SSE relay is a genuinely strong seam — but it rides <b>Redis pub/sub keyed
+          by <span class="mono-inline">stream_id</span></b>. Move Redis to Cluster for HA (Phase 4 P1)
+          and classic pub/sub broadcasts every message across the whole cluster bus.
+        </p>
+        <p>
+          The fix — sharded pub/sub (<span class="mono-inline">SPUBLISH</span>/<span class="mono-inline">SSUBSCRIBE</span>,
+          Redis 7+) on a slot-hash-tagged <span class="mono-inline">stream_id</span> — is now written down,
+          and the SSE-tier split and Redis-HA move are marked as <b>one coupled workstream</b>, not two phases.
+        </p>
+        <p class="fixloc">Now in: <b>sse-events.md</b> (scaling caveat) · <b>research §10(d)</b> · <b>draft-plan #2 + #6</b> (cross-linked).</p>
+      </div>
+    </div>
+  </section>
+
+  <section aria-label="What I escalated">
+    <h2><span class="num">03</span> What I escalated — now resolved in-spec</h2>
+    <div class="escalate">
+      <div class="esc-item">
+        <span class="esc-rank">✓ 01</span>
+        <div class="esc-body">
+          <p><b>SSE × Redis-Cluster pub/sub fan-out.</b> The single biggest concurrency risk (P0) and its HA plan (P1) interact through an unspecified sharded-pub/sub decision. They are now cross-linked as a single workstream to resolve together.</p>
+          <p class="esc-loc">Resolved in: <b>draft-plan Phase 4 #2 ↔ #6</b> · <b>sse-events.md</b> · <b>research §10(d)</b>.</p>
+        </div>
+      </div>
+      <div class="esc-item">
+        <span class="esc-rank">✓ 02</span>
+        <div class="esc-body">
+          <p><b>The 4–5× LLM-call multiplier</b> is now required in every quota/cost/SLO calc, and the load-test harness (P2) now carries a <span class="mono-inline">$/QPS</span> budget and a <b>concurrent-streams</b> primary target — not just an RPS number.</p>
+          <p class="esc-loc">Resolved in: <b>draft-plan Phase 4 #9</b> · <b>research §21</b> · <b>agent-graph.md</b>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <p class="foot">
+    <b>Bottom line —</b> the irreversible decisions (async decoupling, stateless relay, idempotent-with-DB-backstop, partitionable money path, data-layer isolation) are correct and locked, so Phase 4 is genuinely <b>provisioning + HA + load validation, not redesign</b>. The two blind spots above — the SSE/Redis-Cluster pub/sub coupling and the per-query LLM-call multiplier — are now specified in the Phase 1 docs (design-closed; implementation stays Phase 4), plus an interim per-tenant in-flight cap that need not wait for Phase 4. As provisioned today it would not survive thousands of RPS; every mechanism to get there is now enumerated and cross-referenced.<br>
+    Sources: <b>plan.md</b> (Scale/Scope) · <b>research.md §3/§6/§10/§14/§15/§21</b> · <b>draft-plan.md</b> (Phase 4 P0–P2) · contracts: <b>llm-gateway · nats-subjects · sse-events · agent-graph · data-model</b>.
+  </p>
+</div>
+</body>
+</html>
