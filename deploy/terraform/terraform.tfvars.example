@@ -1,0 +1,30 @@
+# Copy to terraform.tfvars and fill in. Do NOT commit terraform.tfvars.
+# The DO API token comes from the environment, not this file:
+#   export TF_VAR_do_token=dop_v1_xxxxxxxx
+
+region       = "sgp1"
+droplet_size = "s-2vcpu-4gb"
+
+# Deploy key pair used by the CD pipeline (private half = DROPLET_SSH_KEY secret).
+# Generate: ssh-keygen -t ed25519 -f ./aisat_deploy -C aisat-cd -N ""
+ssh_public_key = "ssh-ed25519 AAAAC3Nza... aisat-cd"
+
+# Lock SSH to your admin IP in production:
+# ssh_allowed_cidrs = ["203.0.113.10/32"]
+
+# DNS — only when DigitalOcean hosts your zone (otherwise manage_dns = false and
+# point an A record at the reserved IP yourself).
+domain     = "app.example.com"
+manage_dns = false
+
+# Optional off-box data services (default: run in the compose stack).
+enable_managed_postgres = false
+enable_managed_redis    = false
+
+# Optional Spaces bucket (needs Spaces keys, via TF_VAR_spaces_access_id / _secret_key).
+enable_spaces = false
+# spaces_bucket_name = "aisat-intel-assets"
+
+# Optional alerts.
+enable_monitoring_alerts = false
+alert_email              = ""

@@ -179,6 +179,23 @@ test-results/
 deploy/.env.production
 **/.env.production
 
+# Terraform — state and tfvars can contain secrets. Keep .terraform.lock.hcl.
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+*.tfvars
+*.auto.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+!*.tfvars.example
+
 # Package manager lockfiles (keep one, ignore others as needed)
 # yarn.lock
 # package-lock.json

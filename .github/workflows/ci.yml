@@ -35,6 +35,7 @@ jobs:
       python: ${{ steps.filter.outputs.python }}
       frontend: ${{ steps.filter.outputs.frontend }}
       docker: ${{ steps.filter.outputs.docker }}
+      terraform: ${{ steps.filter.outputs.terraform }}
     steps:
       - uses: actions/checkout@v4
       - id: filter
@@ -60,6 +61,9 @@ jobs:
               - '**/Dockerfile'
               - '**/Dockerfile.*'
               - 'deploy/**'
+            terraform:
+              - '**/*.tf'
+              - '**/*.tftpl'
 
   # ---------------------------------------------------------------------------
   # Secret scanning — always runs (cheap, catches leaked creds in any change).
@@ -211,12 +215,35 @@ jobs:
           exit-code: '0' # report-only for now; flip to '1' to block (see SETUP.md)
 
   # ---------------------------------------------------------------------------
+  # Terraform (deploy/terraform) — format check (advisory) + validate (blocking)
+  # ---------------------------------------------------------------------------
+  terraform:
+    needs: changes
+    if: needs.changes.outputs.terraform == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: deploy/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9.8'
+      - name: Format check (advisory)
+        run: terraform fmt -check -recursive -diff || echo "::warning::terraform fmt would reformat files — run 'terraform fmt -recursive'"
+      - name: Init (no backend)
+        run: terraform init -backend=false
+      - name: Validate
+        run: terraform validate -no-color
+
+  # ---------------------------------------------------------------------------
   # Aggregate gate — a single required check for branch protection.
   # Passes only if no needed job failed (skipped is OK on a specs-only change).
   # ---------------------------------------------------------------------------
   ci-gate:
     if: always()
-    needs: [secret-scan, go, python, frontend, docker-lint]
+    needs: [secret-scan, go, python, frontend, docker-lint, terraform]
     runs-on: ubuntu-latest
     steps:
       - name: Verify no job failed
