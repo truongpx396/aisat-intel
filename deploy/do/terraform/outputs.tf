@@ -46,7 +46,7 @@ output "spaces_bucket" {
 }
 
 output "github_secrets_hint" {
-  description = "Map these onto the pipeline's GitHub secrets/variables (see deploy/SETUP.md)."
+  description = "Map these onto the pipeline's GitHub secrets/variables (see deploy/do/SETUP.md)."
   value = {
     DROPLET_HOST    = digitalocean_reserved_ip.web.ip_address # secret
     DROPLET_USER    = var.deploy_user                         # secret

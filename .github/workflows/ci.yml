@@ -220,7 +220,7 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Terraform — format check (advisory) + validate (blocking) for each root
-  # (DigitalOcean: deploy/terraform; AWS EKS: deploy/eks/terraform).
+  # (DigitalOcean: deploy/do/terraform; AWS EKS: deploy/eks/terraform).
   # ---------------------------------------------------------------------------
   terraform:
     needs: changes
@@ -230,7 +230,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        dir: [deploy/terraform, deploy/eks/terraform]
+        dir: [deploy/do/terraform, deploy/eks/terraform]
     defaults:
       run:
         working-directory: ${{ matrix.dir }}

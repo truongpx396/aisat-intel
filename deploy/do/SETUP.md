@@ -7,7 +7,7 @@ lights up per runtime (Go / Python / React) as each appears.
  PR / push ──► CI  (lint · test · vuln-scan · secret-scan · Dockerfile-lint)      [ci.yml]
  push main ──► CD  discover ─► build+push images (Docker Hub, SBOM+provenance)    [cd.yml]
                               └─► ⛔ approval gate (production environment)
-                                   └─► scp deploy/ ─► droplet: pull · migrate · up · health
+                                   └─► scp deploy/do/ ─► droplet: pull · migrate · up · health
                                         └─► rollback on failure ─► Telegram ✅/❌
 ```
 
@@ -33,7 +33,7 @@ Create an Ubuntu 22.04/24.04 droplet (2 vCPU / 4 GB is a sane starting size), po
 DNS **A record** (`PRODUCTION_HOST`) at its IP, then bootstrap it:
 
 ```bash
-ssh root@<droplet-ip> 'bash -s' < deploy/bootstrap-droplet.sh
+ssh root@<droplet-ip> 'bash -s' < deploy/do/bootstrap-droplet.sh
 ```
 
 That installs Docker + Compose, creates the `deploy` user, opens 22/80/443, and prepares
@@ -46,8 +46,8 @@ ssh-copy-id -i ./aisat_deploy.pub deploy@<droplet-ip>   # public key -> droplet
 #    -> put the PRIVATE key (aisat_deploy) into GitHub secret DROPLET_SSH_KEY
 
 # b) create the production env file on the droplet (never committed)
-scp deploy/.env.production.example deploy@<droplet-ip>:/opt/aisat-intel/deploy/.env.production
-ssh deploy@<droplet-ip> 'chmod 600 /opt/aisat-intel/deploy/.env.production && $EDITOR ...'
+scp deploy/do/.env.production.example deploy@<droplet-ip>:/opt/aisat-intel/do/.env.production
+ssh deploy@<droplet-ip> 'chmod 600 /opt/aisat-intel/do/.env.production && $EDITOR ...'
 
 # c) let Docker pull your images
 ssh deploy@<droplet-ip> 'docker login -u <DOCKERHUB_USERNAME>'
@@ -100,7 +100,7 @@ fails its health check.
 
 ## Integration contracts (what the app code must provide)
 
-The pipeline assumes the structure in [specs/001-contextengine-mvp/plan.md](../specs/001-contextengine-mvp/plan.md):
+The pipeline assumes the structure in [specs/001-contextengine-mvp/plan.md](../../specs/001-contextengine-mvp/plan.md):
 
 - **`backend-go/`** — `go.mod`, `cmd/{api,relay,worker}`, and the binary exposes a
   `healthcheck` subcommand and a `migrate up` subcommand; serves `/livez` + `/readyz` on `:8080`.
@@ -109,12 +109,12 @@ The pipeline assumes the structure in [specs/001-contextengine-mvp/plan.md](../s
   `crawl` optional-dependency extra + `src.services.ingestion.crawl_worker` module.
 - **`frontend/`** — `package.json` with `build` (and ideally `lint`/`typecheck`/`test`) scripts;
   Vite emits to `dist/`.
-- Confirm the SSE path prefixes in [deploy/Caddyfile](./Caddyfile) against
+- Confirm the SSE path prefixes in [deploy/do/Caddyfile](./Caddyfile) against
   `specs/001-contextengine-mvp/contracts/{bff-rest,sse-events}.md`.
 
 ## Production hardening checklist
 
-Per [.github/instructions/devops-cicd.instructions.md](../.github/instructions/devops-cicd.instructions.md),
+Per [.github/instructions/devops-cicd.instructions.md](../../.github/instructions/devops-cicd.instructions.md),
 tighten these before real traffic:
 
 - [ ] **Pin actions to commit SHAs** (`ratchet pin .github/workflows/*.yml`); Dependabot maintains them.
