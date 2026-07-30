@@ -7,7 +7,7 @@
 #             pushes to Docker Hub with SBOM + provenance.
 #   deploy  : targets the protected `production` environment, so it PAUSES for a
 #             required reviewer's approval before touching the droplet. It scp's
-#             deploy/ to the droplet, pulls the SHA-tagged images, migrates, and
+#             deploy/do/ to the droplet, pulls the SHA-tagged images, migrates, and
 #             `docker compose up -d`. Telegram is notified on start/success/failure.
 #
 # Manual redeploy / rollback: run via "Run workflow" (workflow_dispatch) and pass an
@@ -174,14 +174,15 @@ jobs:
             by:  ${{ github.actor }}
             run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
-      - name: Copy deploy/ to droplet
+      - name: Copy deploy/do/ to droplet
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.DROPLET_HOST }}
           username: ${{ secrets.DROPLET_USER }}
           key: ${{ secrets.DROPLET_SSH_KEY }}
           port: ${{ secrets.DROPLET_SSH_PORT || 22 }}
-          source: 'deploy'
+          source: 'deploy/do'
+          strip_components: 1 # strip the leading 'deploy/' so it lands at /opt/aisat-intel/do
           target: '/opt/aisat-intel'
           overwrite: true
           # .env.production is NOT in the repo, so it is never overwritten on the droplet.
@@ -201,7 +202,7 @@ jobs:
             export REGISTRY='${{ env.REGISTRY }}'
             export IMAGE_PREFIX='${{ env.IMAGE_PREFIX }}'
             export DOCKERHUB_USERNAME='${{ vars.DOCKERHUB_USERNAME }}'
-            cd /opt/aisat-intel/deploy
+            cd /opt/aisat-intel/do
             chmod +x deploy.sh
             ./deploy.sh
 

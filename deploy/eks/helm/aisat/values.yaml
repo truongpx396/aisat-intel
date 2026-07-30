@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------------------
 # AISAT-INTEL Helm values (defaults).
 #
-# This chart mirrors deploy/docker-compose.prod.yml as Kubernetes workloads:
+# This chart mirrors deploy/do/docker-compose.prod.yml as Kubernetes workloads:
 #   - components         -> Deployments (app tier, edge, casdoor, llm-gateway)
 #   - backingStatefulSets-> StatefulSets with PVCs (postgres, redis, nats, qdrant, minio)
 #   - migrate            -> a pre-upgrade Job (Helm hook) that runs `/api migrate up`
@@ -64,7 +64,7 @@ config:
 #   2. externalSecrets — pull from AWS Secrets Manager via External Secrets Operator.
 #   3. create + data   — chart renders a Secret from inline values (dev/bootstrap
 #                        only; do NOT commit real secrets — override at deploy time).
-# All app pods get `envFrom` this Secret. Keys mirror deploy/.env.production.
+# All app pods get `envFrom` this Secret. Keys mirror deploy/do/.env.production.
 # ---------------------------------------------------------------------------
 secrets:
   existingSecret: ""     # if set, use this Secret and render nothing

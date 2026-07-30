@@ -1,7 +1,7 @@
 # CI/CD Setup — GitHub Actions → Amazon ECR → AWS EKS (Helm, OIDC, Telegram alerts)
 
 This is the **AWS EKS** deploy path. It runs **alongside** the DigitalOcean droplet
-pipeline ([../SETUP.md](../SETUP.md)) — nothing here replaces that. Same app images,
+pipeline ([../do/SETUP.md](../do/SETUP.md)) — nothing here replaces that. Same app images,
 different target: a Helm release on an EKS cluster fronted by an ALB.
 
 ```
@@ -78,7 +78,7 @@ pulls secrets from **AWS Secrets Manager** via the **External Secrets Operator (
 Set this up once before the first deploy:
 
 ```bash
-# a) store the app secret (keys mirror deploy/.env.production — see values.yaml `secrets.data`)
+# a) store the app secret (keys mirror deploy/do/.env.production — see values.yaml `secrets.data`)
 aws secretsmanager create-secret --name aisat/production --region <region> \
   --secret-string '{"POSTGRES_PASSWORD":"...","DATABASE_URL":"postgres://...","S3_ACCESS_KEY":"...","S3_SECRET_KEY":"...","LLM_GATEWAY_MASTER_KEY":"sk-...","JWT_SECRET":"...","OPENAI_API_KEY":"...","ANTHROPIC_API_KEY":"..."}'
 
@@ -108,7 +108,7 @@ YAML
 >
 > ```bash
 > kubectl -n aisat create secret generic aisat-secrets \
->   --from-env-file=deploy/.env.production
+>   --from-env-file=deploy/do/.env.production
 > ```
 
 ## 5. First deploy

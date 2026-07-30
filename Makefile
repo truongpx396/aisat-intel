@@ -64,11 +64,11 @@ docker-build: ## Build all present images locally (tag = IMAGE_TAG)
 	@[ -f $(WEB_DIR)/Dockerfile ]         && docker build -t $(IMG)-frontend:$(IMAGE_TAG) $(WEB_DIR)                          || echo "skip web image"
 
 # ---------------------------- local prod stack -----------------------------
-COMPOSE_PROD = docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.production
+COMPOSE_PROD = docker compose -f deploy/do/docker-compose.prod.yml --env-file deploy/do/.env.production
 .PHONY: prod-pull prod-up prod-down prod-logs migrate
-prod-pull: ## Pull the prod images referenced by deploy/.env.production
+prod-pull: ## Pull the prod images referenced by deploy/do/.env.production
 	IMAGE_TAG=$(IMAGE_TAG) $(COMPOSE_PROD) pull
-prod-up: ## Bring the prod stack up locally (needs deploy/.env.production)
+prod-up: ## Bring the prod stack up locally (needs deploy/do/.env.production)
 	IMAGE_TAG=$(IMAGE_TAG) $(COMPOSE_PROD) up -d
 prod-down: ## Stop the prod stack
 	$(COMPOSE_PROD) down
