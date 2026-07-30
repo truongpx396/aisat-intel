@@ -18,7 +18,7 @@ COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --extra crawl
 
-FROM mcr.microsoft.com/playwright/python:v1.49.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.61.0-jammy
 RUN groupadd -g 10001 appuser 2>/dev/null || true; \
     useradd -m -u 10001 -g 10001 appuser 2>/dev/null || true
 WORKDIR /app
