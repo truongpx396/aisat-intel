@@ -6,7 +6,7 @@
 #
 # TODO(supply-chain): pin base images by @sha256 digest per
 # .github/instructions/devops-cicd.instructions.md (Dependabot manages this).
-FROM golang:1.23-bookworm AS build
+FROM golang:1.26-bookworm AS build
 WORKDIR /src
 ENV CGO_ENABLED=0
 # Dependency layer first — cached until go.sum changes.
