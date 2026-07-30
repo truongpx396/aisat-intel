@@ -1,0 +1,49 @@
+# Production overlay. Apply on top of values.yaml:
+#   helm upgrade --install aisat deploy/eks/helm/aisat -n aisat \
+#     -f deploy/eks/helm/aisat/values-production.yaml \
+#     --set image.registry=<ecr> --set image.tag=<sha> \
+#     --set ingress.host=<host> --set ingress.certificateArn=<acm-arn>
+#
+# The CD workflow passes image.registry/tag and ingress.host/certificateArn via
+# --set (from GitHub Actions Variables), so they are intentionally left blank here.
+
+image:
+  pullPolicy: IfNotPresent
+
+# Secrets: DO NOT ship real credentials in git. In production, pull them from AWS
+# Secrets Manager via the External Secrets Operator (see deploy/eks/SETUP.md).
+secrets:
+  create: false
+externalSecrets:
+  enabled: true
+  remoteKey: aisat/production
+  secretStoreRef:
+    name: aws-secretsmanager
+    kind: ClusterSecretStore
+
+# Give the app tier more headroom in production.
+components:
+  go-api:
+    replicaCount: 3
+    autoscaling:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 65
+  go-relay:
+    replicaCount: 3
+  py-api:
+    replicaCount: 2
+  frontend:
+    replicaCount: 3
+
+# Recommended for production: move Postgres/Redis to managed services (RDS /
+# ElastiCache provisioned by Terraform), then disable the in-cluster ones and
+# point the URLs at the managed endpoints (DATABASE_URL via the Secret,
+# REDIS_URL via config).
+#
+# backingStatefulSets:
+#   postgres: { enabled: false }
+#   redis:    { enabled: false }
+# config:
+#   REDIS_URL: redis://<elasticache-endpoint>:6379/0

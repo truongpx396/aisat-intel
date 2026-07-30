@@ -1,0 +1,30 @@
+{{- /* HorizontalPodAutoscaler per component with autoscaling.enabled. Requires
+       metrics-server (installed by the EKS Terraform). */ -}}
+{{- $root := . -}}
+{{- range $name, $c := .Values.components }}
+{{- $hpa := $c.autoscaling | default dict -}}
+{{- if and $c.enabled $hpa.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "aisat.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $name }}
+  minReplicas: {{ $hpa.minReplicas }}
+  maxReplicas: {{ $hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $hpa.targetCPUUtilizationPercentage | default 70 }}
+{{- end }}
+{{- end }}

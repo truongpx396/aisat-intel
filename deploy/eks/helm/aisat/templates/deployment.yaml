@@ -1,0 +1,104 @@
+{{- /* One Deployment per enabled entry in .Values.components. Fields fall back to
+       .Values.componentDefaults; a component's own value always wins (explicit
+       per-field defaulting — we avoid `merge`, whose zero-value handling would
+       clobber an intentional `false`). */ -}}
+{{- $root := . -}}
+{{- $d := .Values.componentDefaults -}}
+{{- range $name, $c := .Values.components }}
+{{- if $c.enabled }}
+{{- $replicas := $c.replicaCount | default $d.replicaCount -}}
+{{- $envShared := $d.envFromShared -}}{{- if hasKey $c "envFromShared" }}{{- $envShared = $c.envFromShared -}}{{- end }}
+{{- $podSec := $c.podSecurityContext | default $d.podSecurityContext -}}
+{{- $ctrSec := $c.securityContext | default $d.securityContext -}}
+{{- $resources := $c.resources | default $d.resources -}}
+{{- $hpa := $c.autoscaling | default dict }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "aisat.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  {{- if not $hpa.enabled }}
+  replicas: {{ $replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "aisat.selectorLabels" (dict "root" $root "name" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aisat.selectorLabels" (dict "root" $root "name" $name) | nindent 8 }}
+      annotations:
+        # Roll pods when the shared config changes.
+        checksum/config: {{ include (print $root.Template.BasePath "/configmap-env.yaml") $root | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "aisat.serviceAccountName" $root }}
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml $podSec | nindent 8 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "aisat.componentImage" (dict "root" $root "comp" $c) }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml $ctrSec | nindent 12 }}
+          {{- with $c.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $c.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if $c.containerPort }}
+          ports:
+            - name: http
+              containerPort: {{ $c.containerPort }}
+              protocol: TCP
+          {{- end }}
+          {{- if $envShared }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "aisat.configName" $root }}
+            - secretRef:
+                name: {{ include "aisat.secretName" $root }}
+          {{- end }}
+          {{- if or $c.env $c.secretEnv }}
+          env:
+            {{- with $c.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- range $e := ($c.secretEnv | default list) }}
+            - name: {{ $e.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aisat.secretName" $root }}
+                  key: {{ $e.key }}
+            {{- end }}
+          {{- end }}
+          {{- with $c.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $c.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml $resources | nindent 12 }}
+          {{- with $c.volumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with $c.volumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
+{{- end }}

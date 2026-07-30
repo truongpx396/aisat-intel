@@ -14,6 +14,11 @@ lights up per runtime (Go / Python / React) as each appears.
 Only the **deploy** step is gated: it pauses on the protected `production` environment
 until a reviewer approves. CI runs on every PR and push regardless.
 
+> **Deploying to AWS EKS instead of / in addition to the droplet?** See
+> [eks/SETUP.md](./eks/SETUP.md) — a parallel pipeline (`cd-eks.yml`) that builds to
+> Amazon ECR and deploys a Helm release to EKS via OIDC. It runs alongside this one;
+> neither replaces the other.
+
 ---
 
 ## 1. Docker Hub

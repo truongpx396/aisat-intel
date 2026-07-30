@@ -1,0 +1,25 @@
+{{- /* ClusterIP Service per component that opts in (service.enabled). Named by the
+       bare component key so DNS matches the compose service names. */ -}}
+{{- $root := . -}}
+{{- range $name, $c := .Values.components }}
+{{- $svc := $c.service | default dict -}}
+{{- if and $c.enabled $svc.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "aisat.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "aisat.selectorLabels" (dict "root" $root "name" $name) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $c.service.port }}
+      targetPort: {{ $c.service.targetPort | default $c.containerPort | default $c.service.port }}
+      protocol: TCP
+{{- end }}
+{{- end }}

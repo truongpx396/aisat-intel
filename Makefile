@@ -77,6 +77,32 @@ prod-logs: ## Tail prod logs
 migrate: ## Run DB migrations against the prod stack
 	IMAGE_TAG=$(IMAGE_TAG) $(COMPOSE_PROD) --profile migrate run --rm migrate
 
+# ---------------------------- kubernetes / EKS -----------------------------
+HELM_CHART := deploy/eks/helm/aisat
+EKS_NAMESPACE ?= aisat
+# Sample coordinates so `helm template` renders locally; real deploys inject these.
+ECR_REGISTRY ?= 000000000000.dkr.ecr.us-east-1.amazonaws.com
+.PHONY: helm-lint helm-template eks-deploy
+helm-lint: ## Lint + render the EKS Helm chart (both overlays)
+	helm lint $(HELM_CHART)
+	helm template aisat $(HELM_CHART) --namespace $(EKS_NAMESPACE) \
+	  --set image.registry=$(ECR_REGISTRY) --set image.tag=$(IMAGE_TAG) >/dev/null
+	helm template aisat $(HELM_CHART) --namespace $(EKS_NAMESPACE) \
+	  -f $(HELM_CHART)/values-production.yaml \
+	  --set image.registry=$(ECR_REGISTRY) --set image.tag=$(IMAGE_TAG) \
+	  --set ingress.host=example.com --set ingress.certificateArn=arn:aws:acm:x:0:certificate/y >/dev/null
+	@echo "helm chart OK"
+helm-template: ## Render the chart to stdout (set ECR_REGISTRY / IMAGE_TAG)
+	helm template aisat $(HELM_CHART) --namespace $(EKS_NAMESPACE) \
+	  --set image.registry=$(ECR_REGISTRY) --set image.tag=$(IMAGE_TAG)
+eks-deploy: ## helm upgrade --install to the current kube-context (needs ECR_REGISTRY, IMAGE_TAG, PRODUCTION_HOST, ACM_CERTIFICATE_ARN)
+	helm upgrade --install aisat $(HELM_CHART) \
+	  --namespace $(EKS_NAMESPACE) --create-namespace \
+	  -f $(HELM_CHART)/values-production.yaml \
+	  --set image.registry=$(ECR_REGISTRY) --set image.tag=$(IMAGE_TAG) \
+	  --set ingress.host=$(PRODUCTION_HOST) --set ingress.certificateArn=$(ACM_CERTIFICATE_ARN) \
+	  --atomic --timeout 15m
+
 # ------------------------------- gate --------------------------------------
 .PHONY: ci
 ci: lint test build ## Full local gate — mirrors GitHub Actions CI

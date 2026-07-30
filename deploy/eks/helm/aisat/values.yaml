@@ -1,0 +1,414 @@
+# ---------------------------------------------------------------------------
+# AISAT-INTEL Helm values (defaults).
+#
+# This chart mirrors deploy/docker-compose.prod.yml as Kubernetes workloads:
+#   - components         -> Deployments (app tier, edge, casdoor, llm-gateway)
+#   - backingStatefulSets-> StatefulSets with PVCs (postgres, redis, nats, qdrant, minio)
+#   - migrate            -> a pre-upgrade Job (Helm hook) that runs `/api migrate up`
+#   - ingress            -> an ALB (AWS Load Balancer Controller) terminating ACM TLS
+#
+# Override for production in values-production.yaml. The CD workflow additionally
+# passes --set image.registry / image.tag / ingress.host / ingress.certificateArn.
+# ---------------------------------------------------------------------------
+
+nameOverride: ""
+fullnameOverride: ""
+
+# --- Image coordinates (shared) ---------------------------------------------
+# Full app image ref = "{registry}/{prefix}-{component.repo}:{tag}".
+# registry MUST be set to your ECR host, e.g.
+#   123456789012.dkr.ecr.ap-southeast-1.amazonaws.com
+image:
+  registry: ""      # REQUIRED (Terraform output `ecr_registry`)
+  prefix: aisat
+  tag: latest       # overridden per-deploy by CD (immutable git SHA)
+  pullPolicy: IfNotPresent
+
+# Optional pull secret name (NOT needed for ECR — node IAM handles ECR pulls).
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  name: ""          # defaults to the release fullname
+  # Annotate for IRSA to grant the app pods an AWS role (e.g. S3 access):
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::<acct>:role/aisat-app
+  annotations: {}
+
+# ---------------------------------------------------------------------------
+# Non-secret environment — rendered into a ConfigMap and mounted (envFrom) into
+# every app/backing pod. In-cluster service DNS names match the workload names.
+# Anything containing a credential lives in `secrets` below instead.
+# ---------------------------------------------------------------------------
+config:
+  ENV: production
+  LOG_LEVEL: info
+
+  REDIS_URL: redis://redis:6379/0
+  NATS_URL: nats://nats:4222
+  QDRANT_URL: http://qdrant:6333
+
+  S3_ENDPOINT: http://minio:9000
+  S3_BUCKET: aisat
+  S3_REGION: us-east-1
+
+  LLM_GATEWAY_URL: http://llm-gateway:4000
+  LLM_GATEWAY_KIND: litellm
+
+  CASDOOR_ENDPOINT: http://casdoor:8000
+  CASDOOR_ORG: aisat
+  CASDOOR_APP: aisat
+
+# ---------------------------------------------------------------------------
+# Secrets. THREE mutually-exclusive strategies (pick one):
+#   1. existingSecret  — you created the Secret out of band (recommended for prod).
+#   2. externalSecrets — pull from AWS Secrets Manager via External Secrets Operator.
+#   3. create + data   — chart renders a Secret from inline values (dev/bootstrap
+#                        only; do NOT commit real secrets — override at deploy time).
+# All app pods get `envFrom` this Secret. Keys mirror deploy/.env.production.
+# ---------------------------------------------------------------------------
+secrets:
+  existingSecret: ""     # if set, use this Secret and render nothing
+  create: true           # render a Secret from `data` below (bootstrap default)
+  data:
+    POSTGRES_USER: aisat
+    POSTGRES_PASSWORD: change-me-strong
+    POSTGRES_DB: aisat
+    DATABASE_URL: postgres://aisat:change-me-strong@postgres:5432/aisat?sslmode=disable
+    S3_ACCESS_KEY: change-me
+    S3_SECRET_KEY: change-me-strong
+    LLM_GATEWAY_MASTER_KEY: sk-change-me-strong
+    OPENAI_API_KEY: ""
+    ANTHROPIC_API_KEY: ""
+    COHERE_API_KEY: ""
+    VOYAGE_API_KEY: ""
+    CASDOOR_CLIENT_ID: ""
+    CASDOOR_CLIENT_SECRET: ""
+    JWT_SECRET: change-me-strong
+    TURNSTILE_SECRET: ""
+    LANGFUSE_PUBLIC_KEY: ""
+    LANGFUSE_SECRET_KEY: ""
+    SENTRY_DSN: ""
+
+externalSecrets:
+  enabled: false
+  secretStoreRef:
+    name: aws-secretsmanager
+    kind: ClusterSecretStore
+  # AWS Secrets Manager secret whose JSON keys become the Kubernetes Secret keys.
+  remoteKey: aisat/production
+  refreshInterval: 1h
+
+# ---------------------------------------------------------------------------
+# Migration Job — Helm pre-upgrade/pre-install hook. Runs `/api migrate up` from
+# the backend-go image and must succeed before the rollout proceeds.
+# ---------------------------------------------------------------------------
+migrate:
+  enabled: true
+  repo: backend-go
+  command: ["/api"]
+  args: ["migrate", "up"]
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  # Block the migration until the DB accepts connections (the post-install hook
+  # runs right after the Postgres StatefulSet is created, before it is Ready).
+  # Point at your RDS host, or set host: "" to skip the wait.
+  waitFor:
+    host: postgres
+    port: 5432
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+# ---------------------------------------------------------------------------
+# Ingress — internet-facing ALB via the AWS Load Balancer Controller. All external
+# traffic hits the frontend (Caddy), which serves the SPA and reverse-proxies
+# /api + SSE to go-api/go-relay exactly as in the compose stack. ALB terminates
+# TLS with an ACM certificate; HTTP is redirected to HTTPS.
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: alb
+  host: ""                 # e.g. app.example.com (CD sets from PRODUCTION_HOST)
+  certificateArn: ""       # ACM cert ARN for `host` (CD sets from ACM_CERTIFICATE_ARN)
+  serviceName: frontend
+  servicePort: 80
+  # Extra ALB annotations are merged in; these are the sane defaults.
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
+
+# ---------------------------------------------------------------------------
+# LiteLLM gateway config (rendered into a ConfigMap, mounted at /app/config.yaml).
+# Keep provider keys OUT of here — they arrive via env (secrets) at runtime.
+# ---------------------------------------------------------------------------
+llmGatewayConfig:
+  model_list: []
+  general_settings:
+    master_key: os.environ/LLM_GATEWAY_MASTER_KEY
+
+# ---------------------------------------------------------------------------
+# Defaults inherited by every component (deep-merged; a component's own keys win).
+# Our app images already run as a non-root USER, so runAsNonRoot + drop-ALL is
+# safe for them; off-the-shelf images (casdoor, llm-gateway, frontend/Caddy)
+# relax these individually below.
+# ---------------------------------------------------------------------------
+componentDefaults:
+  replicaCount: 1
+  envFromShared: true
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile: { type: RuntimeDefault }
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities: { drop: ["ALL"] }
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+
+# Defaults for backing StatefulSets. These images self-manage their user (they
+# start as root, chown the volume, then step down), so we don't force non-root
+# or drop capabilities — only the always-safe hardening.
+backingDefaults:
+  podSecurityContext:
+    seccompProfile: { type: RuntimeDefault }
+  securityContext:
+    allowPrivilegeEscalation: false
+
+# ---------------------------------------------------------------------------
+# Deployments. `repo` selects one of the built app images; `imageOverride` pins a
+# public image verbatim (casdoor, llm-gateway). Disable any with `enabled: false`.
+# ---------------------------------------------------------------------------
+components:
+  # ---- Go BFF (one image, 3 roles) ----
+  go-api:
+    enabled: true
+    repo: backend-go
+    replicaCount: 2
+    containerPort: 8080
+    service: { enabled: true, port: 8080 }
+    livenessProbe:
+      httpGet: { path: /livez, port: 8080 }
+      initialDelaySeconds: 10
+      periodSeconds: 15
+    readinessProbe:
+      httpGet: { path: /readyz, port: 8080 }
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 70
+
+  go-relay:
+    enabled: true
+    repo: backend-go
+    replicaCount: 2
+    command: ["/relay"]
+    containerPort: 8080
+    service: { enabled: true, port: 8080 }
+    readinessProbe:
+      tcpSocket: { port: 8080 }
+      initialDelaySeconds: 5
+      periodSeconds: 10
+
+  go-worker:
+    enabled: true
+    repo: backend-go
+    replicaCount: 1
+    command: ["/worker"]
+
+  # ---- Python ML / agent tier ----
+  py-api:
+    enabled: true
+    repo: backend-python
+    replicaCount: 1
+    containerPort: 8000
+    service: { enabled: true, port: 8000 }
+    livenessProbe:
+      httpGet: { path: /livez, port: 8000 }
+      initialDelaySeconds: 15
+      periodSeconds: 15
+    readinessProbe:
+      httpGet: { path: /livez, port: 8000 }
+      initialDelaySeconds: 10
+      periodSeconds: 10
+
+  py-worker:
+    enabled: true
+    repo: backend-python
+    replicaCount: 1
+    command: ["python", "-m", "src.worker"]
+
+  py-mcp:
+    enabled: true
+    repo: backend-python
+    replicaCount: 1
+    command: ["python", "-m", "src.mcp_server.server"]
+
+  crawl:
+    enabled: true
+    repo: crawl
+    replicaCount: 1
+
+  # ---- Edge: Caddy serving the SPA + reverse proxy (TLS handled by the ALB) ----
+  frontend:
+    enabled: true
+    repo: frontend
+    replicaCount: 2
+    envFromShared: false
+    containerPort: 80
+    service: { enabled: true, port: 80 }
+    # Caddy runs as root and binds :80 — allow that one privileged bind.
+    podSecurityContext:
+      runAsNonRoot: false
+      seccompProfile: { type: RuntimeDefault }
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities: { drop: ["ALL"], add: ["NET_BIND_SERVICE"] }
+    readinessProbe:
+      httpGet: { path: /, port: 80 }
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    volumeMounts:
+      - name: caddyfile
+        mountPath: /etc/caddy/Caddyfile
+        subPath: Caddyfile
+        readOnly: true
+    volumes:
+      - name: caddyfile
+        configMap:
+          name: caddy-config
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { memory: 256Mi }
+
+  # ---- Auth provider (public image; runs as root) ----
+  casdoor:
+    enabled: true
+    imageOverride: casbin/casdoor:v1.811.0
+    replicaCount: 1
+    containerPort: 8000
+    service: { enabled: true, port: 8000 }
+    podSecurityContext:
+      runAsNonRoot: false
+      seccompProfile: { type: RuntimeDefault }
+    readinessProbe:
+      tcpSocket: { port: 8000 }
+      initialDelaySeconds: 10
+      periodSeconds: 15
+
+  # ---- LiteLLM gateway (public image, runs as root; ONLY holder of provider keys) ----
+  llm-gateway:
+    enabled: true
+    imageOverride: ghcr.io/berriai/litellm:main-stable
+    replicaCount: 1
+    command: ["litellm"]
+    args: ["--config", "/app/config.yaml", "--port", "4000"]
+    containerPort: 4000
+    service: { enabled: true, port: 4000 }
+    podSecurityContext:
+      runAsNonRoot: false
+      seccompProfile: { type: RuntimeDefault }
+    readinessProbe:
+      httpGet: { path: /health/liveliness, port: 4000 }
+      initialDelaySeconds: 15
+      periodSeconds: 15
+    volumeMounts:
+      - name: llm-config
+        mountPath: /app/config.yaml
+        subPath: config.yaml
+        readOnly: true
+    volumes:
+      - name: llm-config
+        configMap:
+          name: llm-gateway-config
+
+# ---------------------------------------------------------------------------
+# Backing StatefulSets. Disable any (`enabled: false`) to use a managed service
+# instead (e.g. RDS/ElastiCache) — then repoint the matching URL in `config`
+# (or `secrets.data.DATABASE_URL`).
+# ---------------------------------------------------------------------------
+backingStatefulSets:
+  postgres:
+    enabled: true
+    image: postgres:16-alpine
+    port: 5432
+    storage: 10Gi
+    dataPath: /var/lib/postgresql/data
+    subPath: pgdata
+    envFromShared: true
+    readinessProbe:
+      exec:
+        command: ["sh", "-c", "pg_isready -U ${POSTGRES_USER:-aisat} -d ${POSTGRES_DB:-aisat}"]
+      initialDelaySeconds: 10
+      periodSeconds: 10
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits: { memory: 1Gi }
+
+  redis:
+    enabled: true
+    image: redis:7-alpine
+    port: 6379
+    storage: 5Gi
+    dataPath: /data
+    args: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    readinessProbe:
+      exec: { command: ["redis-cli", "ping"] }
+      initialDelaySeconds: 5
+      periodSeconds: 10
+
+  nats:
+    enabled: true
+    image: nats:2.10-alpine
+    port: 4222
+    extraPorts: [8222]
+    storage: 5Gi
+    dataPath: /data
+    args: ["-js", "-sd", "/data", "-m", "8222"]
+    readinessProbe:
+      httpGet: { path: /healthz, port: 8222 }
+      initialDelaySeconds: 5
+      periodSeconds: 10
+
+  qdrant:
+    enabled: true
+    image: qdrant/qdrant:v1.12.4
+    port: 6333
+    storage: 10Gi
+    dataPath: /qdrant/storage
+    readinessProbe:
+      tcpSocket: { port: 6333 }
+      initialDelaySeconds: 10
+      periodSeconds: 10
+
+  minio:
+    enabled: true
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    port: 9000
+    extraPorts: [9001]
+    storage: 20Gi
+    dataPath: /data
+    args: ["server", "/data", "--console-address", ":9001"]
+    # MinIO wants its own root-cred var names; source them from the shared Secret.
+    # `secretEnv` maps an env var to a key in the app Secret (name resolved by the
+    # template, so it honours secrets.existingSecret / External Secrets).
+    secretEnv:
+      - name: MINIO_ROOT_USER
+        key: S3_ACCESS_KEY
+      - name: MINIO_ROOT_PASSWORD
+        key: S3_SECRET_KEY
+    readinessProbe:
+      httpGet: { path: /minio/health/ready, port: 9000 }
+      initialDelaySeconds: 10
+      periodSeconds: 10
+
+# StorageClass for all PVCs. gp3 is provisioned by the EBS CSI driver (installed
+# by Terraform). Leave "" to use the cluster default.
+storageClassName: gp3
