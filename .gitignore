@@ -172,8 +172,29 @@ test-results/
 .env.local
 .env.development.local
 .env.test.local
+.env.production
 .env.production.local
 .env*.local
+# Real deploy secrets live only on the droplet — never commit them.
+deploy/.env.production
+**/.env.production
+
+# Terraform — state and tfvars can contain secrets. Keep .terraform.lock.hcl.
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+*.tfvars
+*.auto.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+!*.tfvars.example
 
 # Package manager lockfiles (keep one, ignore others as needed)
 # yarn.lock

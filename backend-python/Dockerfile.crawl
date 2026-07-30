@@ -1,0 +1,31 @@
+# syntax=docker/dockerfile:1
+#
+# Crawl4AI worker — the ONE Python role peeled onto its own image because it drives
+# a headless Chromium (note-enrichment fetch, FR-001). Isolated footprint/blast radius.
+#
+# Runtime base is the official Playwright/Python image (browsers preinstalled). The
+# playwright version in pyproject.toml MUST match this base tag, else browsers mismatch.
+# TODO(supply-chain): pin base images by @sha256 digest; keep the tags in lockstep.
+FROM python:3.12-slim AS build
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+WORKDIR /app
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
+COPY pyproject.toml uv.lock ./
+# `crawl` optional-dependency group carries crawl4ai + playwright (keeps the base image lean).
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project --no-dev --extra crawl
+COPY . .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --extra crawl
+
+FROM mcr.microsoft.com/playwright/python:v1.49.0-jammy
+RUN groupadd -g 10001 appuser 2>/dev/null || true; \
+    useradd -m -u 10001 -g 10001 appuser 2>/dev/null || true
+WORKDIR /app
+COPY --from=build --chown=appuser:appuser /app /app
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+USER appuser
+# Single-purpose worker: subscribe to the crawl NATS subject and fetch pages.
+CMD ["python", "-m", "src.services.ingestion.crawl_worker"]

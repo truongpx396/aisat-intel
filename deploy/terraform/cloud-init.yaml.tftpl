@@ -1,0 +1,27 @@
+#cloud-config
+# Rendered by Terraform (locals.tf). Mirrors deploy/bootstrap-droplet.sh so a
+# TF-created droplet comes up ready for the CD pipeline. Runs once, on first boot.
+package_update: true
+package_upgrade: false
+
+users:
+  - default
+  - name: ${deploy_user}
+    groups: [sudo] # docker group is added in runcmd, after Docker is installed
+    shell: /bin/bash
+    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+runcmd:
+  # Docker Engine + Compose plugin (official convenience script).
+  - curl -fsSL https://get.docker.com | sh
+  - systemctl enable --now docker
+  - usermod -aG docker ${deploy_user}
+  # App directory, owned by the deploy user (CD scp's deploy/ into here).
+  - mkdir -p ${app_dir}/deploy
+  - chown -R ${deploy_user}:${deploy_user} ${app_dir}
+  # 2G swap for small droplets.
+  - test -f /swapfile || (fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab)
+
+final_message: "aisat-intel droplet bootstrap complete after $UPTIME s"

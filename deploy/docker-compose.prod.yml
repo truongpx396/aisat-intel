@@ -1,0 +1,219 @@
+# Production stack for a single DigitalOcean droplet.
+#
+# App images are PULLED from Docker Hub by immutable tag (${IMAGE_TAG}); backing
+# services run alongside them. Only Caddy publishes ports (80/443) — everything
+# else is reachable only on the internal compose network.
+#
+# Driven by deploy.sh, which exports REGISTRY / DOCKERHUB_USERNAME / IMAGE_PREFIX /
+# IMAGE_TAG and loads secrets from .env.production (never committed).
+#
+# TODO(supply-chain): pin every image below by @sha256 digest and verify the
+# floating tags (litellm/minio/casdoor) against a known-good release.
+
+x-app-env: &app-env
+  env_file: [.env.production]
+
+services:
+  # ------------------------- backing services ---------------------------------
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aisat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env.production}
+      POSTGRES_DB: ${POSTGRES_DB:-aisat}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER:-aisat} -d $${POSTGRES_DB:-aisat}']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  nats:
+    image: nats:2.10-alpine
+    restart: unless-stopped
+    command: ['-js', '-sd', '/data', '-m', '8222'] # JetStream on, monitoring on :8222
+    volumes:
+      - natsdata:/data
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8222/healthz']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    restart: unless-stopped
+    volumes:
+      - qdrantdata:/qdrant/storage
+    healthcheck:
+      test: ['CMD-SHELL', 'bash -c ":> /dev/tcp/127.0.0.1/6333" || exit 1']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    restart: unless-stopped
+    command: ['server', '/data', '--console-address', ':9001']
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?set in .env.production}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?set in .env.production}
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  casdoor:
+    # Auth provider (kernel Auth = casdoor.Auth). First run needs configuration —
+    # see https://casdoor.org. Not gated as a startup dependency of the app tier.
+    image: casbin/casdoor:v1.811.0
+    restart: unless-stopped
+    <<: *app-env
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  llm-gateway:
+    # Standalone OpenAI-wire gateway (LiteLLM). ONLY holder of provider keys.
+    image: ghcr.io/berriai/litellm:main-stable
+    restart: unless-stopped
+    <<: *app-env
+    command: ['--config', '/app/config.yaml', '--port', '4000']
+    volumes:
+      - ./llm-gateway/config.yaml:/app/config.yaml:ro
+    healthcheck:
+      test: ['CMD-SHELL', "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness').status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  # ------------------------- Go BFF (one image, 3 roles) ----------------------
+  go-api:
+    image: ${REGISTRY:-docker.io}/${DOCKERHUB_USERNAME:?set}/${IMAGE_PREFIX:-aisat}-backend-go:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    <<: *app-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      nats: { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+    healthcheck: # distroless: probe via the binary's own subcommand
+      test: ['CMD', '/api', 'healthcheck']
+      interval: 15s
+      timeout: 3s
+      start_period: 20s
+      retries: 5
+
+  go-relay:
+    image: ${REGISTRY:-docker.io}/${DOCKERHUB_USERNAME:?set}/${IMAGE_PREFIX:-aisat}-backend-go:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    <<: *app-env
+    entrypoint: ['/relay']
+    depends_on:
+      redis: { condition: service_healthy }
+      nats: { condition: service_healthy }
+
+  go-worker:
+    image: ${REGISTRY:-docker.io}/${DOCKERHUB_USERNAME:?set}/${IMAGE_PREFIX:-aisat}-backend-go:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    <<: *app-env
+    entrypoint: ['/worker']
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      nats: { condition: service_healthy }
+
+  # ------------------------- Python ML / agent tier ---------------------------
+  py-api:
+    image: ${REGISTRY:-docker.io}/${DOCKERHUB_USERNAME:?set}/${IMAGE_PREFIX:-aisat}-backend-python:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    <<: *app-env
+    depends_on:
+      nats: { condition: service_healthy }
+      llm-gateway: { condition: service_healthy }
+
+  py-worker:
+    image: ${REGISTRY:-docker.io}/${DOCKERHUB_USERNAME:?set}/${IMAGE_PREFIX:-aisat}-backend-python:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    <<: *app-env
+    command: ['python', '-m', 'src.worker']
+    depends_on:
+      nats: { condition: service_healthy }
+      llm-gateway: { condition: service_healthy }
+
+  py-mcp:
+    image: ${REGISTRY:-docker.io}/${DOCKERHUB_USERNAME:?set}/${IMAGE_PREFIX:-aisat}-backend-python:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    <<: *app-env
+    command: ['python', '-m', 'src.mcp_server.server']
+    depends_on:
+      nats: { condition: service_healthy }
+
+  crawl:
+    image: ${REGISTRY:-docker.io}/${DOCKERHUB_USERNAME:?set}/${IMAGE_PREFIX:-aisat}-crawl:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    <<: *app-env
+    depends_on:
+      nats: { condition: service_healthy }
+
+  # ------------------------- edge: Caddy = TLS + proxy + SPA ------------------
+  # Per plan.md, Caddy does static SPA serving AND reverse proxy AND automatic TLS.
+  # The image built from frontend/ is Caddy with the built SPA baked in at /srv, so
+  # there is NO separate nginx/static container. The Caddyfile is mounted (editable
+  # without a rebuild); the SPA assets ship inside the image (deploy together by tag).
+  caddy:
+    image: ${REGISTRY:-docker.io}/${DOCKERHUB_USERNAME:?set}/${IMAGE_PREFIX:-aisat}-frontend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on: [go-api, go-relay]
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      PRODUCTION_HOST: ${PRODUCTION_HOST:?set in .env.production}
+      ACME_EMAIL: ${ACME_EMAIL:?set in .env.production}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck: # Caddy admin API (localhost:2019) confirms the server is up
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:2019/config/']
+      interval: 20s
+      timeout: 3s
+      retries: 5
+
+  # ------------------------- one-shot migration role --------------------------
+  # `docker compose --profile migrate run --rm migrate` (invoked by deploy.sh).
+  migrate:
+    image: ${REGISTRY:-docker.io}/${DOCKERHUB_USERNAME:?set}/${IMAGE_PREFIX:-aisat}-backend-go:${IMAGE_TAG:-latest}
+    <<: *app-env
+    entrypoint: ['/api']
+    command: ['migrate', 'up'] # binary must expose a `migrate up` subcommand
+    restart: 'no'
+    profiles: ['migrate']
+    depends_on:
+      postgres: { condition: service_healthy }
+
+volumes:
+  pgdata:
+  redisdata:
+  natsdata:
+  qdrantdata:
+  miniodata:
+  caddy_data:
+  caddy_config:
