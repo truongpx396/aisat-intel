@@ -1,0 +1,37 @@
+# Copy to terraform.tfvars and fill in. Do NOT commit terraform.tfvars.
+# AWS credentials come from the environment, not this file:
+#   export AWS_PROFILE=aisat            (or AWS_ACCESS_KEY_ID / _SECRET_ACCESS_KEY)
+
+region       = "ap-southeast-1"
+cluster_name = "aisat-intel-prod"
+environment  = "production"
+
+# --- Networking -------------------------------------------------------------
+vpc_cidr           = "10.42.0.0/16"
+az_count           = 2
+single_nat_gateway = true # set false for one NAT per AZ (HA, pricier)
+
+# --- Control plane + nodes --------------------------------------------------
+kubernetes_version = "1.30"
+node_instance_types = ["t3.large"]
+node_capacity_type  = "ON_DEMAND" # or SPOT
+node_min_size       = 2
+node_desired_size   = 3
+node_max_size       = 6
+
+# Lock the public API endpoint to your admin/CI egress IPs in production:
+# cluster_endpoint_public_access_cidrs = ["203.0.113.10/32"]
+
+# Extra cluster-admins (e.g. your SSO role). The CI deploy role is added for you.
+# cluster_admin_principal_arns = ["arn:aws:iam::123456789012:role/AdminSSO"]
+
+# --- GitHub Actions OIDC deploy role ----------------------------------------
+github_owner      = "truongpx396"
+github_repo       = "aisat-intel"
+github_deploy_ref = "refs/heads/main" # or e.g. "refs/tags/v*" to deploy on release tags
+# Set false if the GitHub OIDC provider already exists in this AWS account:
+# create_github_oidc_provider = false
+
+# --- Optional managed data services (default: in-cluster StatefulSets) -------
+enable_rds_postgres      = false
+enable_elasticache_redis = false

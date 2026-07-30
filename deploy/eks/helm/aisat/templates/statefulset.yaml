@@ -1,0 +1,128 @@
+{{- /* One headless Service + StatefulSet per enabled backing store. Named by the
+       bare key (postgres/redis/nats/qdrant/minio) so config URLs resolve. Disable
+       any to point at a managed service (RDS/ElastiCache) instead. */ -}}
+{{- $root := . -}}
+{{- $d := .Values.backingDefaults -}}
+{{- range $name, $s := .Values.backingStatefulSets }}
+{{- if $s.enabled }}
+{{- $envShared := true -}}{{- if hasKey $s "envFromShared" }}{{- $envShared = $s.envFromShared -}}{{- end }}
+{{- $podSec := $s.podSecurityContext | default $d.podSecurityContext -}}
+{{- $ctrSec := $s.securityContext | default $d.securityContext -}}
+{{- $resources := $s.resources | default $d.resources }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "aisat.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "aisat.selectorLabels" (dict "root" $root "name" $name) | nindent 4 }}
+  ports:
+    - name: main
+      port: {{ $s.port }}
+      targetPort: {{ $s.port }}
+      protocol: TCP
+    {{- range $p := ($s.extraPorts | default list) }}
+    - name: port-{{ $p }}
+      port: {{ $p }}
+      targetPort: {{ $p }}
+      protocol: TCP
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "aisat.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "aisat.selectorLabels" (dict "root" $root "name" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aisat.selectorLabels" (dict "root" $root "name" $name) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "aisat.serviceAccountName" $root }}
+      securityContext:
+        {{- toYaml $podSec | nindent 8 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ $s.image }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml $ctrSec | nindent 12 }}
+          {{- with $s.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $s.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: main
+              containerPort: {{ $s.port }}
+              protocol: TCP
+            {{- range $p := ($s.extraPorts | default list) }}
+            - name: port-{{ $p }}
+              containerPort: {{ $p }}
+              protocol: TCP
+            {{- end }}
+          {{- if $envShared }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "aisat.configName" $root }}
+            - secretRef:
+                name: {{ include "aisat.secretName" $root }}
+          {{- end }}
+          {{- if or $s.env $s.secretEnv }}
+          env:
+            {{- with $s.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- range $e := ($s.secretEnv | default list) }}
+            - name: {{ $e.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aisat.secretName" $root }}
+                  key: {{ $e.key }}
+            {{- end }}
+          {{- end }}
+          {{- with $s.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $s.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml $resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ $s.dataPath }}
+              {{- if $s.subPath }}
+              subPath: {{ $s.subPath }}
+              {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if $root.Values.storageClassName }}
+        storageClassName: {{ $root.Values.storageClassName }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $s.storage }}
+{{- end }}
+{{- end }}

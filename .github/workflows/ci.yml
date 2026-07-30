@@ -36,6 +36,7 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
       docker: ${{ steps.filter.outputs.docker }}
       terraform: ${{ steps.filter.outputs.terraform }}
+      helm: ${{ steps.filter.outputs.helm }}
     steps:
       - uses: actions/checkout@v4
       - id: filter
@@ -64,6 +65,9 @@ jobs:
             terraform:
               - '**/*.tf'
               - '**/*.tftpl'
+            helm:
+              - 'deploy/eks/helm/**'
+              - '.github/workflows/cd-eks.yml'
 
   # ---------------------------------------------------------------------------
   # Secret scanning — always runs (cheap, catches leaked creds in any change).
@@ -215,27 +219,66 @@ jobs:
           exit-code: '0' # report-only for now; flip to '1' to block (see SETUP.md)
 
   # ---------------------------------------------------------------------------
-  # Terraform (deploy/terraform) — format check (advisory) + validate (blocking)
+  # Terraform — format check (advisory) + validate (blocking) for each root
+  # (DigitalOcean: deploy/terraform; AWS EKS: deploy/eks/terraform).
   # ---------------------------------------------------------------------------
   terraform:
     needs: changes
     if: needs.changes.outputs.terraform == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: [deploy/terraform, deploy/eks/terraform]
     defaults:
       run:
-        working-directory: deploy/terraform
+        working-directory: ${{ matrix.dir }}
     steps:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: '1.9.8'
       - name: Format check (advisory)
-        run: terraform fmt -check -recursive -diff || echo "::warning::terraform fmt would reformat files — run 'terraform fmt -recursive'"
+        run: terraform fmt -check -recursive -diff || echo "::warning::terraform fmt would reformat files in ${{ matrix.dir }} — run 'terraform fmt -recursive'"
       - name: Init (no backend)
         run: terraform init -backend=false
       - name: Validate
         run: terraform validate -no-color
+
+  # ---------------------------------------------------------------------------
+  # Helm chart (deploy/eks/helm) — lint, render both overlays, schema-validate.
+  # ---------------------------------------------------------------------------
+  helm-lint:
+    needs: changes
+    if: needs.changes.outputs.helm == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.15.4
+      - name: Helm lint
+        run: helm lint deploy/eks/helm/aisat
+      - name: Render (default + production overlays)
+        run: |
+          set -euo pipefail
+          reg=000000000000.dkr.ecr.us-east-1.amazonaws.com
+          helm template aisat deploy/eks/helm/aisat --namespace aisat \
+            --set image.registry="$reg" --set image.tag=citest > /tmp/rendered.yaml
+          helm template aisat deploy/eks/helm/aisat --namespace aisat \
+            -f deploy/eks/helm/aisat/values-production.yaml \
+            --set image.registry="$reg" --set image.tag=citest \
+            --set ingress.host=ci.example.com \
+            --set ingress.certificateArn=arn:aws:acm:us-east-1:000000000000:certificate/ci > /dev/null
+          echo "default overlay rendered $(grep -c '^kind:' /tmp/rendered.yaml) resources"
+      - name: Validate manifests (kubeconform)
+        run: |
+          set -euo pipefail
+          curl -sSLf https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /tmp kubeconform
+          /tmp/kubeconform -strict -ignore-missing-schemas -summary /tmp/rendered.yaml
 
   # ---------------------------------------------------------------------------
   # Aggregate gate — a single required check for branch protection.
@@ -243,7 +286,7 @@ jobs:
   # ---------------------------------------------------------------------------
   ci-gate:
     if: always()
-    needs: [secret-scan, go, python, frontend, docker-lint, terraform]
+    needs: [secret-scan, go, python, frontend, docker-lint, terraform, helm-lint]
     runs-on: ubuntu-latest
     steps:
       - name: Verify no job failed

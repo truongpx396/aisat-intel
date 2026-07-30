@@ -1,0 +1,67 @@
+{{- /* DB migration Job — Helm hook. Runs on post-install (first deploy, after the
+       Postgres StatefulSet exists) and pre-upgrade (before app pods roll to the
+       new image). Must complete successfully or the release fails. */ -}}
+{{- if .Values.migrate.enabled }}
+{{- $img := printf "%s/%s-%s:%s" .Values.image.registry .Values.image.prefix .Values.migrate.repo (.Values.image.tag | toString) -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "aisat.fullname" . }}-migrate
+  labels:
+    {{- include "aisat.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    "helm.sh/hook": post-install,pre-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrate.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrate.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "aisat.selectorLabels" (dict "root" . "name" "migrate") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "aisat.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      {{- if .Values.migrate.waitFor.host }}
+      initContainers:
+        - name: wait-for-db
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z {{ .Values.migrate.waitFor.host }} {{ .Values.migrate.waitFor.port }}; do
+                echo "waiting for {{ .Values.migrate.waitFor.host }}:{{ .Values.migrate.waitFor.port }} ..."
+                sleep 2
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+      {{- end }}
+      containers:
+        - name: migrate
+          image: {{ $img }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            {{- toYaml .Values.migrate.command | nindent 12 }}
+          args:
+            {{- toYaml .Values.migrate.args | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "aisat.configName" . }}
+            - secretRef:
+                name: {{ include "aisat.secretName" . }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            {{- toYaml .Values.migrate.resources | nindent 12 }}
+{{- end }}

@@ -1,0 +1,13 @@
+apiVersion: v2
+name: aisat
+description: AISAT-INTEL — Go BFF + Python ML/agent tier + React SPA, with backing services, for AWS EKS.
+type: application
+
+# Chart version tracks the packaging; appVersion is set at deploy time to the
+# deployed image tag (git SHA) via `--set image.tag=...` from the CD workflow.
+version: 0.1.0
+appVersion: "0.1.0"
+
+keywords: [aisat, rag, eks, kubernetes]
+maintainers:
+  - name: aisat-intel

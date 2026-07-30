@@ -1,0 +1,15 @@
+{{- /* LiteLLM gateway config, mounted at /app/config.yaml. Provider keys are NOT
+       here — they arrive via env (the shared Secret) at runtime. */ -}}
+{{- $llm := index .Values.components "llm-gateway" | default dict -}}
+{{- if $llm.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-gateway-config
+  labels:
+    {{- include "aisat.labels" . | nindent 4 }}
+    app.kubernetes.io/component: llm-gateway
+data:
+  config.yaml: |
+    {{- toYaml .Values.llmGatewayConfig | nindent 4 }}
+{{- end }}

@@ -1,0 +1,54 @@
+{{- /* Caddyfile for the frontend edge, in HTTP mode: the ALB terminates TLS, so
+       Caddy serves plain HTTP on :80 while keeping the SPA + reverse-proxy routing
+       (and SSE flush) from deploy/Caddyfile. reverse_proxy targets resolve to the
+       in-cluster Services go-api / go-relay. */ -}}
+{{- $fe := index .Values.components "frontend" | default dict -}}
+{{- if $fe.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: caddy-config
+  labels:
+    {{- include "aisat.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+data:
+  Caddyfile: |
+    :80 {
+      encode zstd gzip
+
+      # Streaming (SSE) routes -> the relay tier, with buffering OFF.
+      @stream path /api/v1/query/*/stream /api/v1/ingest/*/status /api/v1/events*
+      handle @stream {
+        reverse_proxy go-relay:8080 {
+          flush_interval -1
+          transport http {
+            versions 1.1
+          }
+        }
+      }
+
+      # REST API -> the BFF.
+      handle /api/* {
+        reverse_proxy go-api:8080
+      }
+
+      # Everything else -> the SPA (assets baked into the image at /srv).
+      handle {
+        root * /srv
+        try_files {path} /index.html
+        file_server
+      }
+
+      header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+      }
+
+      log {
+        output stdout
+        format json
+      }
+    }
+{{- end }}

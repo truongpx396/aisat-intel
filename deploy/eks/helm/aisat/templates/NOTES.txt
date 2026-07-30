@@ -1,0 +1,27 @@
+aisat-intel deployed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Image: {{ .Values.image.registry | default "<set image.registry>" }}/{{ .Values.image.prefix }}-<component>:{{ .Values.image.tag }}
+
+Watch the rollout:
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/go-api --timeout=180s
+  kubectl -n {{ .Release.Namespace }} get pods
+
+{{- if .Values.ingress.enabled }}
+
+The ALB is provisioned by the AWS Load Balancer Controller. Find its address:
+  kubectl -n {{ .Release.Namespace }} get ingress {{ include "aisat.fullname" . }}
+
+{{- if .Values.ingress.host }}
+Then point a DNS record for {{ .Values.ingress.host }} at the ALB hostname above
+(a CNAME, or an ALIAS/A in Route 53). App URL: https://{{ .Values.ingress.host }}
+{{- else }}
+Set ingress.host and ingress.certificateArn to serve TLS on your domain.
+{{- end }}
+{{- end }}
+
+{{- if and .Values.secrets.create (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) }}
+
+WARNING: using the chart-managed Secret with default/placeholder values. For
+production, set externalSecrets.enabled=true (AWS Secrets Manager) or supply a
+pre-created secrets.existingSecret. See deploy/eks/SETUP.md.
+{{- end }}
