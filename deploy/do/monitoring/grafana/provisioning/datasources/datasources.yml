@@ -1,0 +1,50 @@
+# Auto-provisioned datasources with metrics <-> logs <-> traces correlation.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+      # Jump from a Prometheus exemplar straight to the trace in Tempo.
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      # Extract a trace id from log lines and link to Tempo.
+      derivedFields:
+        - name: TraceID
+          matcherRegex: '"trace_id":"(\w+)"'
+          url: '${__value.raw}'
+          datasourceUid: tempo
+
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      # Trace -> logs: open Loki filtered to the same container/time window.
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: '-5m'
+        spanEndTimeShift: '5m'
+        filterByTraceID: true
+        tags:
+          - key: service.name
+            value: compose_service
+      # Trace -> metrics + the service graph come from Prometheus.
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true

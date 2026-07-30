@@ -35,3 +35,27 @@ github_deploy_ref = "refs/heads/main" # or e.g. "refs/tags/v*" to deploy on rele
 # --- Optional managed data services (default: in-cluster StatefulSets) -------
 enable_rds_postgres      = false
 enable_elasticache_redis = false
+
+# --- Observability + GitOps add-ons (Helm; all ON by default) ---------------
+enable_kube_prometheus_stack = true
+enable_loki                  = true
+enable_tempo                 = true
+enable_langfuse              = true
+enable_argocd                = true
+
+# Chart versions — VERIFY against the upstream chart index before apply and bump
+# as needed (Dependabot maintains them once merged):
+# kube_prometheus_stack_version = "65.5.1"
+# loki_version                  = "6.18.0"
+# tempo_version                 = "1.10.3"
+# langfuse_version              = "0.14.0"
+# argocd_version                = "7.7.5"
+
+# Secrets — set via environment, NOT this file (TF_VAR_* keeps them out of git):
+#   export TF_VAR_grafana_admin_password=...     TF_VAR_langfuse_nextauth_secret=...
+#   export TF_VAR_langfuse_salt=...              TF_VAR_langfuse_postgres_password=...
+# argocd_domain = "argocd.example.com"
+
+# GitOps alternative: to have Argo CD manage the stack from Git instead of
+# Terraform, flip the four stack toggles above to false and apply the app-of-apps
+# in deploy/eks/argocd/. Keep enable_argocd = true.

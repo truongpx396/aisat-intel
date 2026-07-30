@@ -15,7 +15,12 @@ GitHub CD  ─►  build → ECR → helm upgrade → ALB Ingress   (../SETUP.md
 
 | Always                                                                                                                                                    | Optional (toggle)                                                                    |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| VPC (public + private subnets, NAT), EKS control plane + managed node group, core add-ons (CoreDNS, kube-proxy, VPC CNI, EBS CSI), IRSA/OIDC, ECR repos, AWS Load Balancer Controller, GitHub Actions OIDC deploy role | `install_alb_controller` · `enable_rds_postgres` · `enable_elasticache_redis` · `create_github_oidc_provider` |
+| VPC (public + private subnets, NAT), EKS control plane + managed node group, core add-ons (CoreDNS, kube-proxy, VPC CNI, EBS CSI), `gp3` StorageClass, IRSA/OIDC, ECR repos, AWS Load Balancer Controller, GitHub Actions OIDC deploy role | `install_alb_controller` · `enable_rds_postgres` · `enable_elasticache_redis` · `create_github_oidc_provider` · **observability**: `enable_kube_prometheus_stack` · `enable_loki` · `enable_tempo` · `enable_langfuse` · `enable_argocd` |
+
+The observability add-ons (kube-prometheus-stack, Loki, Tempo, Langfuse) and Argo
+CD install via Helm and are **on by default** — see [../SETUP.md](../SETUP.md#observability--gitops-installed-by-terraform).
+Their chart versions are pinned via variables; `terraform validate` does **not**
+fetch charts, so verify the pins against the upstream indexes before apply.
 
 Managed data services are **off by default** — Postgres/Redis (and the rest of
 the backing services) run in-cluster via the Helm chart. Turn RDS/ElastiCache on

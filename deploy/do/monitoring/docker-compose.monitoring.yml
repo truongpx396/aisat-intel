@@ -1,0 +1,165 @@
+# Observability overlay for the single-droplet stack.
+#
+# Layered ON TOP of docker-compose.prod.yml so it joins the SAME compose project
+# and default network — Prometheus can therefore scrape app services by name
+# (go-api:8080, py-api:8000, …). Always invoke it together with the base file:
+#
+#   docker compose \
+#     -f docker-compose.prod.yml \
+#     -f monitoring/docker-compose.monitoring.yml \
+#     --env-file .env.production up -d
+#
+# (deploy.sh does this automatically when ENABLE_MONITORING=true; `make mon-up`
+# is the local shortcut.)
+#
+# SECURITY: every UI here binds to 127.0.0.1 only — reach them over an SSH tunnel
+#   ssh -L 3000:127.0.0.1:3000 deploy@<droplet>   # then open http://localhost:3000
+# or front Grafana with Caddy on a subdomain (see monitoring/README.md).
+# (Langfuse lives in the base docker-compose.prod.yml — it's an app dependency.)
+#
+# TODO(supply-chain): pin every image below by @sha256 digest.
+
+services:
+  # ------------------------- metrics: Prometheus + Alertmanager ---------------
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle' # allows `curl -XPOST :9090/-/reload`
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - '127.0.0.1:9090:9090'
+    depends_on: [alertmanager]
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:9090/-/healthy']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - '127.0.0.1:9093:9093'
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:9093/-/healthy']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  # ------------------------- exporters: host + containers ---------------------
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    command:
+      - '--path.rootfs=/host'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    pid: host
+    volumes:
+      - '/:/host:ro,rslave'
+    # No published port — Prometheus scrapes it at node-exporter:9100 on the net.
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    restart: unless-stopped
+    command: ['--housekeeping_interval=10s', '--docker_only=true']
+    privileged: true
+    devices: ['/dev/kmsg']
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    # Prometheus scrapes it at cadvisor:8080.
+
+  # ------------------------- logs: Loki + Promtail ----------------------------
+  loki:
+    image: grafana/loki:3.2.1
+    restart: unless-stopped
+    command: ['-config.file=/etc/loki/loki-config.yml']
+    volumes:
+      - ./monitoring/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    ports:
+      - '127.0.0.1:3100:3100'
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3100/ready']
+      interval: 30s
+      timeout: 5s
+      retries: 10
+
+  promtail:
+    # Ships container stdout/stderr to Loki via the Docker service-discovery.
+    # NOTE: Promtail is in maintenance mode; Grafana Alloy is its successor.
+    # See monitoring/README.md for the Alloy migration note.
+    image: grafana/promtail:3.2.1
+    restart: unless-stopped
+    command: ['-config.file=/etc/promtail/promtail-config.yml']
+    volumes:
+      - ./monitoring/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - promtail_data:/tmp
+    depends_on: [loki]
+
+  # ------------------------- traces: Tempo (OTLP) -----------------------------
+  tempo:
+    image: grafana/tempo:2.6.1
+    restart: unless-stopped
+    command: ['-config.file=/etc/tempo/tempo.yml']
+    volumes:
+      - ./monitoring/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+      - tempo_data:/var/tempo
+    ports:
+      - '127.0.0.1:3200:3200' # Tempo query API (Grafana datasource)
+      # OTLP receivers stay on the internal network only — apps send traces to
+      # tempo:4317 (gRPC) / tempo:4318 (HTTP) via OTEL_EXPORTER_OTLP_ENDPOINT.
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3200/ready']
+      interval: 30s
+      timeout: 5s
+      retries: 10
+
+  # ------------------------- dashboards: Grafana ------------------------------
+  grafana:
+    image: grafana/grafana:11.3.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set in .env.production}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - '127.0.0.1:3000:3000'
+    depends_on: [prometheus, loki, tempo]
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/api/health']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  prometheus_data:
+  alertmanager_data:
+  loki_data:
+  promtail_data:
+  tempo_data:
+  grafana_data:

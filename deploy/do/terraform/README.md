@@ -6,7 +6,7 @@ Provisions the infrastructure the CD pipeline deploys onto. Terraform builds the
 ```
 Terraform  ─►  VPC · droplet (cloud-init: Docker + deploy user) · reserved IP
                firewall · DNS · [managed PG/Redis] · [Spaces] · [alerts] · project
-GitHub CD  ─►  scp deploy/ ─► droplet ─► compose pull/migrate/up   (deploy/SETUP.md)
+GitHub CD  ─►  scp deploy/do/ ─► droplet ─► compose pull/migrate/up   (deploy/do/SETUP.md)
 ```
 
 ## What it creates
@@ -29,7 +29,7 @@ droplet's compose stack. Turn them on to harden for production, then repoint
 ## Usage
 
 ```bash
-cd deploy/terraform
+cd deploy/do/terraform
 cp terraform.tfvars.example terraform.tfvars     # fill in ssh_public_key, domain, ...
 export TF_VAR_do_token=dop_v1_xxxxxxxx           # never put the token in a file
 # If enabling Spaces, also:
@@ -58,7 +58,7 @@ ssh deploy@$(terraform output -raw reserved_ipv4) 'cloud-init status --wait'
 | `postgres_uri` / `redis_uri` / `spaces_*` | corresponding keys in `.env.production` (when enabled) |
 
 `terraform output -json github_secrets_hint` prints the first three ready to copy.
-Then create `/opt/aisat-intel/deploy/.env.production` on the droplet (secrets —
+Then create `/opt/aisat-intel/do/.env.production` on the droplet (secrets —
 never in Terraform state) as described in SETUP.md, and trigger a deploy.
 
 ## State

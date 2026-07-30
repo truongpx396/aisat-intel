@@ -1,0 +1,42 @@
+# Alertmanager routing. The default receiver is a no-op (alerts fire in
+# Prometheus and are visible at :9093 but are not delivered anywhere) so the
+# stack starts clean without secrets. Enable ONE integration below.
+#
+# The repo already provisions Telegram for CI — reuse the same bot to deliver
+# droplet alerts: uncomment `telegram_configs` and fill in the token + chat id.
+route:
+  receiver: default
+  group_by: ['alertname', 'job']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 3h
+  routes:
+    - matchers: ['severity="critical"']
+      receiver: default
+      repeat_interval: 1h
+
+inhibit_rules:
+  # A firing critical alert silences the matching warning for the same target.
+  - source_matchers: ['severity="critical"']
+    target_matchers: ['severity="warning"']
+    equal: ['alertname', 'instance']
+
+receivers:
+  - name: default
+    # --- Telegram (recommended — reuse the CI bot) ----------------------------
+    # telegram_configs:
+    #   - bot_token: '<TELEGRAM_BOT_TOKEN>'   # or bot_token_file: /etc/alertmanager/telegram_token
+    #     chat_id: <TELEGRAM_CHAT_ID>          # integer; negative for groups
+    #     parse_mode: HTML
+    #     send_resolved: true
+    #
+    # --- Slack ----------------------------------------------------------------
+    # slack_configs:
+    #   - api_url: '<SLACK_WEBHOOK_URL>'
+    #     channel: '#alerts'
+    #     send_resolved: true
+    #
+    # --- Email (SMTP; also set `global.smtp_*` above) -------------------------
+    # email_configs:
+    #   - to: 'oncall@example.com'
+    #     send_resolved: true

@@ -1,0 +1,34 @@
+# Argo CD — GitOps controller. Server runs in insecure mode (TLS is expected to
+# be terminated by an Ingress/ALB, or you reach it via `kubectl port-forward`).
+# Rendered by Terraform: ${'$'}{argocd_domain}.
+global:
+  domain: ${argocd_domain}
+
+configs:
+  params:
+    server.insecure: true
+
+# Keep the bootstrap footprint small; enable these as you need them.
+dex:
+  enabled: false
+notifications:
+  enabled: false
+
+# Register Argo CD component metrics with kube-prometheus-stack (if installed).
+controller:
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+repoServer:
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+server:
+  service:
+    type: ClusterIP # reach via port-forward, or add an ALB Ingress for the domain
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true

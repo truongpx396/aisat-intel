@@ -1,0 +1,34 @@
+# Langfuse (v2 line) — LLM tracing/eval, backed by its own bundled Postgres.
+# Secrets (nextauth.secret, salt, postgres password) are injected by Terraform
+# via set_sensitive. Rendered by Terraform: ${'$'}{storage_class}.
+#
+# NOTE: chart key names track the langfuse-k8s chart version — verify against the
+# version you pin (var.langfuse_version) before apply.
+langfuse:
+  image:
+    tag: "2"
+  telemetryEnabled: false
+  nextauth:
+    # In-cluster URL; front with an Ingress + real URL to expose the UI.
+    url: http://localhost:3000
+  # Optional headless bootstrap of an org/project + API keys (uncomment + fill):
+  # additionalEnv:
+  #   - name: LANGFUSE_INIT_ORG_ID
+  #     value: aisat
+  #   - name: LANGFUSE_INIT_PROJECT_ID
+  #     value: aisat
+  ingress:
+    enabled: false
+
+# Bundled Postgres (Bitnami subchart). Set deploy=false and point
+# langfuse.postgresql.host at an RDS endpoint to use a managed database.
+postgresql:
+  deploy: true
+  auth:
+    username: langfuse
+    database: langfuse
+  primary:
+    persistence:
+      enabled: true
+      storageClass: ${storage_class}
+      size: 10Gi

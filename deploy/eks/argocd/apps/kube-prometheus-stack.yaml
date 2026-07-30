@@ -1,0 +1,97 @@
+# Prometheus + Alertmanager + Grafana + node-exporter + kube-state-metrics.
+# Grafana's admin password comes from a pre-created Secret (never inline it in
+# Git). Create it once:
+#   kubectl -n monitoring create secret generic grafana-admin \
+#     --from-literal=admin-user=admin --from-literal=admin-password='<strong>'
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: aisat
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 65.5.1 # verify/bump against the upstream index
+    helm:
+      values: |
+        fullnameOverride: kube-prometheus-stack
+        alertmanager:
+          alertmanagerSpec:
+            retention: 120h
+            storage:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: gp3
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 5Gi
+        grafana:
+          defaultDashboardsTimezone: browser
+          service:
+            type: ClusterIP
+          admin:
+            existingSecret: grafana-admin
+            userKey: admin-user
+            passwordKey: admin-password
+          persistence:
+            enabled: true
+            storageClassName: gp3
+            size: 10Gi
+          additionalDataSources:
+            - name: Loki
+              type: loki
+              uid: loki
+              access: proxy
+              url: http://loki.monitoring.svc:3100
+            - name: Tempo
+              type: tempo
+              uid: tempo
+              access: proxy
+              url: http://tempo.monitoring.svc:3200
+              jsonData:
+                serviceMap:
+                  datasourceUid: prometheus
+                nodeGraph:
+                  enabled: true
+          sidecar:
+            dashboards:
+              enabled: true
+              searchNamespace: ALL
+              label: grafana_dashboard
+        prometheus:
+          prometheusSpec:
+            retention: 15d
+            serviceMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
+            probeSelectorNilUsesHelmValues: false
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: gp3
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 30Gi
+            resources:
+              requests: { cpu: 250m, memory: 512Mi }
+              limits: { memory: 2Gi }
+        prometheus-node-exporter:
+          fullnameOverride: node-exporter
+        kube-state-metrics:
+          fullnameOverride: kube-state-metrics
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true # kube-prometheus-stack CRDs are large

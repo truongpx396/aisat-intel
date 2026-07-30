@@ -1,0 +1,52 @@
+# Tempo 2.x — single-binary, local-disk trace store. Receives OTLP from the app
+# tiers (OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318). Data -> tempo_data.
+server:
+  http_listen_port: 3200
+  grpc_listen_port: 9095
+  log_level: info
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+ingester:
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 168h # 7d trace retention
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal
+
+# Service-graph + span metrics feed Grafana's "Service Graph" and RED metrics.
+# They are written to Prometheus via remote_write. Uncomment to enable (requires
+# Prometheus started with --web.enable-remote-write-receiver).
+# metrics_generator:
+#   registry:
+#     external_labels:
+#       source: tempo
+#   storage:
+#     path: /var/tempo/generator/wal
+#     remote_write:
+#       - url: http://prometheus:9090/api/v1/write
+#         send_exemplars: true
+#   traces_storage:
+#     path: /var/tempo/generator/traces
+# overrides:
+#   defaults:
+#     metrics_generator:
+#       processors: [service-graphs, span-metrics]
+
+usage_report:
+  reporting_enabled: false

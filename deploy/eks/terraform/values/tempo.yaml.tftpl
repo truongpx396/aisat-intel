@@ -1,0 +1,28 @@
+# Grafana Tempo — single binary, local-disk trace store, OTLP receivers on.
+# Apps send traces to tempo.<ns>.svc:4317 (gRPC) / :4318 (HTTP).
+# Rendered by Terraform: ${'$'}{storage_class}.
+tempo:
+  retention: 168h # 7d
+  storage:
+    trace:
+      backend: local
+      local:
+        path: /var/tempo/traces
+      wal:
+        path: /var/tempo/wal
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClassName: ${storage_class}
+
+# Expose a ServiceMonitor so kube-prometheus-stack scrapes Tempo's own metrics.
+serviceMonitor:
+  enabled: true

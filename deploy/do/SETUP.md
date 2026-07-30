@@ -7,7 +7,7 @@ lights up per runtime (Go / Python / React) as each appears.
  PR / push ──► CI  (lint · test · vuln-scan · secret-scan · Dockerfile-lint)      [ci.yml]
  push main ──► CD  discover ─► build+push images (Docker Hub, SBOM+provenance)    [cd.yml]
                               └─► ⛔ approval gate (production environment)
-                                   └─► scp deploy/ ─► droplet: pull · migrate · up · health
+                                   └─► scp deploy/do/ ─► droplet: pull · migrate · up · health
                                         └─► rollback on failure ─► Telegram ✅/❌
 ```
 
@@ -33,7 +33,7 @@ Create an Ubuntu 22.04/24.04 droplet (2 vCPU / 4 GB is a sane starting size), po
 DNS **A record** (`PRODUCTION_HOST`) at its IP, then bootstrap it:
 
 ```bash
-ssh root@<droplet-ip> 'bash -s' < deploy/bootstrap-droplet.sh
+ssh root@<droplet-ip> 'bash -s' < deploy/do/bootstrap-droplet.sh
 ```
 
 That installs Docker + Compose, creates the `deploy` user, opens 22/80/443, and prepares
@@ -46,8 +46,8 @@ ssh-copy-id -i ./aisat_deploy.pub deploy@<droplet-ip>   # public key -> droplet
 #    -> put the PRIVATE key (aisat_deploy) into GitHub secret DROPLET_SSH_KEY
 
 # b) create the production env file on the droplet (never committed)
-scp deploy/.env.production.example deploy@<droplet-ip>:/opt/aisat-intel/deploy/.env.production
-ssh deploy@<droplet-ip> 'chmod 600 /opt/aisat-intel/deploy/.env.production && $EDITOR ...'
+scp deploy/do/.env.production.example deploy@<droplet-ip>:/opt/aisat-intel/do/.env.production
+ssh deploy@<droplet-ip> 'chmod 600 /opt/aisat-intel/do/.env.production && $EDITOR ...'
 
 # c) let Docker pull your images
 ssh deploy@<droplet-ip> 'docker login -u <DOCKERHUB_USERNAME>'
@@ -98,9 +98,33 @@ fails its health check.
 
 ---
 
+## Monitoring (optional overlay)
+
+A full observability stack — **Prometheus, Grafana, cAdvisor, Node Exporter,
+Loki, Tempo, Alertmanager, Promtail** — ships as a compose overlay in
+[monitoring/](./monitoring/). It layers onto the same compose project, so
+Prometheus scrapes app containers by service name with no extra wiring.
+
+```bash
+# opt in on the droplet by setting the CD env var (or run make mon-up locally):
+ENABLE_MONITORING=true ./deploy.sh
+```
+
+Every UI binds to `127.0.0.1` only — reach them over an SSH tunnel (or front
+Grafana with Caddy). Set `GRAFANA_ADMIN_PASSWORD` in `.env.production` before
+enabling the overlay. Full details, ports, dashboards, and app wiring:
+[monitoring/README.md](./monitoring/README.md).
+
+> **Langfuse** (LLM tracing) is **not** in this overlay — it's an app dependency,
+> so it runs in the base stack and is always on. That makes
+> `LANGFUSE_DB_PASSWORD`, `LANGFUSE_NEXTAUTH_SECRET`, and `LANGFUSE_SALT` required
+> for every deploy (set them in `.env.production`, overlay or not).
+
+---
+
 ## Integration contracts (what the app code must provide)
 
-The pipeline assumes the structure in [specs/001-contextengine-mvp/plan.md](../specs/001-contextengine-mvp/plan.md):
+The pipeline assumes the structure in [specs/001-contextengine-mvp/plan.md](../../specs/001-contextengine-mvp/plan.md):
 
 - **`backend-go/`** — `go.mod`, `cmd/{api,relay,worker}`, and the binary exposes a
   `healthcheck` subcommand and a `migrate up` subcommand; serves `/livez` + `/readyz` on `:8080`.
@@ -109,12 +133,12 @@ The pipeline assumes the structure in [specs/001-contextengine-mvp/plan.md](../s
   `crawl` optional-dependency extra + `src.services.ingestion.crawl_worker` module.
 - **`frontend/`** — `package.json` with `build` (and ideally `lint`/`typecheck`/`test`) scripts;
   Vite emits to `dist/`.
-- Confirm the SSE path prefixes in [deploy/Caddyfile](./Caddyfile) against
+- Confirm the SSE path prefixes in [deploy/do/Caddyfile](./Caddyfile) against
   `specs/001-contextengine-mvp/contracts/{bff-rest,sse-events}.md`.
 
 ## Production hardening checklist
 
-Per [.github/instructions/devops-cicd.instructions.md](../.github/instructions/devops-cicd.instructions.md),
+Per [.github/instructions/devops-cicd.instructions.md](../../.github/instructions/devops-cicd.instructions.md),
 tighten these before real traffic:
 
 - [ ] **Pin actions to commit SHAs** (`ratchet pin .github/workflows/*.yml`); Dependabot maintains them.

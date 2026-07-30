@@ -1,0 +1,74 @@
+# kube-prometheus-stack values (rendered by Terraform: ${'$'}{storage_class}, ${'$'}{monitoring_namespace}).
+# Bundles Prometheus (Operator), Alertmanager, Grafana, node-exporter, and
+# kube-state-metrics. Grafana's admin password is injected via set_sensitive.
+fullnameOverride: kube-prometheus-stack
+
+alertmanager:
+  alertmanagerSpec:
+    retention: 120h
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: ${storage_class}
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+
+grafana:
+  defaultDashboardsTimezone: browser
+  service:
+    type: ClusterIP # reach via `kubectl port-forward` or add an ALB Ingress
+  persistence:
+    enabled: true
+    storageClassName: ${storage_class}
+    size: 10Gi
+  # Prometheus is auto-wired by the chart; add Loki + Tempo (in the same ns).
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      uid: loki
+      access: proxy
+      url: http://loki.${monitoring_namespace}.svc:3100
+    - name: Tempo
+      type: tempo
+      uid: tempo
+      access: proxy
+      url: http://tempo.${monitoring_namespace}.svc:3200
+      jsonData:
+        serviceMap:
+          datasourceUid: prometheus
+        nodeGraph:
+          enabled: true
+  # Pick up dashboards labelled grafana_dashboard in any namespace (ConfigMaps).
+  sidecar:
+    dashboards:
+      enabled: true
+      searchNamespace: ALL
+      label: grafana_dashboard
+
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    # Watch ServiceMonitors/PodMonitors/Rules cluster-wide, not just chart-labelled.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: ${storage_class}
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 30Gi
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits: { memory: 2Gi }
+
+# Sub-charts: give them stable names so ServiceMonitors/DNS are predictable.
+prometheus-node-exporter:
+  fullnameOverride: node-exporter
+kube-state-metrics:
+  fullnameOverride: kube-state-metrics

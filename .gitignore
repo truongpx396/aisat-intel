@@ -176,7 +176,7 @@ test-results/
 .env.production.local
 .env*.local
 # Real deploy secrets live only on the droplet — never commit them.
-deploy/.env.production
+deploy/do/.env.production
 **/.env.production
 
 # Terraform — state and tfvars can contain secrets. Keep .terraform.lock.hcl.

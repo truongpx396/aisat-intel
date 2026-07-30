@@ -1,6 +1,6 @@
 {{- /* Caddyfile for the frontend edge, in HTTP mode: the ALB terminates TLS, so
        Caddy serves plain HTTP on :80 while keeping the SPA + reverse-proxy routing
-       (and SSE flush) from deploy/Caddyfile. reverse_proxy targets resolve to the
+       (and SSE flush) from deploy/do/Caddyfile. reverse_proxy targets resolve to the
        in-cluster Services go-api / go-relay. */ -}}
 {{- $fe := index .Values.components "frontend" | default dict -}}
 {{- if $fe.enabled }}

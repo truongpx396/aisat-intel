@@ -1,7 +1,7 @@
 # CI/CD Setup — GitHub Actions → Amazon ECR → AWS EKS (Helm, OIDC, Telegram alerts)
 
 This is the **AWS EKS** deploy path. It runs **alongside** the DigitalOcean droplet
-pipeline ([../SETUP.md](../SETUP.md)) — nothing here replaces that. Same app images,
+pipeline ([../do/SETUP.md](../do/SETUP.md)) — nothing here replaces that. Same app images,
 different target: a Helm release on an EKS cluster fronted by an ALB.
 
 ```
@@ -78,7 +78,7 @@ pulls secrets from **AWS Secrets Manager** via the **External Secrets Operator (
 Set this up once before the first deploy:
 
 ```bash
-# a) store the app secret (keys mirror deploy/.env.production — see values.yaml `secrets.data`)
+# a) store the app secret (keys mirror deploy/do/.env.production — see values.yaml `secrets.data`)
 aws secretsmanager create-secret --name aisat/production --region <region> \
   --secret-string '{"POSTGRES_PASSWORD":"...","DATABASE_URL":"postgres://...","S3_ACCESS_KEY":"...","S3_SECRET_KEY":"...","LLM_GATEWAY_MASTER_KEY":"sk-...","JWT_SECRET":"...","OPENAI_API_KEY":"...","ANTHROPIC_API_KEY":"..."}'
 
@@ -108,7 +108,7 @@ YAML
 >
 > ```bash
 > kubectl -n aisat create secret generic aisat-secrets \
->   --from-env-file=deploy/.env.production
+>   --from-env-file=deploy/do/.env.production
 > ```
 
 ## 5. First deploy
@@ -126,6 +126,57 @@ revision if a deploy fails its health/rollout checks. Manual rollback:
 helm -n aisat history aisat
 helm -n aisat rollback aisat <REVISION>
 ```
+
+---
+
+## Observability + GitOps (installed by Terraform)
+
+`terraform apply` also installs an in-cluster observability stack and Argo CD
+(all toggleable, all **on** by default):
+
+| Component               | Namespace    | What it is                                          |
+| ----------------------- | ------------ | --------------------------------------------------- |
+| `kube-prometheus-stack` | `monitoring` | Prometheus + Alertmanager + Grafana + node-exporter + kube-state-metrics |
+| `loki`                  | `monitoring` | log store (SingleBinary, filesystem)                |
+| `tempo`                 | `monitoring` | trace store, OTLP in on 4317/4318                   |
+| `langfuse` (+ Postgres) | `langfuse`   | LLM tracing / eval (v2)                              |
+| `argo-cd`               | `argocd`     | GitOps controller (bootstrap)                        |
+
+Grafana comes pre-wired with the Loki + Tempo datasources. A `gp3` StorageClass
+([terraform/storage.tf](./terraform/storage.tf)) backs every PVC.
+
+**Secrets** are passed via `TF_VAR_*` (never the tfvars file):
+
+```bash
+export TF_VAR_grafana_admin_password="$(openssl rand -hex 24)"
+export TF_VAR_langfuse_nextauth_secret="$(openssl rand -hex 32)"
+export TF_VAR_langfuse_salt="$(openssl rand -hex 32)"
+export TF_VAR_langfuse_postgres_password="$(openssl rand -hex 32)"
+terraform apply
+```
+
+**Reach the UIs** (nothing is public by default — use port-forward):
+
+```bash
+terraform output grafana_access_hint     # Grafana (admin / TF_VAR_grafana_admin_password)
+terraform output argocd_access_hint      # Argo CD (prints the initial admin password + port-forward)
+```
+
+**Chart versions** are pinned via variables (`kube_prometheus_stack_version`, …).
+`terraform validate` does **not** fetch charts, so verify the defaults against the
+upstream chart indexes before apply and let Dependabot bump them after.
+
+**Wire the app in:** set `OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo.monitoring.svc:4318`
+(traces) and `LANGFUSE_HOST` to the in-cluster Langfuse service; expose `/metrics`
++ a `ServiceMonitor` for scraping.
+
+### Prefer GitOps?
+
+Argo CD can own the stack instead of Terraform — see
+[argocd/README.md](./argocd/README.md). Flip the four stack toggles
+(`enable_kube_prometheus_stack`/`enable_loki`/`enable_tempo`/`enable_langfuse`) to
+`false`, keep `enable_argocd = true`, and apply the app-of-apps. **Never let both
+Terraform and Argo CD manage the same chart.**
 
 ---
 

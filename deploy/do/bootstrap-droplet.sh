@@ -2,7 +2,7 @@
 # One-time droplet provisioning. Run as root (or via sudo) on a fresh
 # Ubuntu 22.04/24.04 DigitalOcean droplet:
 #
-#   ssh root@<droplet-ip> 'bash -s' < deploy/bootstrap-droplet.sh
+#   ssh root@<droplet-ip> 'bash -s' < deploy/do/bootstrap-droplet.sh
 #
 # Installs Docker + Compose, creates the non-root deploy user, opens the firewall,
 # and prepares /opt/aisat-intel. Idempotent — safe to re-run.

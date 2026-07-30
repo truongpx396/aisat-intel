@@ -1,0 +1,49 @@
+# Grafana Loki — SingleBinary, filesystem-backed (right-sized for one cluster).
+# Rendered by Terraform: ${'$'}{storage_class}.
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  schemaConfig:
+    configs:
+      - from: "2024-01-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+  storage:
+    type: filesystem
+  limits_config:
+    retention_period: 168h # 7d
+    reject_old_samples: true
+    reject_old_samples_max_age: 168h
+    volume_enabled: true
+
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: ${storage_class}
+
+# SingleBinary mode: zero out the scalable-mode targets and the memcached caches.
+backend:
+  replicas: 0
+read:
+  replicas: 0
+write:
+  replicas: 0
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+lokiCanary:
+  enabled: false
+test:
+  enabled: false
+gateway:
+  enabled: false

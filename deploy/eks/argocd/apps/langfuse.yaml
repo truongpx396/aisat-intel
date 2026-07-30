@@ -1,0 +1,59 @@
+# Langfuse (v2) + bundled Postgres. Secrets come from a pre-created Secret (never
+# inline them in Git). Create it once, then reference its keys below:
+#   kubectl -n langfuse create secret generic langfuse-secrets \
+#     --from-literal=nextauth-secret="$(openssl rand -hex 32)" \
+#     --from-literal=salt="$(openssl rand -hex 32)" \
+#     --from-literal=postgres-password="$(openssl rand -hex 32)"
+#
+# NOTE: chart key names track the langfuse-k8s chart version — verify against
+# targetRevision before syncing.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: langfuse
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: aisat
+  source:
+    repoURL: https://langfuse.github.io/langfuse-k8s
+    chart: langfuse
+    targetRevision: 0.14.0 # verify/bump against the upstream index
+    helm:
+      values: |
+        langfuse:
+          image:
+            tag: "2"
+          telemetryEnabled: false
+          nextauth:
+            url: http://localhost:3000
+            existingSecret: langfuse-secrets
+            secretKeys:
+              nextauthSecret: nextauth-secret
+              salt: salt
+          ingress:
+            enabled: false
+        postgresql:
+          deploy: true
+          auth:
+            username: langfuse
+            database: langfuse
+            existingSecret: langfuse-secrets
+            secretKeys:
+              adminPasswordKey: postgres-password
+              userPasswordKey: postgres-password
+          primary:
+            persistence:
+              enabled: true
+              storageClass: gp3
+              size: 10Gi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: langfuse
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
