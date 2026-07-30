@@ -1,0 +1,31 @@
+# AppProject scoping what the observability Applications may deploy. Kept
+# permissive on cluster-scoped resources because kube-prometheus-stack installs
+# CRDs; tighten sourceRepos/destinations to taste.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: aisat
+  namespace: argocd
+  # Keep the project even if the bootstrap app is deleted.
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false
+spec:
+  description: AISAT platform + observability stack
+  sourceRepos:
+    - https://github.com/truongpx396/aisat-intel.git # this repo (app-of-apps source)
+    - https://prometheus-community.github.io/helm-charts
+    - https://grafana.github.io/helm-charts
+    - https://langfuse.github.io/langfuse-k8s
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: monitoring
+    - server: https://kubernetes.default.svc
+      namespace: langfuse
+    - server: https://kubernetes.default.svc
+      namespace: argocd
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'

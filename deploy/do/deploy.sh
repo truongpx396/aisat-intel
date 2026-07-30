@@ -16,7 +16,14 @@ export IMAGE_PREFIX="${IMAGE_PREFIX:-aisat}"
 
 [ -f .env.production ] || { echo "ERROR: .env.production missing on the droplet (see bootstrap-droplet.sh)"; exit 1; }
 
-COMPOSE=(docker compose -f docker-compose.prod.yml --env-file .env.production)
+# Optionally fold in the observability overlay (Prometheus/Grafana/Loki/Tempo/
+# Alertmanager/exporters/Langfuse). Set ENABLE_MONITORING=true in the CD job env.
+COMPOSE_FILES=(-f docker-compose.prod.yml)
+if [ "${ENABLE_MONITORING:-false}" = "true" ]; then
+  COMPOSE_FILES+=(-f monitoring/docker-compose.monitoring.yml)
+fi
+
+COMPOSE=(docker compose "${COMPOSE_FILES[@]}" --env-file .env.production)
 HEALTH_SVC="go-api"          # gate the rollout on the BFF becoming healthy
 HEALTH_TIMEOUT=180           # seconds
 PREV_FILE=".last_deployed_tag"
@@ -40,6 +47,7 @@ wait_healthy() {
 }
 
 log "Logged-in registry: ${REGISTRY} as ${DOCKERHUB_USERNAME} (tag ${IMAGE_TAG})"
+[ "${ENABLE_MONITORING:-false}" = "true" ] && log "Monitoring overlay ENABLED (Prometheus/Grafana/Loki/Tempo/Alertmanager)"
 
 log "Pulling images @ ${IMAGE_TAG}"
 IMAGE_TAG="$IMAGE_TAG" "${COMPOSE[@]}" pull

@@ -1,0 +1,59 @@
+# Baseline alerting rules. Tune thresholds to the droplet size before real use.
+groups:
+  - name: availability
+    rules:
+      - alert: TargetDown
+        expr: up == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: 'Scrape target down: {{ $labels.job }} ({{ $labels.instance }})'
+          description: 'Prometheus has failed to scrape {{ $labels.instance }} for >2m.'
+
+  - name: host
+    rules:
+      - alert: HostHighCPU
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: 'High CPU on {{ $labels.instance }}'
+          description: 'CPU usage has exceeded 85% for 5m (current: {{ printf "%.0f" $value }}%).'
+
+      - alert: HostHighMemory
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: 'High memory on {{ $labels.instance }}'
+          description: 'Memory usage has exceeded 85% for 5m (current: {{ printf "%.0f" $value }}%).'
+
+      - alert: HostLowDisk
+        expr: |
+          (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}
+                / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"})) * 100 > 85
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: 'Low disk on {{ $labels.instance }} ({{ $labels.mountpoint }})'
+          description: 'Filesystem usage has exceeded 85% for 10m (current: {{ printf "%.0f" $value }}%).'
+
+  - name: containers
+    rules:
+      - alert: ContainerRestarting
+        expr: rate(container_start_time_seconds{name!=""}[15m]) > 0 and on(name) changes(container_start_time_seconds{name!=""}[15m]) > 2
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: 'Container {{ $labels.name }} is restarting'
+          description: 'Container {{ $labels.name }} restarted more than twice in 15m.'
+
+      - alert: ContainerHighMemory
+        expr: |
+          (container_memory_working_set_bytes{name!=""}
+           / (container_spec_memory_limit_bytes{name!=""} > 0)) * 100 > 90
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: 'Container {{ $labels.name }} near its memory limit'
+          description: '{{ $labels.name }} is using >90% of its memory limit for 10m.'

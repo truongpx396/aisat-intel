@@ -58,6 +58,40 @@ output "elasticache_redis_endpoint" {
   value       = var.enable_elasticache_redis ? aws_elasticache_cluster.redis[0].cache_nodes[0].address : null
 }
 
+# ---------------------------------------------------------------------------
+# Observability + GitOps access hints
+# ---------------------------------------------------------------------------
+output "grafana_access_hint" {
+  description = "How to reach Grafana (kube-prometheus-stack). Login: admin / grafana_admin_password."
+  value = var.enable_kube_prometheus_stack ? join(" && ", [
+    "kubectl -n ${var.monitoring_namespace} port-forward svc/kube-prometheus-stack-grafana 3000:80",
+    "open http://localhost:3000",
+  ]) : null
+}
+
+output "prometheus_access_hint" {
+  description = "How to reach the Prometheus UI."
+  value       = var.enable_kube_prometheus_stack ? "kubectl -n ${var.monitoring_namespace} port-forward svc/kube-prometheus-stack-prometheus 9090:9090" : null
+}
+
+output "tempo_otlp_endpoint" {
+  description = "In-cluster OTLP endpoint for app traces (OTEL_EXPORTER_OTLP_ENDPOINT)."
+  value       = var.enable_tempo ? "http://tempo.${var.monitoring_namespace}.svc:4318" : null
+}
+
+output "langfuse_access_hint" {
+  description = "How to reach the Langfuse UI (service name may vary by chart version)."
+  value       = var.enable_langfuse ? "kubectl -n ${var.langfuse_namespace} port-forward svc/langfuse-web 3000:3000" : null
+}
+
+output "argocd_access_hint" {
+  description = "How to reach Argo CD and fetch the initial admin password."
+  value = var.enable_argocd ? join(" && ", [
+    "kubectl -n ${var.argocd_namespace} get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo",
+    "kubectl -n ${var.argocd_namespace} port-forward svc/argocd-server 8080:443",
+  ]) : null
+}
+
 # Copy these onto the pipeline's GitHub Actions Variables (see deploy/eks/SETUP.md).
 output "github_actions_config_hint" {
   description = "Map onto GitHub Actions Variables for .github/workflows/cd-eks.yml."

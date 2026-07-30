@@ -98,6 +98,30 @@ fails its health check.
 
 ---
 
+## Monitoring (optional overlay)
+
+A full observability stack — **Prometheus, Grafana, cAdvisor, Node Exporter,
+Loki, Tempo, Alertmanager, Promtail** — ships as a compose overlay in
+[monitoring/](./monitoring/). It layers onto the same compose project, so
+Prometheus scrapes app containers by service name with no extra wiring.
+
+```bash
+# opt in on the droplet by setting the CD env var (or run make mon-up locally):
+ENABLE_MONITORING=true ./deploy.sh
+```
+
+Every UI binds to `127.0.0.1` only — reach them over an SSH tunnel (or front
+Grafana with Caddy). Set `GRAFANA_ADMIN_PASSWORD` in `.env.production` before
+enabling the overlay. Full details, ports, dashboards, and app wiring:
+[monitoring/README.md](./monitoring/README.md).
+
+> **Langfuse** (LLM tracing) is **not** in this overlay — it's an app dependency,
+> so it runs in the base stack and is always on. That makes
+> `LANGFUSE_DB_PASSWORD`, `LANGFUSE_NEXTAUTH_SECRET`, and `LANGFUSE_SALT` required
+> for every deploy (set them in `.env.production`, overlay or not).
+
+---
+
 ## Integration contracts (what the app code must provide)
 
 The pipeline assumes the structure in [specs/001-contextengine-mvp/plan.md](../../specs/001-contextengine-mvp/plan.md):

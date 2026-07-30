@@ -262,3 +262,137 @@ variable "elasticache_engine_version" {
   type    = string
   default = "7.1"
 }
+
+# ---------------------------------------------------------------------------
+# Observability add-ons (Helm releases, installed after the cluster exists):
+#   kube-prometheus-stack (Prometheus/Alertmanager/Grafana/exporters), Loki, Tempo.
+#
+# NOTE: chart versions are pinned to sane defaults but MUST be verified against
+# the upstream chart index — `terraform validate` does NOT fetch charts, so a
+# stale pin only surfaces at apply. Dependabot maintains them once merged.
+# ---------------------------------------------------------------------------
+variable "monitoring_namespace" {
+  description = "Namespace for kube-prometheus-stack, Loki, and Tempo."
+  type        = string
+  default     = "monitoring"
+}
+
+variable "monitoring_storage_class" {
+  description = "StorageClass for monitoring/Langfuse PVCs (gp3 is created in storage.tf)."
+  type        = string
+  default     = "gp3"
+}
+
+variable "enable_kube_prometheus_stack" {
+  description = "Install kube-prometheus-stack (Prometheus, Alertmanager, Grafana, node-exporter, kube-state-metrics)."
+  type        = bool
+  default     = true
+}
+
+variable "kube_prometheus_stack_version" {
+  description = "kube-prometheus-stack chart version (verify against the prometheus-community index)."
+  type        = string
+  default     = "65.5.1"
+}
+
+variable "grafana_admin_password" {
+  description = "Grafana admin password (injected via set_sensitive). Override via TF_VAR_grafana_admin_password."
+  type        = string
+  default     = "change-me-strong"
+  sensitive   = true
+}
+
+variable "enable_loki" {
+  description = "Install Grafana Loki (SingleBinary, filesystem)."
+  type        = bool
+  default     = true
+}
+
+variable "loki_version" {
+  description = "grafana/loki chart version (verify against the grafana helm index)."
+  type        = string
+  default     = "6.18.0"
+}
+
+variable "enable_tempo" {
+  description = "Install Grafana Tempo (single binary, OTLP receivers)."
+  type        = bool
+  default     = true
+}
+
+variable "tempo_version" {
+  description = "grafana/tempo chart version (verify against the grafana helm index)."
+  type        = string
+  default     = "1.10.3"
+}
+
+# ---------------------------------------------------------------------------
+# Langfuse (v2) — LLM tracing/eval via the langfuse-k8s chart + bundled Postgres.
+# ---------------------------------------------------------------------------
+variable "enable_langfuse" {
+  description = "Install Langfuse (v2) with its bundled Postgres."
+  type        = bool
+  default     = true
+}
+
+variable "langfuse_version" {
+  description = "langfuse-k8s chart version (verify against the langfuse helm index)."
+  type        = string
+  default     = "0.14.0"
+}
+
+variable "langfuse_namespace" {
+  description = "Namespace for Langfuse."
+  type        = string
+  default     = "langfuse"
+}
+
+variable "langfuse_nextauth_secret" {
+  description = "Langfuse NEXTAUTH_SECRET (openssl rand -hex 32). Set via TF_VAR_langfuse_nextauth_secret."
+  type        = string
+  default     = "change-me-strong"
+  sensitive   = true
+}
+
+variable "langfuse_salt" {
+  description = "Langfuse SALT (openssl rand -hex 32). Set via TF_VAR_langfuse_salt."
+  type        = string
+  default     = "change-me-strong"
+  sensitive   = true
+}
+
+variable "langfuse_postgres_password" {
+  description = "Password for Langfuse's bundled Postgres. Set via TF_VAR_langfuse_postgres_password."
+  type        = string
+  default     = "change-me-strong"
+  sensitive   = true
+}
+
+# ---------------------------------------------------------------------------
+# Argo CD — GitOps controller (bootstrap install). Manage the stack from Git via
+# the app-of-apps in deploy/eks/argocd/ (then disable the TF-managed helm
+# releases above to avoid double-management).
+# ---------------------------------------------------------------------------
+variable "enable_argocd" {
+  description = "Install Argo CD (GitOps controller)."
+  type        = bool
+  default     = true
+}
+
+variable "argocd_version" {
+  description = "argo/argo-cd chart version (verify against the argo helm index)."
+  type        = string
+  default     = "7.7.5"
+}
+
+variable "argocd_namespace" {
+  description = "Namespace for Argo CD."
+  type        = string
+  default     = "argocd"
+}
+
+variable "argocd_domain" {
+  description = "Hostname Argo CD advertises (used by the UI/CLI). Front with an Ingress or port-forward."
+  type        = string
+  default     = "argocd.example.com"
+}

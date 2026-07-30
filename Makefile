@@ -77,6 +77,25 @@ prod-logs: ## Tail prod logs
 migrate: ## Run DB migrations against the prod stack
 	IMAGE_TAG=$(IMAGE_TAG) $(COMPOSE_PROD) --profile migrate run --rm migrate
 
+# ---------------------- monitoring overlay (DO droplet) --------------------
+# Prometheus · Grafana · cAdvisor · Node Exporter · Loki · Tempo · Alertmanager
+# · Promtail · Langfuse — layered on top of the prod compose project.
+COMPOSE_MON = docker compose \
+  -f deploy/do/docker-compose.prod.yml \
+  -f deploy/do/monitoring/docker-compose.monitoring.yml \
+  --env-file deploy/do/.env.production
+.PHONY: mon-up mon-down mon-logs mon-ps mon-config
+mon-up: ## Bring the full stack up WITH the monitoring overlay (needs .env.production)
+	IMAGE_TAG=$(IMAGE_TAG) $(COMPOSE_MON) up -d
+mon-down: ## Stop the stack + monitoring overlay
+	$(COMPOSE_MON) down
+mon-logs: ## Tail monitoring logs (Langfuse is in the base stack — use prod-logs)
+	$(COMPOSE_MON) logs -f --tail=100 prometheus grafana loki tempo alertmanager
+mon-ps: ## Status of the stack + monitoring overlay
+	$(COMPOSE_MON) ps
+mon-config: ## Validate the merged compose config (base + overlay)
+	$(COMPOSE_MON) config -q && echo "compose config OK"
+
 # ---------------------------- kubernetes / EKS -----------------------------
 HELM_CHART := deploy/eks/helm/aisat
 EKS_NAMESPACE ?= aisat
@@ -95,6 +114,16 @@ helm-lint: ## Lint + render the EKS Helm chart (both overlays)
 helm-template: ## Render the chart to stdout (set ECR_REGISTRY / IMAGE_TAG)
 	helm template aisat $(HELM_CHART) --namespace $(EKS_NAMESPACE) \
 	  --set image.registry=$(ECR_REGISTRY) --set image.tag=$(IMAGE_TAG)
+
+# --- infra + GitOps validation (offline; no cluster/cloud needed) ---
+.PHONY: tf-fmt argocd-lint
+tf-fmt: ## terraform fmt -check across both deploy paths
+	terraform -chdir=deploy/eks/terraform fmt -check -recursive
+	terraform -chdir=deploy/do/terraform fmt -check -recursive
+argocd-lint: ## YAML-parse the Argo CD app-of-apps manifests (uses Ruby's YAML)
+	@for f in $$(find deploy/eks/argocd -name '*.yaml'); do \
+	  ruby -ryaml -e 'YAML.load_stream(File.read(ARGV[0]))' "$$f" && echo "ok: $$f" || exit 1; \
+	done
 eks-deploy: ## helm upgrade --install to the current kube-context (needs ECR_REGISTRY, IMAGE_TAG, PRODUCTION_HOST, ACM_CERTIFICATE_ARN)
 	helm upgrade --install aisat $(HELM_CHART) \
 	  --namespace $(EKS_NAMESPACE) --create-namespace \

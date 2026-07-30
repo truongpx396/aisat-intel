@@ -172,6 +172,55 @@ services:
     depends_on:
       nats: { condition: service_healthy }
 
+  # ------------------------- LLM observability: Langfuse ----------------------
+  # LLM tracing/eval for the agent tiers — part of the app stack, NOT the
+  # optional monitoring overlay (the app tiers send traces here). Runs with its
+  # OWN Postgres (decoupled from the app DB). App wiring is via
+  # LANGFUSE_HOST/PUBLIC_KEY/SECRET_KEY. The UI binds to 127.0.0.1 only — reach it
+  # over an SSH tunnel, or front it with Caddy on a subdomain.
+  langfuse-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:?set in .env.production}
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U langfuse -d langfuse']
+      interval: 10s
+      timeout: 3s
+      retries: 20
+
+  langfuse:
+    image: langfuse/langfuse:2
+    restart: unless-stopped
+    depends_on:
+      langfuse-db: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD:?set in .env.production}@langfuse-db:5432/langfuse
+      NEXTAUTH_URL: ${LANGFUSE_NEXTAUTH_URL:-http://localhost:3001}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?set in .env.production}
+      SALT: ${LANGFUSE_SALT:?set in .env.production}
+      TELEMETRY_ENABLED: 'false'
+      LANGFUSE_DEFAULT_PROJECT_ROLE: VIEWER
+      # Optional headless bootstrap — uncomment to pre-seed an org/project and a
+      # key pair so the app's LANGFUSE_PUBLIC_KEY/SECRET_KEY work on first boot:
+      # LANGFUSE_INIT_ORG_ID: aisat
+      # LANGFUSE_INIT_PROJECT_ID: aisat
+      # LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      # LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      # LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL}
+      # LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD}
+    ports:
+      - '127.0.0.1:3001:3000'
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/api/public/health']
+      interval: 30s
+      timeout: 5s
+      retries: 10
+
   # ------------------------- edge: Caddy = TLS + proxy + SPA ------------------
   # Per plan.md, Caddy does static SPA serving AND reverse proxy AND automatic TLS.
   # The image built from frontend/ is Caddy with the built SPA baked in at /srv, so
@@ -215,5 +264,6 @@ volumes:
   natsdata:
   qdrantdata:
   miniodata:
+  langfuse_pgdata:
   caddy_data:
   caddy_config:

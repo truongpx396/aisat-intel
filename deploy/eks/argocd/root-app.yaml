@@ -1,0 +1,32 @@
+# App-of-apps root. Apply this ONCE (after the AppProject) and Argo CD syncs
+# every child Application under deploy/eks/argocd/apps/ from Git:
+#
+#   kubectl apply -f deploy/eks/argocd/projects/aisat.yaml
+#   kubectl apply -f deploy/eks/argocd/root-app.yaml
+#
+# Point spec.source.repoURL at your fork if you renamed the repo, and register
+# repo credentials in Argo CD first if it is private.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aisat-observability-root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: aisat
+  source:
+    repoURL: https://github.com/truongpx396/aisat-intel.git
+    targetRevision: main
+    path: deploy/eks/argocd/apps
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
