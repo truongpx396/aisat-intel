@@ -1,0 +1,62 @@
+# ---------------------------------------------------------------------------
+# LOCAL Kind overrides for the aisat chart. Pairs with deploy/eks/local/up.sh.
+#
+# This swaps every AWS-specific surface for a local equivalent so the *portable*
+# part of the chart (Deployments, StatefulSets, Services, ConfigMaps, the migrate
+# hook, probes) can be exercised on Kind. It does NOT reproduce ALB / IRSA /
+# Secrets Manager / EBS — those have no local analogue; test them on a real EKS
+# cluster. NOT for production (that's values-production.yaml).
+# ---------------------------------------------------------------------------
+
+# Images are built + `kind load`ed by build-load.sh under this registry/prefix and
+# never pulled (IfNotPresent + no such remote registry). The chart resolves each
+# app image to "{registry}/{prefix}-{component.repo}:{tag}".
+image:
+  registry: aisat.local
+  prefix: aisat
+  tag: dev
+  pullPolicy: IfNotPresent
+
+# No AWS EBS on Kind. "" = cluster default (Kind's local-path). up.sh also creates
+# a "gp3" StorageClass alias, so leaving this as gp3 would work too.
+storageClassName: ""
+
+# ingress-nginx instead of the AWS Load Balancer Controller; no ACM, no TLS.
+# *.localtest.me resolves to 127.0.0.1, so the app is reachable with no /etc/hosts
+# edit once host ports 80/443 are published (see kind-cluster.yaml).
+ingress:
+  enabled: true
+  className: nginx
+  host: aisat.localtest.me
+  certificateArn: ""            # blank => no ACM annotation is rendered
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    # NOTE: the chart's default alb.ingress.* annotations still merge in here and
+    # are simply ignored by ingress-nginx.
+
+# No IRSA locally — the app ServiceAccount gets no AWS role.
+serviceAccount:
+  create: true
+  annotations: {}
+
+# Use the chart-rendered inline Secret (dev creds from values.yaml). Do NOT layer
+# values-production.yaml on top locally: it flips on External Secrets / AWS Secrets
+# Manager, which don't exist on Kind.
+secrets:
+  create: true
+externalSecrets:
+  enabled: false
+
+# Shrink the footprint so the whole stack fits a laptop, and drop HPA (Kind ships
+# no metrics-server, so autoscaling can't compute utilisation anyway).
+componentDefaults:
+  replicaCount: 1
+components:
+  go-api:
+    replicaCount: 1
+    autoscaling:
+      enabled: false
+  go-relay:
+    replicaCount: 1
+  frontend:
+    replicaCount: 1

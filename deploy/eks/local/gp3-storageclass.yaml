@@ -1,0 +1,13 @@
+# Local-only: a StorageClass named "gp3" backed by Kind's built-in local-path
+# provisioner. On real EKS "gp3" is the EBS-CSI class (deploy/eks/terraform/storage.tf);
+# on Kind it doesn't exist, so manifests that hardcode `storageClassName: gp3`
+# (notably the Argo CD observability apps) would leave their PVCs Pending forever.
+# This alias makes them bind. local-path ignores the requested capacity, so the
+# large sizes those charts ask for (30Gi Prometheus, etc.) are just directories.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3
+provisioner: rancher.io/local-path
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Delete

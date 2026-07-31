@@ -1,0 +1,49 @@
+# LOCAL-ONLY Argo CD Application — deploys the aisat app on Kind the SAME way prod
+# does (migrate Sync hook at wave -1, sync-waves), but with the Kind overlay
+# (values-kind.yaml: local kind-loaded images, in-cluster Secret, nginx ingress,
+# local-path storage) so it needs no AWS. This is the local counterpart of the
+# AWS-wired deploy/eks/argocd/apps/aisat-app.yaml.
+#
+# Applied by `argocd-up.sh --with-app`; deliberately NOT under argocd/apps/, so the
+# production app-of-apps never picks it up.
+#
+# Prereqs:
+#   1. run up.sh first (cluster + ingress-nginx + built/loaded aisat.local images).
+#      Skip its Helm install with INSTALL_APP=none so Argo is the sole owner.
+#   2. push your branch — Argo CD reads the chart AND values-kind.yaml from Git, not
+#      your working tree. argocd-up.sh patches targetRevision to your current branch.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aisat-app-kind
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: aisat
+  source:
+    repoURL: https://github.com/truongpx396/aisat-intel.git
+    targetRevision: main   # argocd-up.sh overrides this with your pushed branch
+    path: deploy/eks/helm/aisat
+    helm:
+      # values-kind.yaml lives outside the chart dir but inside the repo, which
+      # Argo CD allows. It supplies the local registry/ingress/storage/secret.
+      valueFiles:
+        - ../../local/values-kind.yaml
+      # Override just the hook mode so migrations run as an Argo Sync hook — the
+      # one thing values-kind.yaml (built for plain `helm install`) leaves at helm.
+      values: |
+        migrate:
+          hookProvider: argocd
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: aisat
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 3
+      backoff: { duration: 20s, factor: 2, maxDuration: 5m }

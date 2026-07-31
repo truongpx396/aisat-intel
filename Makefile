@@ -132,6 +132,15 @@ eks-deploy: ## helm upgrade --install to the current kube-context (needs ECR_REG
 	  --set ingress.host=$(PRODUCTION_HOST) --set ingress.certificateArn=$(ACM_CERTIFICATE_ARN) \
 	  --atomic --timeout 15m
 
+# --- local Kind smoke-test of the EKS chart (no AWS; see deploy/eks/local) ---
+.PHONY: kind-up kind-down kind-argocd
+kind-up: ## Local Kind cluster + ingress-nginx + build/load images + helm install
+	deploy/eks/local/up.sh
+kind-down: ## Delete the local Kind cluster
+	deploy/eks/local/down.sh
+kind-argocd: ## Install Argo CD on the Kind cluster + apply the observability app-of-apps
+	deploy/eks/local/argocd-up.sh
+
 # ------------------------------- gate --------------------------------------
 .PHONY: ci
 ci: lint test build ## Full local gate — mirrors GitHub Actions CI
