@@ -65,6 +65,9 @@ jobs:
             terraform:
               - '**/*.tf'
               - '**/*.tftpl'
+              - '**/.tflint.hcl'
+              - '**/.trivyignore'
+              - '.github/workflows/ci.yml'
             helm:
               - 'deploy/eks/helm/**'
               - '.github/workflows/cd-eks.yml'
