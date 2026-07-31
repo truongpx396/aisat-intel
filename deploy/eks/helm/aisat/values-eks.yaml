@@ -1,0 +1,19 @@
+# ---------------------------------------------------------------------------
+# GitOps overlay — committed, environment-specific IDENTITY for the Argo CD
+# deploy of the app (deploy/eks/argocd/apps/aisat-app.yaml layers this on top of
+# values.yaml + values-production.yaml). These are NOT secrets; fill them once
+# from `terraform output`. The image TAG is intentionally NOT here — CI writes it
+# to values-image.yaml on every release (see .github/workflows/cd-eks.yml).
+# ---------------------------------------------------------------------------
+image:
+  registry: REPLACE_WITH_ECR_REGISTRY      # terraform output ecr_registry, e.g. 123456789012.dkr.ecr.ap-southeast-1.amazonaws.com
+  prefix: aisat
+
+ingress:
+  host: REPLACE_WITH_PRODUCTION_HOST        # e.g. app.example.com
+  certificateArn: REPLACE_WITH_ACM_CERT_ARN # ACM cert ARN for `host` (same region as the cluster)
+
+# Argo CD owns the app, so schedule migrations as an Argo Sync hook (wave -1)
+# rather than a Helm hook. Requires the sync-wave-annotated infra in the chart.
+migrate:
+  hookProvider: argocd

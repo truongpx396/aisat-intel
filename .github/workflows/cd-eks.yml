@@ -7,10 +7,16 @@
 # To make EKS deploy automatically on main too, add `push: { branches: [main] }`.
 #
 # Flow:  discover present images -> build+push to ECR (matrix) -> [approval gate]
-#        -> helm upgrade (migrate hook runs first) -> Telegram
+#        -> write image tag to values-image.yaml + git push -> Argo CD auto-syncs
 #
-# Auth is OIDC-only: the deploy role (Terraform output `github_deploy_role_arn`)
-# is assumed at run time — NO long-lived AWS keys are stored as GitHub secrets.
+# GitOps: Argo CD (deploy/eks/argocd/apps/aisat-app.yaml) owns the release. This
+# workflow no longer runs `helm upgrade`; it commits the new tag and Argo CD rolls
+# it out (migrations run as an Argo Sync hook). The production-eks approval gate
+# still applies — it now gates the tag-bump commit.
+#
+# Auth: build assumes the OIDC deploy role for ECR (Terraform output
+# `github_deploy_role_arn`) — NO long-lived AWS keys. The promote job needs no
+# AWS access, only permission to push the tag commit.
 #
 # See .github/workflows/ci.yml for the note on pinning actions to commit SHAs.
 name: CD (EKS)
@@ -175,95 +181,110 @@ jobs:
           if-no-files-found: ignore
 
   # ---------------------------------------------------------------------------
-  # Deploy to EKS via Helm. Protected `production-eks` environment => approval gate.
+  # Promote via GitOps: write the built image tag into values-image.yaml and push
+  # it. Argo CD (aisat-app Application) then auto-syncs the new version — no
+  # cluster/AWS access here. The protected `production-eks` environment still
+  # gates this step, so approval is required before the tag is committed.
+  #
+  # Pushing to the GitOps branch (default: main) needs a token that can bypass
+  # branch protection. GITHUB_TOKEN works if the branch is unprotected or allows
+  # the actions bot; otherwise set a GITOPS_TOKEN secret (PAT / GitHub App) and/or
+  # a GITOPS_BRANCH variable pointing at a dedicated deploy branch Argo tracks.
   # ---------------------------------------------------------------------------
-  deploy:
+  promote:
     needs: [discover, build]
     if: needs.discover.outputs.any == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     permissions:
-      contents: read
-      id-token: write
+      contents: write # push the tag-bump commit
     environment:
       name: production-eks
       url: https://${{ vars.PRODUCTION_HOST }}
     concurrency:
-      group: deploy-eks-production
+      group: promote-eks-production
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ vars.GITOPS_BRANCH || 'main' }} # the branch Argo CD tracks
+          fetch-depth: 0
+          token: ${{ secrets.GITOPS_TOKEN || github.token }}
 
       - name: Resolve image tag
         id: tag
         run: echo "value=${{ github.event.inputs.image_tag || github.sha }}" >> "$GITHUB_OUTPUT"
 
-      - name: Notify — deploy started
+      - name: Notify — promote started
         uses: ./.github/actions/telegram-notify
         with:
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
           message: |
-            🚀 EKS deploy STARTED — aisat-intel
-            env: production-eks
+            🚀 EKS promote STARTED — aisat-intel
+            env: production-eks (GitOps)
             ref: ${{ github.ref_name }}
             tag: ${{ steps.tag.outputs.value }}
             by:  ${{ github.actor }}
             run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-
-      - name: Install Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: v3.15.4
-
-      - name: Update kubeconfig
-        run: aws eks update-kubeconfig --name "${{ vars.EKS_CLUSTER_NAME }}" --region "${{ vars.AWS_REGION }}"
-
-      - name: Helm upgrade --install
+      - name: Write image tag into values-image.yaml
+        env:
+          TAG: ${{ steps.tag.outputs.value }}
         run: |
           set -euo pipefail
-          helm upgrade --install "${HELM_RELEASE}" deploy/eks/helm/aisat \
-            --namespace "${EKS_NAMESPACE}" --create-namespace \
-            -f deploy/eks/helm/aisat/values-production.yaml \
-            --set image.registry="${{ vars.ECR_REGISTRY }}" \
-            --set image.prefix="${IMAGE_PREFIX}" \
-            --set image.tag="${{ steps.tag.outputs.value }}" \
-            --set ingress.host="${{ vars.PRODUCTION_HOST }}" \
-            --set ingress.certificateArn="${{ vars.ACM_CERTIFICATE_ARN }}" \
-            --atomic --timeout 15m
-          # --atomic auto-rolls-back the release (and runs the migrate hook first),
-          # so a failed rollout leaves the previous good revision in place.
+          f=deploy/eks/helm/aisat/values-image.yaml
+          # Regenerate the whole file (it exists only to carry the tag) — portable,
+          # no dependence on sed dialect or the file's prior contents.
+          cat > "$f" <<YAML
+          # CI-MANAGED — do not edit by hand. Rewritten by .github/workflows/cd-eks.yml
+          # after build+push, behind the production-eks gate. The commit is what
+          # triggers Argo CD to sync the new version.
+          image:
+            tag: "${TAG}"
+          YAML
+          echo "values-image.yaml now:"; cat "$f"
 
-      - name: Rollout status
+      - name: Commit + push (triggers Argo CD sync)
+        id: commit
+        env:
+          TAG: ${{ steps.tag.outputs.value }}
+          BRANCH: ${{ vars.GITOPS_BRANCH || 'main' }}
         run: |
-          kubectl -n "${EKS_NAMESPACE}" rollout status deploy/go-api --timeout=180s
-          kubectl -n "${EKS_NAMESPACE}" get pods -o wide
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deploy/eks/helm/aisat/values-image.yaml
+          if git diff --cached --quiet; then
+            echo "Image tag already ${TAG}; nothing to commit."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git commit -m "deploy(eks): aisat image tag ${TAG} [skip ci]"
+          git push origin "HEAD:${BRANCH}"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Notify — deploy succeeded
+      - name: Notify — promote succeeded
         if: success()
         uses: ./.github/actions/telegram-notify
         with:
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
           message: |
-            ✅ EKS deploy SUCCEEDED — aisat-intel
+            ✅ EKS promote SUCCEEDED — aisat-intel
             env: production-eks  •  tag: ${{ steps.tag.outputs.value }}
-            url: https://${{ vars.PRODUCTION_HOST }}
+            ${{ steps.commit.outputs.changed == 'true' && 'Tag committed — Argo CD is syncing the release.' || 'No tag change — already at this version.' }}
+            Watch: Argo CD UI (aisat-app)  •  url: https://${{ vars.PRODUCTION_HOST }}
 
-      - name: Notify — deploy failed
+      - name: Notify — promote failed
         if: failure()
         uses: ./.github/actions/telegram-notify
         with:
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
           message: |
-            ❌ EKS deploy FAILED — aisat-intel
+            ❌ EKS promote FAILED — aisat-intel
             env: production-eks  •  tag: ${{ steps.tag.outputs.value }}
-            Helm --atomic rolled the release back to the previous revision.
+            The tag was NOT committed (push/permission error?). Argo CD still runs
+            the previous version. See deploy/eks/SETUP.md (GitOps token/branch).
             run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

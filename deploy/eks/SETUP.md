@@ -7,10 +7,15 @@ different target: a Helm release on an EKS cluster fronted by an ALB.
 ```
  push tag / dispatch ─► CD (EKS)  preflight ─► build+push images (ECR, SBOM+provenance)  [cd-eks.yml]
                                    └─► ⛔ approval gate (production-eks environment)
-                                        └─► helm upgrade ─► migrate hook ─► rollout
-                                             └─► --atomic rollback on failure ─► Telegram ✅/❌
+                                        └─► write image tag to values-image.yaml ─► git push ─► Telegram
+                                             └─► Argo CD sync ─► migrate Sync hook ─► rollout
  Terraform (deploy/eks/terraform) ─► VPC · EKS · node group · IRSA · ECR · ALB controller · OIDC role
 ```
+
+> **The app is deployed by Argo CD (GitOps), not `helm upgrade`.** CI builds images
+> and commits the new tag; Argo CD reconciles it. See
+> [argocd/README.md → Deploying the app](./argocd/README.md#deploying-the-app).
+> Argo CD must be running (`enable_argocd = true`) with the app-of-apps applied.
 
 Auth is **OIDC-only** — the workflow assumes a scoped AWS role at run time; there
 are **no long-lived AWS keys** in GitHub secrets.
@@ -111,20 +116,37 @@ YAML
 >   --from-env-file=deploy/do/.env.production
 > ```
 
-## 5. First deploy
+## 5. First deploy (GitOps)
 
-Trigger **Actions → CD (EKS) → Run workflow** (or push a `v*` tag). It builds +
-pushes images to ECR, then waits on the `production-eks` approval. Approve it → Helm
-installs the release; the migration hook runs first, then the app rolls out. You get
-a Telegram message on start, success, or failure.
-
-**Redeploy / rollback:** Actions → CD (EKS) → **Run workflow** and pass an earlier
-commit SHA as `image_tag`. Helm `--atomic` also auto-rolls-back to the previous
-revision if a deploy fails its health/rollout checks. Manual rollback:
+**One-time bootstrap:** install Argo CD (`enable_argocd = true`) and apply the
+app-of-apps, then fill the app's GitOps identity:
 
 ```bash
-helm -n aisat history aisat
-helm -n aisat rollback aisat <REVISION>
+# a) fill deploy/eks/helm/aisat/values-eks.yaml — image.registry / ingress.host /
+#    certificateArn (from `terraform output` + ACM). migrate.hookProvider is
+#    already set to argocd. Commit it.
+# b) apply the project + app-of-apps (also brings up the observability stack):
+kubectl apply -f deploy/eks/argocd/projects/aisat.yaml
+kubectl apply -f deploy/eks/argocd/root-app.yaml
+kubectl -n argocd get applications -w        # aisat-app should appear + sync
+```
+
+**Release:** trigger **Actions → CD (EKS) → Run workflow** (or push a `v*` tag). It
+builds + pushes images to ECR, waits on the `production-eks` approval, then commits
+the new tag to `values-image.yaml`. Argo CD detects the commit and syncs: the
+migrate Sync hook runs first, then the app rolls out. Telegram fires on start/
+success/failure of the **commit** (watch the rollout itself in the Argo CD UI).
+
+> CI must be able to push to the branch Argo CD tracks (default `main`). If that
+> branch is protected, set a `GITOPS_TOKEN` secret (PAT / GitHub App) and/or a
+> `GITOPS_BRANCH` variable — see the header of [cd-eks.yml](../../.github/workflows/cd-eks.yml).
+
+**Redeploy / rollback:** re-run the workflow with an earlier `image_tag`, or just
+**revert the `values-image.yaml` commit** — Argo CD syncs back. Or use Argo directly:
+
+```bash
+argocd app history aisat-app
+argocd app rollback aisat-app <ID>
 ```
 
 ---

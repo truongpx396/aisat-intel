@@ -17,6 +17,10 @@ metadata:
   labels:
     {{- include "aisat.labels" $root | nindent 4 }}
     app.kubernetes.io/component: {{ $name }}
+  annotations:
+    # Backing stores come up first under Argo CD (before migrate at -1, app at 0).
+    # Inert for plain Helm. See templates/migrate-job.yaml.
+    argocd.argoproj.io/sync-wave: "-2"
 spec:
   clusterIP: None
   selector:
@@ -40,6 +44,10 @@ metadata:
   labels:
     {{- include "aisat.labels" $root | nindent 4 }}
     app.kubernetes.io/component: {{ $name }}
+  annotations:
+    # Backing stores come up first under Argo CD (before migrate at -1, app at 0).
+    # Inert for plain Helm. See templates/migrate-job.yaml.
+    argocd.argoproj.io/sync-wave: "-2"
 spec:
   serviceName: {{ $name }}
   replicas: 1

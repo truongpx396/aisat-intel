@@ -5,6 +5,9 @@ metadata:
   name: {{ include "aisat.configName" . }}
   labels:
     {{- include "aisat.labels" . | nindent 4 }}
+  annotations:
+    # Available before the migrate hook (wave -1) reads it via envFrom (Argo CD).
+    argocd.argoproj.io/sync-wave: "-2"
 data:
   {{- range $k, $v := .Values.config }}
   {{ $k }}: {{ $v | quote }}

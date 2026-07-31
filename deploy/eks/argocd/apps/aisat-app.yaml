@@ -1,0 +1,44 @@
+# The aisat application itself, deployed by Argo CD (GitOps) instead of the CI
+# `helm upgrade`. Discovered by the app-of-apps (root-app.yaml) like the
+# observability apps. The image tag comes from values-image.yaml, which CD
+# rewrites + commits on each release; Argo CD then auto-syncs the new version.
+#
+# Migrations run as an Argo CD Sync hook (values-eks.yaml sets migrate.hookProvider
+# = argocd); sync-waves order it after the infra (config/secret/DB) and before the
+# app rollout, so the first sync doesn't deadlock.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aisat-app
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: aisat
+  source:
+    repoURL: https://github.com/truongpx396/aisat-intel.git
+    targetRevision: main
+    path: deploy/eks/helm/aisat
+    helm:
+      # Layered in order; later files win. values-image.yaml (the tag) is last so
+      # the CI-managed tag always takes effect.
+      valueFiles:
+        - values-production.yaml   # prod tuning (replicas, External Secrets)
+        - values-eks.yaml          # env identity (registry/host/cert) + argocd hook
+        - values-image.yaml        # CI-managed image tag
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: aisat
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 20s
+        factor: 2
+        maxDuration: 5m
