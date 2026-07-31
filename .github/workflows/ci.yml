@@ -267,7 +267,7 @@ jobs:
       # Blocks only on HIGH,CRITICAL; whitelist accepted checks in a per-root
       # .trivyignore (one check ID per line, e.g. AVD-AWS-0057).
       - name: Trivy config scan (HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: config
           scan-ref: ${{ matrix.dir }}
