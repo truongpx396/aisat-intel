@@ -264,8 +264,9 @@ jobs:
           tflint --format compact
 
       # Security/compliance scan of the HCL source (no plan / no creds needed).
-      # Blocks only on HIGH,CRITICAL; whitelist accepted checks in a per-root
-      # .trivyignore (one check ID per line, e.g. AVD-AWS-0057).
+      # skip-dirs drops .terraform/ so we scan our own code, not the vendored
+      # module source `terraform init` downloaded. Blocks only on HIGH,CRITICAL;
+      # whitelist accepted checks in a per-root .trivyignore (one ID per line).
       - name: Trivy config scan (HIGH/CRITICAL)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -273,6 +274,7 @@ jobs:
           scan-ref: ${{ matrix.dir }}
           severity: HIGH,CRITICAL
           exit-code: '1'
+          skip-dirs: '.terraform,**/.terraform'
           trivyignores: ${{ matrix.dir }}/.trivyignore
 
   # ---------------------------------------------------------------------------
