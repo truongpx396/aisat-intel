@@ -1,10 +1,15 @@
-# Argo CD — GitOps for the observability stack (optional)
+# Argo CD — GitOps for the app + observability stack
 
-This is the **GitOps alternative** to the Terraform-managed Helm releases in
-[../terraform/monitoring.tf](../terraform/monitoring.tf) and
-[../terraform/langfuse.tf](../terraform/langfuse.tf). Argo CD watches this repo
-and reconciles the stack from Git — the same charts, driven by Git instead of
-`terraform apply`.
+Argo CD watches this repo and reconciles from Git. It owns two things:
+
+1. **The aisat app** ([apps/aisat-app.yaml](./apps/aisat-app.yaml)) — the Helm chart
+   in [../helm/aisat](../helm/aisat). This **replaces** the CI `helm upgrade`:
+   [cd-eks.yml](../../../.github/workflows/cd-eks.yml) now builds+pushes images and
+   commits the new tag; Argo CD rolls it out. See **[Deploying the app](#deploying-the-app)**.
+2. **The observability stack** ([apps/](./apps)) — the **GitOps alternative** to the
+   Terraform-managed Helm releases in [../terraform/monitoring.tf](../terraform/monitoring.tf)
+   and [../terraform/langfuse.tf](../terraform/langfuse.tf): the same charts, driven
+   by Git instead of `terraform apply`.
 
 > **Pick one owner per component.** Don't have both Terraform *and* Argo CD manage
 > the same chart. If you use this GitOps path, set the Terraform stack toggles to
@@ -24,11 +29,50 @@ argocd/
   projects/aisat.yaml           # AppProject (scopes repos/namespaces/resources)
   root-app.yaml                 # app-of-apps — syncs everything under apps/
   apps/
+    aisat-app.yaml              # the aisat application (../helm/aisat chart)
     kube-prometheus-stack.yaml  # Prometheus + Alertmanager + Grafana + exporters
     loki.yaml                   # logs
     tempo.yaml                  # traces (OTLP)
     langfuse.yaml               # LLM tracing/eval + bundled Postgres
 ```
+
+## Deploying the app
+
+`aisat-app.yaml` renders [../helm/aisat](../helm/aisat) with three committed value
+files (later wins):
+
+| File | Owner | Holds |
+| --- | --- | --- |
+| [values-production.yaml](../helm/aisat/values-production.yaml) | you | prod tuning (replicas, External Secrets) |
+| [values-eks.yaml](../helm/aisat/values-eks.yaml) | you (fill once) | `image.registry`, `ingress.host`, `certificateArn`, `migrate.hookProvider: argocd` |
+| [values-image.yaml](../helm/aisat/values-image.yaml) | **CI** | just `image.tag` — rewritten by [cd-eks.yml](../../../.github/workflows/cd-eks.yml) each release |
+
+**Release flow (one owner — Argo CD, not `helm upgrade`):**
+
+```
+push tag / dispatch → build+push to ECR → [production-eks approval]
+   → CI writes image.tag to values-image.yaml + git push
+       → Argo CD detects the commit → sync
+           → migrate Sync hook (wave -1) → app rollout (wave 0)
+```
+
+**Migrations & ordering.** With `migrate.hookProvider: argocd`, the migrate Job is
+an Argo **Sync hook** (deleted+recreated each sync, so it re-runs every deploy).
+[sync-waves](../helm/aisat/templates) order the sync: infra (config/Secret/DB) at
+**-2**, migrate at **-1**, app at **0** — so the very first sync doesn't deadlock
+waiting on a DB that hasn't synced yet. The migrate initContainer still blocks on
+`migrate.waitFor.host`; for a managed DB point it at RDS (or set it to `""`).
+
+**Rollback** is a Git operation: revert the `values-image.yaml` commit (or set an
+earlier tag) and Argo CD syncs back. Or `argocd app rollback aisat-app <id>`.
+
+**Before the first sync:** fill `values-eks.yaml`, set up **External Secrets** +
+the `ClusterSecretStore` (production values expect ESO — see [../SETUP.md](../SETUP.md)),
+and ensure CI can push to the branch Argo tracks (see the token/branch note in
+[cd-eks.yml](../../../.github/workflows/cd-eks.yml)).
+
+> **Break-glass:** to deploy by hand while Argo owns the app, pause auto-sync first
+> (`argocd app set aisat-app --sync-policy none`) or self-heal will revert you.
 
 Each app under `apps/` is a Helm-chart `Application`; the app-of-apps
 (`root-app.yaml`) points Argo CD at the `apps/` directory so adding a file there

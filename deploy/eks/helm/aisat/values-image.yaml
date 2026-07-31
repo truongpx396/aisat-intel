@@ -1,0 +1,10 @@
+# ---------------------------------------------------------------------------
+# CI-MANAGED — do not edit by hand.
+#
+# This file holds the single image tag Argo CD deploys. The CD pipeline
+# (.github/workflows/cd-eks.yml) rewrites it with the immutable git SHA after it
+# builds + pushes the images to ECR, behind the production-eks approval gate.
+# Committing the change is what triggers Argo CD to sync the new version.
+# ---------------------------------------------------------------------------
+image:
+  tag: latest

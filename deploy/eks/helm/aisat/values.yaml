@@ -104,6 +104,12 @@ externalSecrets:
 # ---------------------------------------------------------------------------
 migrate:
   enabled: true
+  # How the migration Job is scheduled:
+  #   helm   — Helm post-install/pre-upgrade hook (CI `helm upgrade`, local Kind).
+  #   argocd — Argo CD Sync hook at sync-wave -1, so it runs after the infra
+  #            resources (wave -2) and before the app rolls (wave 0). Set this in
+  #            the GitOps overlay (values-eks.yaml) when Argo CD owns the app.
+  hookProvider: helm
   repo: backend-go
   command: ["/api"]
   args: ["migrate", "up"]

@@ -18,6 +18,8 @@ spec:
     - https://langfuse.github.io/langfuse-k8s
   destinations:
     - server: https://kubernetes.default.svc
+      namespace: aisat        # the application itself (aisat-app.yaml)
+    - server: https://kubernetes.default.svc
       namespace: monitoring
     - server: https://kubernetes.default.svc
       namespace: langfuse
