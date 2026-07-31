@@ -1,0 +1,3 @@
+# Trivy misconfiguration whitelist for the DigitalOcean Terraform root.
+# Add one check ID per line to accept a HIGH/CRITICAL finding (with a reason).
+# See the check ID in the Trivy CI output (the terraform job in ci.yml).

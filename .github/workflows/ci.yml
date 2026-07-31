@@ -219,8 +219,9 @@ jobs:
           exit-code: '0' # report-only for now; flip to '1' to block (see SETUP.md)
 
   # ---------------------------------------------------------------------------
-  # Terraform — format check (advisory) + validate (blocking) for each root
-  # (DigitalOcean: deploy/do/terraform; AWS EKS: deploy/eks/terraform).
+  # Terraform — per root (DigitalOcean: deploy/do/terraform; AWS EKS:
+  # deploy/eks/terraform). Advisory: fmt. Blocking: validate, TFLint (lint +
+  # provider rules), Trivy config scan (HIGH/CRITICAL misconfigurations).
   # ---------------------------------------------------------------------------
   terraform:
     needs: changes
@@ -245,6 +246,31 @@ jobs:
         run: terraform init -backend=false
       - name: Validate
         run: terraform validate -no-color
+
+      # Lint — provider-aware checks validate can't do (deprecated syntax,
+      # invalid instance types, unused declarations). Config: <dir>/.tflint.hcl.
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.55.1
+      - name: TFLint
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # avoids plugin-download rate limits
+        run: |
+          tflint --init
+          tflint --format compact
+
+      # Security/compliance scan of the HCL source (no plan / no creds needed).
+      # Blocks only on HIGH,CRITICAL; whitelist accepted checks in a per-root
+      # .trivyignore (one check ID per line, e.g. AVD-AWS-0057).
+      - name: Trivy config scan (HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: ${{ matrix.dir }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          trivyignores: ${{ matrix.dir }}/.trivyignore
 
   # ---------------------------------------------------------------------------
   # Helm chart (deploy/eks/helm) — lint, render both overlays, schema-validate.

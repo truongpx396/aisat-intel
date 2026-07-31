@@ -116,10 +116,13 @@ helm-template: ## Render the chart to stdout (set ECR_REGISTRY / IMAGE_TAG)
 	  --set image.registry=$(ECR_REGISTRY) --set image.tag=$(IMAGE_TAG)
 
 # --- infra + GitOps validation (offline; no cluster/cloud needed) ---
-.PHONY: tf-fmt argocd-lint
+.PHONY: tf-fmt tf-lint argocd-lint
 tf-fmt: ## terraform fmt -check across both deploy paths
 	terraform -chdir=deploy/eks/terraform fmt -check -recursive
 	terraform -chdir=deploy/do/terraform fmt -check -recursive
+tf-lint: ## TFLint both deploy paths (needs tflint; run `tflint --init` per dir once)
+	cd deploy/eks/terraform && tflint --init && tflint --format compact
+	cd deploy/do/terraform && tflint --init && tflint --format compact
 argocd-lint: ## YAML-parse the Argo CD app-of-apps manifests (uses Ruby's YAML)
 	@for f in $$(find deploy/eks/argocd -name '*.yaml'); do \
 	  ruby -ryaml -e 'YAML.load_stream(File.read(ARGV[0]))' "$$f" && echo "ok: $$f" || exit 1; \
