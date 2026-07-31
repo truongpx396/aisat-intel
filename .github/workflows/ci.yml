@@ -264,11 +264,15 @@ jobs:
           tflint --format compact
 
       # Security/compliance scan of the HCL source (no plan / no creds needed).
-      # skip-dirs drops .terraform/ so we scan our own code, not the vendored
-      # module source `terraform init` downloaded. Blocks only on HIGH,CRITICAL;
-      # whitelist accepted checks in a per-root .trivyignore (one ID per line).
+      # We scan our own code, not vendored upstream modules `terraform init`
+      # pulled into .terraform/: skip-dirs drops their standalone files (e.g.
+      # example k8s manifests) and TRIVY_TF_EXCLUDE_DOWNLOADED_MODULES drops
+      # findings the terraform scanner attributes to those modules' resources.
+      # Blocks only on HIGH,CRITICAL; accept checks in a per-root .trivyignore.
       - name: Trivy config scan (HIGH/CRITICAL)
         uses: aquasecurity/trivy-action@v0.36.0
+        env:
+          TRIVY_TF_EXCLUDE_DOWNLOADED_MODULES: 'true'
         with:
           scan-type: config
           scan-ref: ${{ matrix.dir }}
