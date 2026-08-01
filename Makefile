@@ -60,7 +60,7 @@ IMG = $(REGISTRY)/$(DOCKERHUB_USERNAME)/$(IMAGE_PREFIX)
 docker-build: ## Build all present images locally (tag = IMAGE_TAG)
 	@[ -f $(GO_DIR)/Dockerfile ]          && docker build -t $(IMG)-backend-go:$(IMAGE_TAG) $(GO_DIR)                         || echo "skip go image"
 	@[ -f $(PY_DIR)/Dockerfile ]          && docker build -t $(IMG)-backend-python:$(IMAGE_TAG) $(PY_DIR)                     || echo "skip py image"
-	@[ -f $(PY_DIR)/Dockerfile.crawl ]    && docker build -f $(PY_DIR)/Dockerfile.crawl -t $(IMG)-crawl:$(IMAGE_TAG) $(PY_DIR) || echo "skip crawl image"
+	@# crawl has no image — it runs from backend-python; the crawl4ai toolchain is an E2B microVM template (deploy/sandbox/templates/).
 	@[ -f $(WEB_DIR)/Dockerfile ]         && docker build -t $(IMG)-frontend:$(IMAGE_TAG) $(WEB_DIR)                          || echo "skip web image"
 
 # ---------------------------- local prod stack -----------------------------

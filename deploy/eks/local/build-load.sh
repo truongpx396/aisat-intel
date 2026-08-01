@@ -30,7 +30,10 @@ build() { # <repo-name> <context> [dockerfile]
 
 build backend-go     "$ROOT/backend-go"
 build backend-python "$ROOT/backend-python"
-build crawl          "$ROOT/backend-python" "$ROOT/backend-python/Dockerfile.crawl"
 build frontend       "$ROOT/frontend"
+# NOTE: the crawl role no longer has its own image — it is a thin orchestrator that
+# runs from the backend-python image and drives crawl4ai inside an E2B microVM
+# (deploy/sandbox/templates/tmpl-crawl.Dockerfile). Sandbox templates are built by
+# the sandbox build step, not loaded into Kind here.
 
-echo "==> loaded: $REG/$PREFIX-{backend-go,backend-python,crawl,frontend}:$TAG"
+echo "==> loaded: $REG/$PREFIX-{backend-go,backend-python,frontend}:$TAG"

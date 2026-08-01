@@ -1,0 +1,44 @@
+# Sandbox template manifest.
+#
+# Declares the microVM templates the self-hosted fleet boots from, their default
+# resource caps, and their warm-pool depth. `make sandbox-templates` (TODO) builds
+# each Dockerfile and publishes it to the self-hosted registry (or E2B Cloud when
+# SANDBOX_KIND=e2b_cloud). Resource/egress caps here are DEFAULTS — a caller's
+# SandboxSpec may lower them, never raise them past the fleet ceiling.
+#
+# Contract: ../../../specs/001-contextengine-mvp/contracts/sandbox-runtime.md
+
+[fleet]
+# Where the fleet control plane lives. Overridden per-env by SANDBOX_URL.
+egress_default = "deny"          # default-deny; a template opts into an allowlist
+kill_on_timeout = true           # a run past timeout_s is force-killed (timed_out=true)
+
+[[template]]
+name        = "tmpl-crawl"
+dockerfile  = "tmpl-crawl.Dockerfile"
+vcpu        = 1
+mem_mb      = 2048               # Chromium is memory-hungry
+timeout_s   = 45
+egress      = "ssrf_allowlist"   # https, public IPs, no redirects, bounded size/time
+warm_pool   = 2                  # hot path (note-enrichment fetch) — keep VMs pre-booted
+operation   = "sandbox.crawl"    # metering line item
+
+[[template]]
+name        = "tmpl-convert"
+dockerfile  = "tmpl-convert.Dockerfile"
+vcpu        = 1
+mem_mb      = 1024
+timeout_s   = 60
+egress      = "deny"             # offline conversion
+warm_pool   = 1
+operation   = "sandbox.convert"
+
+[[template]]
+name        = "tmpl-coderun"     # Phase 2
+dockerfile  = "tmpl-coderun.Dockerfile"
+vcpu        = 1
+mem_mb      = 1024
+timeout_s   = 30
+egress      = "deny"             # opt-in per-run allowlist, HITL-gated
+warm_pool   = 0                  # cold-start acceptable for a HITL-gated long-horizon action
+operation   = "sandbox.run_script"

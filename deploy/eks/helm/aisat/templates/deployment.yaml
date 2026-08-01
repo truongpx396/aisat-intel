@@ -42,6 +42,14 @@ spec:
       {{- end }}
       securityContext:
         {{- toYaml $podSec | nindent 8 }}
+      {{- with $c.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $c.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ $name }}
           image: {{ include "aisat.componentImage" (dict "root" $root "comp" $c) }}

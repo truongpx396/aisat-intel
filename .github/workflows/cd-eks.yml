@@ -93,9 +93,9 @@ jobs:
           if [ -f backend-python/Dockerfile ] && [ -f backend-python/pyproject.toml ]; then
             add '{"name":"backend-python","context":"backend-python","dockerfile":"backend-python/Dockerfile"}'
           fi
-          if [ -f backend-python/Dockerfile.crawl ] && [ -f backend-python/pyproject.toml ]; then
-            add '{"name":"crawl","context":"backend-python","dockerfile":"backend-python/Dockerfile.crawl"}'
-          fi
+          # No crawl image: the crawl role runs from the backend-python image as a thin
+          # orchestrator; its crawl4ai toolchain ships as an E2B microVM template
+          # (deploy/sandbox/templates/tmpl-crawl.Dockerfile), built by the sandbox step.
           if [ -f frontend/Dockerfile ] && [ -f frontend/package.json ]; then
             add '{"name":"frontend","context":"frontend","dockerfile":"frontend/Dockerfile"}'
           fi

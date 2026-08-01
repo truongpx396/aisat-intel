@@ -44,21 +44,50 @@ module "eks" {
     }
   }
 
-  eks_managed_node_groups = {
-    default = {
-      instance_types = var.node_instance_types
-      capacity_type  = var.node_capacity_type
+  eks_managed_node_groups = merge(
+    {
+      default = {
+        instance_types = var.node_instance_types
+        capacity_type  = var.node_capacity_type
 
-      min_size     = var.node_min_size
-      max_size     = var.node_max_size
-      desired_size = var.node_desired_size
-      disk_size    = var.node_disk_size
+        min_size     = var.node_min_size
+        max_size     = var.node_max_size
+        desired_size = var.node_desired_size
+        disk_size    = var.node_disk_size
 
-      labels = {
-        role = "app"
+        labels = {
+          role = "app"
+        }
       }
-    }
-  }
+    },
+    # Dedicated KVM / bare-metal pool for the microVM sandbox fleet (crawl4ai,
+    # MarkItDown convert, code-gen). Firecracker needs /dev/kvm, which the default
+    # nitro instances (t3.large) do NOT expose — hence a *.metal instance type.
+    # Tainted so ONLY sandbox VMs land here (blast-radius + resource isolation).
+    # See sandbox.tf for the full rationale and the self-host control-plane seam.
+    var.sandbox_enabled ? {
+      sandbox = {
+        instance_types = var.sandbox_instance_types
+        capacity_type  = var.sandbox_capacity_type
+
+        min_size     = var.sandbox_min_size
+        max_size     = var.sandbox_max_size
+        desired_size = var.sandbox_desired_size
+        disk_size    = var.sandbox_disk_size
+
+        labels = {
+          role = "sandbox"
+        }
+        taints = {
+          sandbox = {
+            key    = "sandbox"
+            value  = "true"
+            effect = "NO_SCHEDULE"
+          }
+        }
+      }
+    } : {},
+  )
 
   # Access entries. enable_cluster_creator_admin_permissions grants whoever runs
   # `terraform apply`; the map adds break-glass admins + the CI deploy role.
