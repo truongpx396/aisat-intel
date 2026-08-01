@@ -436,5 +436,5 @@ Return strengths + issues by severity + approve/needs-changes.
   [merge queue](#parallel-pr--conflict-resolution-3-concurrent-tracks) integrates them one at a time
   (rebase → regenerate lockfiles → full suite → merge) before starting the next wave. A stale PR is
   bounced to its owning agent, never hand-fixed.
-- After all targeted stories: dispatch the Stage 11 adversarial hardening (T140–T144) + final
+- After all targeted stories: dispatch the Stage 11 adversarial hardening (T144–T149) + final
   whole-implementation review, then `superpowers:finishing-a-development-branch`.

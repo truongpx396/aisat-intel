@@ -33,11 +33,11 @@ Technical approach: a three-runtime system — a Go BFF/gateway (kernel + agent 
 
 **Project Type**: Web application — multi-runtime (Go backend + Python ML tier + React frontend)
 
-**Performance Goals**: API p95 < 200ms (non-LLM paths, per constitution); first upload → cited answer < 5 min (SC-004); retrieval `recall@10` ≥ 0.85 pre-rerank, `recall@5` ≥ 0.80 post-rerank, `MRR@10` ≥ 0.70 (SC-002/SC-003); initial web interactive < 2.5s
+**Performance Goals**: API p95 < 200ms (non-LLM paths, per constitution); first upload → cited answer < 5 min (SC-004); retrieval `recall@10` ≥ 0.85 pre-rerank, `recall@5` ≥ 0.80 post-rerank, `MRR@10` ≥ 0.70 (SC-002/SC-003); **notification publish → in-app inbox delivery p95 < 5s (SC-011)**, exported as the `notify.delivery.latency_ms` histogram; initial web interactive < 2.5s
 
 **Constraints**: 100% access-control correctness (SC-001, release blocker); injection/disallowed inputs refused before retrieval/spend (SC-007); exact credit accounting, no double-charge (SC-006); per-file upload size limit admin-configurable per workspace, default 50 MB; raw prompt/response retention 30 days; near-limit warning at admin-configurable threshold (default 80%); one-hop provider fallback only
 
-**Scale/Scope**: Phase 1 capacity — Go BFF 2 replicas, 3 Python worker pods per NATS subject (plus the standalone LLM gateway (LiteLLM) and the standalone self-hosted **sandbox tier** (E2B/Firecracker microVMs) as their **own deployments** — the `crawl` role is now a thin orchestrator that runs crawl4ai inside a sandbox microVM), single Qdrant/NATS cluster, Postgres primary + 1 read replica; 8 user stories, ~39 functional requirements, 13+ key entities, 10 MCP tools. **Scale-forward seams locked in Phase 1 (rework-risk, research §14–§15):** NATS runs in **JetStream** mode (durable pull consumers + per-subject queue groups); the SSE relay is a logically separable tier from the request-handling BFF; the Redis credit outbox is workspace-partitionable; Qdrant stays payload-isolated with a documented re-shard/replication trigger; scheduled/background work runs single-owner in a dedicated `cmd/worker` role (external CronJob → NATS tick → queue group, idempotent atomic claims — no in-process timers). Horizontal-scale *provisioning* (KEDA autoscaling, PgBouncer, Redis/Qdrant HA, SSE connection ceilings, load testing) is deferred to **Phase 4** ([draft-plan.md — Phase 4](../draft-plan.md#phase-4-scalability-and-resilience-hardening)).
+**Scale/Scope**: Phase 1 capacity — Go BFF 2 replicas, 3 Python worker pods per NATS subject (plus the standalone LLM gateway (LiteLLM) and the standalone self-hosted **sandbox tier** (E2B/Firecracker microVMs) as their **own deployments** — the `crawl` role is now a thin orchestrator that runs crawl4ai inside a sandbox microVM), single Qdrant/NATS cluster, Postgres primary + 1 read replica; 8 user stories, 41 functional requirements (FR-001…FR-041), 15 success criteria (SC-001…SC-015), 18 key entities, 10 MCP tools (8 read-only across Categories A–C + 2 HITL-gated Category-D actions). **Scale-forward seams locked in Phase 1 (rework-risk, research §14–§15):** NATS runs in **JetStream** mode (durable pull consumers + per-subject queue groups); the SSE relay is a logically separable tier from the request-handling BFF; the Redis credit outbox is workspace-partitionable; Qdrant stays payload-isolated with a documented re-shard/replication trigger; scheduled/background work runs single-owner in a dedicated `cmd/worker` role (external CronJob → NATS tick → queue group, idempotent atomic claims — no in-process timers). Horizontal-scale *provisioning* (KEDA autoscaling, PgBouncer, Redis/Qdrant HA, SSE connection ceilings, load testing) is deferred to **Phase 4** ([draft-plan.md — Phase 4](../draft-plan.md#phase-4-scalability-and-resilience-hardening)).
 
 ## Constitution Check
 
@@ -144,7 +144,9 @@ frontend/                        # React 19 + Vite SPA
 deploy/
 ├── docker-compose.yml           # local dev: postgres, redis, qdrant, nats, casdoor, llm-gateway (LiteLLM :4000), services
 ├── llm-gateway/                 # standalone LLM gateway config (LiteLLM config.yaml; Bifrost-swappable) — aliases, provider keys, LB routing (research §21)
-├── sandbox/                     # standalone sandbox tier: microVM templates (tmpl-crawl/convert/coderun) + self-host/egress config (research §24)
+├── sandbox/                     # standalone sandbox tier: microVM templates/ (tmpl-crawl/convert/coderun) + self-host/egress config (research §24)
+├── eks/                         # AWS target: terraform/ (incl. sandbox.tf tainted KVM/*.metal node group, T024c), helm/, argocd/, local/
+├── do/                          # DigitalOcean target: terraform/, llm-gateway/, monitoring/
 └── Caddyfile                    # reverse proxy, automatic TLS, static SPA serving
 
 Makefile                         # canonical task runner: up/down, build, test, lint, migrate, eval, dev

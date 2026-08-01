@@ -175,20 +175,20 @@ The system builds into **three images**, each deployed as one or more independen
 The `ingest` / `query` / `enrich` / `janitor` / `crawl` roles are **not** separate repositories — they are logical roles inside the single `backend-python/` codebase (one image, one `pyproject.toml`). **The split happens at the deployment layer, not the code layer:** the same image is deployed as multiple pods, each with an entrypoint that subscribes to a different **NATS subject**. (Billing and the notification/email workers are **Go** [`cmd/worker`](#one-go-image-three-deployable-roles-api--sse-relay--worker) roles, not Python.) The heavy, security-sensitive workloads — the crawl fetch and document convert — are **not** run on these pods; they are offloaded into the **Sandbox Runtime** (self-hosted E2B microVMs), which the crawl/ingest roles drive over a thin `Sandbox` port:
 
 ```text
-              ┌──────────────────────────────┐                       ┌──────────────────────────────────┐
-              │   backend-python/ (1 image)  │   Sandbox port        │   🧰 Sandbox Runtime (E2B)        │
-              │   shared code · schemas ·    │  (stage files · run · │   self-hosted · Firecracker µVMs  │
-              │   LLM gateway · MCP · Sandbox │   metered · audited)  │   egress default-deny · torn down │
-              └───────────────┬──────────────┘ ────────────────────▶ │   tmpl-crawl · tmpl-convert ·     │
-        same image, one entrypoint per NATS subject                  │   tmpl-coderun (Phase 2)          │
-   ┌───────────────┬──────────┼──────────┬──────────────┐            └──────────────────────────────────┘
+              ┌──────────────────────────────┐                       ┌────────────────────────────────────┐
+              │   backend-python/ (1 image)  │   Sandbox port        │   🧰 Sandbox Runtime (E2B)          │
+              │   shared code · schemas ·    │  (stage files · run · │   self-hosted · Firecracker µVMs   │
+              │   LLM gateway · MCP · Sandbox│   metered · audited)  │   egress default-deny · torn down  │
+              └───────────────┬──────────────┘ ────────────────────▶ │   tmpl-crawl · tmpl-convert ·      │
+        same image, one entrypoint per NATS subject                  │   tmpl-coderun (Phase 2)           │
+   ┌───────────────┬──────────┼──────────┬──────────────┐            └────────────────────────────────────┘
  ingestion.*    query.agent.* │  enrich.note.*   agent.janitor.tick    ▲                    ▲
  ┌─────────┐    ┌─────────┐   │  ┌─────────┐     ┌──────────────┐      │ tmpl-convert       │ tmpl-crawl
  │ ×3 pod  │    │ ×3 pod  │   │  │ ×N pod  │     │ single-owner │      │ (markitdown)       │ (crawl4ai)
  │ ingest  │────┘ query   │   │  │ enrich  │     │ janitor      │      │                    │
  └────┬────┘    └─────────┘   │  └─────────┘     └──────────────┘   ingestion.crawl.*  ┌────┴────┐
-      └─────────────────────────────────────────────────────────────────────────────▶ │  crawl  │ (thin orchestrator)
-                                                                                        └─────────┘
+      └─────────────────────────────────────────────────────────────────────────────▶  │  crawl  │ (thin orchestrator)
+                                                                                       └─────────┘
 ```
 
 **Why the browser + parsers run in a sandbox microVM.** Crawl4AI drives a full **headless browser** (Chromium) and MarkItDown parses **untrusted user files** — heavy, security-sensitive, resource-divergent workloads unlike the stateless Python pods, and both execute *attacker-influenceable* input (a pasted link, a crafted PDF). Running them inside an **ephemeral, network-isolated microVM** (hardware virtualization) keeps that footprint off the ingest/query/agent pods, lets the sandbox fleet scale independently, and gives a **strictly stronger blast-radius boundary** than the old separate-pod split — a compromised browser or parser can't touch the cluster. The `crawl` role is now just a **thin orchestrator**: it consumes `ingestion.crawl.*` — the **internal fetch step of member-initiated note enrichment** (FR-001), never an autonomous agent action — runs the fetch in a `tmpl-crawl` sandbox, and its distilled output enters the index only after the member accepts the draft. Full design: [sandbox-runtime.md](specs/001-contextengine-mvp/contracts/sandbox-runtime.md).

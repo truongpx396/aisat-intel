@@ -354,6 +354,8 @@ expensive class of error — they hide regressions, erode trust, and push failur
 downstream. Requiring evidence makes "done" mean the same thing for every
 contributor, human or agent.
 
+## Technology & Quality Constraints
+
 - **Languages & stacks**: Go (latest stable minor, currently 1.23+) and Python
   (3.12+) for backend; React (TypeScript) for frontend. New components MUST
   justify any deviation from these stacks.

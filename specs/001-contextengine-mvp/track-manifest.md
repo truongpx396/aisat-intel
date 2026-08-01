@@ -61,16 +61,18 @@ tracks:
   - id: us1                       # Ingest knowledge (P1 MVP)
     branch: track/us1
     worktree: ../aisat-us1
-    tasks: [T035, T036, T037, T038, T039, T040, T041, T042, T043, T044, T045, T046,
-            T047, T048, T049, T050, T051, T051a, T052, T053, T054, T054a, T055, T056]
+    tasks: [T035, T036, T037, T037a, T038, T039, T040, T041, T042, T043, T044, T045,
+            T046, T047, T048, T049, T050, T051, T051a, T051b, T051c, T052, T053,
+            T053a, T054, T054a, T055, T056]
     owns_migrations: ["0010"]
     depends_on: []
 
   - id: us2                       # Cited, access-scoped answers (P1 MVP)
     branch: track/us2
     worktree: ../aisat-us2
-    tasks: [T057, T058, T059, T060, T060a, T061, T061a, T062, T063, T064, T065, T066,
-            T067, T068, T069, T070, T071, T072, T073, T074, T075, T076, T077, T077a, T077b]
+    tasks: [T057, T058, T059, T060, T060a, T060b, T061, T061a, T062, T063, T064, T065,
+            T066, T067, T068, T069, T070, T071, T072, T072a, T073, T074, T075, T076,
+            T077, T077a, T077b]
     owns_migrations: ["0011"]
     depends_on: []               # consumes US1 chunks at runtime, but independently testable via seeded fixtures
 ```
