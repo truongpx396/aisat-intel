@@ -54,6 +54,13 @@ config:
   LLM_GATEWAY_URL: http://llm-gateway:4000
   LLM_GATEWAY_KIND: litellm
 
+  # Sandbox tier — the single chokepoint for isolated code/tool execution (crawl4ai,
+  # MarkItDown convert, code-gen). Self-hosted is primary; SANDBOX_KIND selects the
+  # backend behind the Sandbox port: e2b_selfhost | e2b_cloud | daytona | local_docker.
+  # See specs/001-contextengine-mvp/contracts/sandbox-runtime.md and deploy/sandbox/.
+  SANDBOX_URL: http://sandbox-orchestrator:49983
+  SANDBOX_KIND: e2b_selfhost
+
   CASDOOR_ENDPOINT: http://casdoor:8000
   CASDOOR_ORG: aisat
   CASDOOR_APP: aisat
@@ -257,10 +264,17 @@ components:
     replicaCount: 1
     command: ["python", "-m", "src.mcp_server.server"]
 
+  # The crawl role is now a THIN ORCHESTRATOR: it consumes ingestion.crawl.<ws> and
+  # drives crawl4ai inside an E2B microVM (tmpl-crawl) over the Sandbox port — the
+  # headless browser lives in the fleet, not this pod. So it runs from the
+  # backend-python image (no bespoke -crawl image) and stays light on normal nodes.
+  # The microVM fleet itself is the tainted KVM/*.metal pool (deploy/eks/terraform/
+  # sandbox.tf), provisioned + GitOps-managed separately, not by this chart.
   crawl:
     enabled: true
-    repo: crawl
+    repo: backend-python
     replicaCount: 1
+    command: ["python", "-m", "src.services.ingestion.crawl_orchestrator"]
 
   # ---- Edge: Caddy serving the SPA + reverse proxy (TLS handled by the ALB) ----
   frontend:

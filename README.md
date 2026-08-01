@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🤖 AISAT-INTEL — ContextEngine
+# 🤖 AISAT-INTEL — 🏢 Enterprise Second Brain
 
 ### An AI-Powered Shared Second Brain for Work Teams
 
@@ -77,7 +77,7 @@ Governed by a formal, versioned **[Project Constitution v2.1.0](.specify/memory/
 
 ## 🏗️ System Architecture
 
-A **three-runtime system** coordinated over NATS, with a single LLM chokepoint and data-layer access control.
+A **three-runtime system** coordinated over NATS, with two standalone chokepoints — a single **LLM chokepoint** (all model calls) and a single **sandbox-execution chokepoint** (all untrusted / generated code) — and data-layer access control.
 
 ```mermaid
 flowchart TB
@@ -101,12 +101,16 @@ flowchart TB
         MCP["MCP Tool Server — 10 tools / 4 categories"]
     end
 
-    subgraph CRAWL["🕷️ Crawl4AI — separate single deployment"]
-        Crawl["crawl worker<br/>headless browser · SSRF-guarded fetch"]
+    subgraph CRAWL["🕷️ Crawl orchestrator — thin role"]
+        Crawl["consumes ingestion.crawl<br/>drives crawl4ai inside a sandbox microVM"]
     end
 
     subgraph GATEWAY["🔌 LLM Gateway — standalone service (LiteLLM · Bifrost-swappable)"]
         Gateway["aliases · multi-key LB · one-hop fallback<br/>only holder of provider keys"]
+    end
+
+    subgraph SANDBOX["🧰 Sandbox Runtime — self-hosted E2B (Firecracker microVMs · Daytona-swappable)"]
+        Sbx["tmpl-crawl · tmpl-convert · tmpl-coderun<br/>ephemeral microVM · egress default-deny · metered<br/>the only chokepoint for untrusted / generated code"]
     end
 
     subgraph DATA["🗄️ Backing Stores"]
@@ -126,9 +130,12 @@ flowchart TB
     Policy -. NATS async .-> Agent
     Agent --> Gateway
     Agent --> MCP
+    Agent -.->|"code-gen (Phase 2)"| Sbx
     Ingest --> Gateway
+    Ingest -->|"convert · markitdown"| Sbx
     Ingest -.->|"NATS ingestion.crawl"| Crawl
     Crawl -.->|"distilled draft"| Ingest
+    Crawl -->|"Sandbox port · tmpl-crawl"| Sbx
     Crawl --> Gateway
     Kernel --> PG & Redis & S3
     Agent --> Qdrant & Redis
@@ -142,6 +149,7 @@ flowchart TB
 - **Redis** is the low-latency control plane: credit fast-path, idempotency guards, rate limits / quotas, security throttling, LangGraph checkpoints, semantic answer-cache, and the outbox queue (see [Redis — the Production Hot Path](#-redis--the-production-hot-path)).
 - **The LLM Gateway** is a **standalone OpenAI-wire service** (LiteLLM, Bifrost-swappable) — the *only* place model IDs + provider keys live; both runtimes call it by alias through a thin client. Its own budget + cache are **off**: credit metering stays single-writer in Go, and the clearance-scoped answer-cache stays in the app (SC-006 / SC-001).
 - **The MCP server** is the *only* tool surface — every dispatch is allowlist-checked.
+- **The Sandbox Runtime** is the *only* place untrusted or model-**generated** code runs — a **standalone, self-hosted E2B tier** (Firecracker microVMs; Daytona/gVisor-swappable) that is the sole holder of the sandbox fleet + template registry + egress policy, exactly as the LLM Gateway is the sole holder of provider keys. crawl4ai fetch, MarkItDown convert, and the Phase-2 code-gen tools all run as ephemeral, egress-locked microVMs behind a thin `Sandbox` port — never on a worker pod, never with ambient credentials. See [sandbox-runtime.md](specs/001-contextengine-mvp/contracts/sandbox-runtime.md).
 
 #### Deployable runtimes at a glance
 
@@ -156,38 +164,41 @@ The system builds into **three images**, each deployed as one or more independen
 | | **`query`** | `query.agent.*` subject | LangGraph RAG agent (stream partials → Redis) | consumer lag (×3) |
 | | **`enrich`** | `enrich.note.*` subject | note-enrichment orchestration (distill → draft) | consumer lag |
 | | **`janitor`** | `agent.janitor.tick` | single-owner stale-`agent_run` re-queue | single-owner |
-| **`crawl` / Crawl4AI** (**separate image**) | **`crawl`** | `ingestion.crawl.*` subject | headless-browser (Chromium) fetch, SSRF-guarded | its own deployment |
+| **`crawl` orchestrator** (runs from `backend-python`) | **`crawl`** | `ingestion.crawl.*` subject | thin orchestrator — drives crawl4ai **inside a `tmpl-crawl` sandbox microVM** (headless Chromium off the shared pods) | consumer lag |
 | **`llm-gateway`** (LiteLLM · Bifrost-swappable) | **standalone service** | `:4000` (OpenAI-wire) | aliases · multi-key LB · one-hop fallback · sole holder of provider keys | in-flight requests |
+| **`sandbox` / E2B self-host** (Firecracker · Daytona/gVisor-swappable) | **standalone tier** | fleet control plane + template registry + egress proxy | ephemeral microVMs: `tmpl-crawl` (crawl4ai) · `tmpl-convert` (markitdown) · `tmpl-coderun` (code-gen) — egress default-deny · metered per sandbox-second · sole holder of the fleet | sandbox demand (dedicated KVM / `*.metal` pool) |
 
-> **Note the two things people usually get wrong here:** the **email/notification** worker and the **billing** worker are **Go** (`cmd/worker`) roles — not Python — because they carry no ML; and the **crawl** worker is peeled out into its **own separate deployment** rather than living on the shared Python pods (see below). The two subsections that follow expand the Go and Python splits.
+> **Note the two things people usually get wrong here:** the **email/notification** worker and the **billing** worker are **Go** (`cmd/worker`) roles — not Python — because they carry no ML; and the **crawl** role no longer ships as a bespoke Chromium image — it is a **thin orchestrator** (in the `backend-python` image) that offloads the headless browser into a **sandbox microVM** (see below). The two subsections that follow expand the Go and Python splits.
 
 #### One Python codebase, many worker roles
 
-The `ingest` / `query` / `enrich` / `janitor` roles are **not** separate repositories — they are logical roles inside the single `backend-python/` codebase (one image, one `pyproject.toml`). **The split happens at the deployment layer, not the code layer:** the same image is deployed as multiple pods, each with an entrypoint that subscribes to a different **NATS subject**. (Billing and the notification/email workers are **Go** [`cmd/worker`](#one-go-image-three-deployable-roles-api--sse-relay--worker) roles, not Python.) The one role that is **not** in this image is **crawl** — it ships as its own separate deployment:
+The `ingest` / `query` / `enrich` / `janitor` / `crawl` roles are **not** separate repositories — they are logical roles inside the single `backend-python/` codebase (one image, one `pyproject.toml`). **The split happens at the deployment layer, not the code layer:** the same image is deployed as multiple pods, each with an entrypoint that subscribes to a different **NATS subject**. (Billing and the notification/email workers are **Go** [`cmd/worker`](#one-go-image-three-deployable-roles-api--sse-relay--worker) roles, not Python.) The heavy, security-sensitive workloads — the crawl fetch and document convert — are **not** run on these pods; they are offloaded into the **Sandbox Runtime** (self-hosted E2B microVMs), which the crawl/ingest roles drive over a thin `Sandbox` port:
 
 ```text
-              ┌──────────────────────────────┐   ingestion.crawl.*   ┌──────────────────────────────┐
-              │   backend-python/ (1 image)  │  (member-initiated    │   crawl · Crawl4AI           │
-              │   shared code · schemas ·    │   note enrichment)    │   SEPARATE image — its own   │
-              │   LLM gateway · MCP server   │ ─────────────────────▶│   single deployment          │
-              └───────────────┬──────────────┘                       │   headless browser · SSRF    │
-        same image, one entrypoint per NATS subject                  └──────────────────────────────┘
-   ┌───────────────┬──────────┴──────────┬──────────────────┐
- ingestion.*    query.agent.*       enrich.note.*     agent.janitor.tick
- ┌─────────┐    ┌─────────┐         ┌─────────┐        ┌──────────────┐
- │ ×3 pod  │    │ ×3 pod  │         │ ×N pod  │        │ single-owner │
- │ ingest  │    │ query   │         │ enrich  │        │ janitor      │
- └─────────┘    └─────────┘         └─────────┘        └──────────────┘
+              ┌──────────────────────────────┐                       ┌──────────────────────────────────┐
+              │   backend-python/ (1 image)  │   Sandbox port        │   🧰 Sandbox Runtime (E2B)        │
+              │   shared code · schemas ·    │  (stage files · run · │   self-hosted · Firecracker µVMs  │
+              │   LLM gateway · MCP · Sandbox │   metered · audited)  │   egress default-deny · torn down │
+              └───────────────┬──────────────┘ ────────────────────▶ │   tmpl-crawl · tmpl-convert ·     │
+        same image, one entrypoint per NATS subject                  │   tmpl-coderun (Phase 2)          │
+   ┌───────────────┬──────────┼──────────┬──────────────┐            └──────────────────────────────────┘
+ ingestion.*    query.agent.* │  enrich.note.*   agent.janitor.tick    ▲                    ▲
+ ┌─────────┐    ┌─────────┐   │  ┌─────────┐     ┌──────────────┐      │ tmpl-convert       │ tmpl-crawl
+ │ ×3 pod  │    │ ×3 pod  │   │  │ ×N pod  │     │ single-owner │      │ (markitdown)       │ (crawl4ai)
+ │ ingest  │────┘ query   │   │  │ enrich  │     │ janitor      │      │                    │
+ └────┬────┘    └─────────┘   │  └─────────┘     └──────────────┘   ingestion.crawl.*  ┌────┴────┐
+      └─────────────────────────────────────────────────────────────────────────────▶ │  crawl  │ (thin orchestrator)
+                                                                                        └─────────┘
 ```
 
-**Why `crawl` is its own single deployment.** The crawl worker runs **Crawl4AI**, which drives a full **headless browser** (Chromium) — a heavy, security-sensitive, resource-divergent workload unlike the other stateless Python pods. Peeling it into its **own deployment** keeps that browser footprint (memory, cold-start, sandboxing) off the ingest/query/agent pods, lets it scale or stay pinned independently, and isolates its blast radius. It only ever consumes `ingestion.crawl.*` — the **internal fetch step of member-initiated note enrichment** (FR-001), never an autonomous agent action — and its distilled output enters the index only after the member accepts the draft.
+**Why the browser + parsers run in a sandbox microVM.** Crawl4AI drives a full **headless browser** (Chromium) and MarkItDown parses **untrusted user files** — heavy, security-sensitive, resource-divergent workloads unlike the stateless Python pods, and both execute *attacker-influenceable* input (a pasted link, a crafted PDF). Running them inside an **ephemeral, network-isolated microVM** (hardware virtualization) keeps that footprint off the ingest/query/agent pods, lets the sandbox fleet scale independently, and gives a **strictly stronger blast-radius boundary** than the old separate-pod split — a compromised browser or parser can't touch the cluster. The `crawl` role is now just a **thin orchestrator**: it consumes `ingestion.crawl.*` — the **internal fetch step of member-initiated note enrichment** (FR-001), never an autonomous agent action — runs the fetch in a `tmpl-crawl` sandbox, and its distilled output enters the index only after the member accepts the draft. Full design: [sandbox-runtime.md](specs/001-contextengine-mvp/contracts/sandbox-runtime.md).
 
 | | |
 |---|---|
 | **What it gives you** | Independent horizontal scaling + per-subject failure isolation, while every in-image role shares the same code, schemas, LLM gateway, and MCP server. |
 | **What pattern it is** | A **modular monolith / distributed-worker** model — same family as Celery/Sidekiq queue-scoped workers or NATS/Kafka consumer groups ("one codebase → N specialized consumer deployments"). |
 | **Why this middle ground** | It sits between a do-everything monolith (can't scale roles independently) and a repo-per-service split (schema/version-skew tax). |
-| **Tradeoffs to manage** | Set **per-role resource limits & autoscaling** (ingest is bursty; query is latency-sensitive), and keep dependency hygiene tight since the in-image roles share one image. The headless-browser **crawl** role is **already peeled into its own image** for exactly this reason (Chromium's footprint is unlike the other pods); a future audio/Whisper worker is the next natural candidate — the per-subject consumer boundary makes each such split a low-friction refactor. |
+| **Tradeoffs to manage** | Set **per-role resource limits & autoscaling** (ingest is bursty; query is latency-sensitive), and keep dependency hygiene tight since the in-image roles share one image. The heavy/untrusted workloads — headless-browser **crawl** and file-parsing **convert** — are **offloaded into sandbox microVMs** rather than fattening these pods (Chromium + parsers don't belong on stateless workers); a future audio/Whisper worker is the next natural candidate, either as another in-image role or a `tmpl-whisper` sandbox — the per-subject consumer boundary and the `Sandbox` port make each such split a low-friction refactor. |
 
 📐 Full architecture diagram: [system-architecture.excalidraw](specs/001-contextengine-mvp/diagrams/system-architecture.excalidraw)
 
@@ -446,6 +457,7 @@ Access control is **structural**, enforced at multiple layers — not by trustin
 - **Existence privacy** — cross-clearance / cross-workspace lookups return `not_found`, never `forbidden`, so restricted resources aren't probeable.
 - **Prompt-injection defense** — disallowed/injection inputs are refused *before* retrieval or credit spend; retrieved documents are treated as inert reference material.
 - **Human-in-the-loop gate** — any action that mutates the index, raises a document's clearance, or reaches outside the workspace pauses for an explicit human decision recorded *before* the action and *before* any spend; the gate is **fail-closed** (unresolved/rejected ⇒ never proceeds) and the decision is human-authored, never derived from model/tool output — so a poisoned page can at worst influence a *draft the human reviews*. One reusable port backs every such confirmation (see [contracts/approval-ports.md](specs/001-contextengine-mvp/contracts/approval-ports.md)).
+- **Sandbox isolation for untrusted / generated code** — every untrusted browser (crawl4ai), untrusted file parser (MarkItDown), and model-**generated** script runs inside an **ephemeral, network-isolated microVM** (self-hosted E2B / Firecracker), never on a worker pod. The sandbox holds **no provider key and no DB/Qdrant access**; egress is **default-deny + SSRF-allowlisted**, so generated code that needs AI or knowledge must call back through the LLM Gateway / MCP chokepoints — it can't bypass them. It operates only on S3-staged, clearance-scoped files, and its output re-enters the index only through the existing pipeline / HITL accept gate — so a crafted PDF or poisoned page can at worst influence a *draft a human reviews*, never widen access (SC-001). Every run is metered per sandbox-second and audited (`sandbox_run`). See [contracts/sandbox-runtime.md](specs/001-contextengine-mvp/contracts/sandbox-runtime.md).
 
 These are aligned with **OWASP Top 10 (2025)** — see the repo-wide [security & OWASP instructions](.github/instructions/security-and-owasp.instructions.md).
 
@@ -738,6 +750,7 @@ Every answer is fully traceable. The **debug panel** (US5) surfaces, per query: 
 | **Go BFF / Gateway / Kernel** | Go 1.23 · Gin · GORM · nats.go · go-redis · OpenTelemetry · zerolog · Sentry |
 | **Python ML / Agent Tier** | Python 3.12 · FastAPI · LangGraph · Mem0 · BAML · FastMCP · MarkItDown · Crawl4AI · qdrant-client · Langfuse SDK |
 | **LLM Gateway** | LiteLLM (standalone, OpenAI-wire) · Bifrost-swappable · aliases · multi-key LB · one-hop fallback · sole provider-key holder |
+| **Sandbox Runtime** | E2B (self-hosted, Firecracker microVMs) · Daytona/gVisor-swappable · versioned templates (`tmpl-crawl`/`convert`/`coderun`) · default-deny + SSRF-allowlisted egress proxy · sole holder of the sandbox fleet |
 | **Frontend** | React 19 · Vite · TypeScript 5.x · native EventSource/SSE · PostHog |
 | **Data** | PostgreSQL (RLS) · Redis · Qdrant (hybrid BM25/SPLADE + dense) · S3 |
 | **Async / Edge** | NATS · Caddy (reverse proxy + auto TLS) · CloudFront (prod CDN) |
@@ -794,8 +807,9 @@ aisat-intel/
 │   │   ├── routers/                   #   ingest · query · crawl · admin (FastAPI)
 │   │   ├── services/
 │   │   │   ├── llm_gateway.py         #     thin client to the standalone LLM gateway (LiteLLM/Bifrost): clearance-cache · PII scrub · budget gate · spend emit · trace
-│   │   │   ├── ingestion/             #     pipeline · chunker · captioner · markitdown · crawler · tagger
+│   │   │   ├── ingestion/             #     pipeline · chunker · captioner · markitdown · crawl_orchestrator · tagger
 │   │   │   ├── retrieval/             #     hybrid · reranker · hot_cold · filter
+│   │   │   ├── sandbox/               #     Sandbox port + client (E2B/Daytona-swappable) — isolated crawl/convert/code-gen exec
 │   │   │   └── agent/                 #     graph (7+1 nodes) · memory (Mem0) · semantic cache · suggestions
 │   │   ├── mcp_server/                #   server.py + tools/{knowledge,structured,utility} · billing/ledger.py
 │   │   ├── baml_client/               #   generated BAML client
@@ -815,6 +829,7 @@ aisat-intel/
 ├── deploy/
 │   ├── docker-compose.yml             # local dev: postgres · redis · qdrant · nats · casdoor · caddy · llm-gateway
 │   ├── llm-gateway/                   # standalone LLM gateway config (LiteLLM config.yaml; Bifrost-swappable) — aliases · keys · LB
+│   ├── sandbox/                       # standalone sandbox tier: microVM templates (tmpl-crawl/convert/coderun) + self-host/egress config
 │   └── Caddyfile                      # reverse proxy · automatic TLS · static SPA serving
 │
 ├── specs/001-contextengine-mvp/       # 📋 the full design package (source of truth)
@@ -900,9 +915,9 @@ A dark-first developer/observability aesthetic — *"code dark + run green"* (sl
 |---|---|
 | **Phase 1 — Core App** *(current)* | Ingestion, 7-pattern RAG, agent layer, access control, credits, debug panel, notifications — plus structural prompt-injection defenses and a minimal eval seed set. |
 | **Phase 2 — Evaluation Suite & Billing** | Full Promptfoo + DeepEval + Ragas, **answer-groundedness self-correction** (CRAG/Self-RAG node — grade → re-retrieve / abstain, see [research §17](specs/001-contextengine-mvp/research.md)), context compression (Headroom seam), **complexity-based model routing** (RouteLLM-style strong/cheap selection — app-side decision, eval-gated, see [research §22](specs/001-contextengine-mvp/research.md)), audio ingestion (Whisper), the **billing & payments** layer (Stripe / Polar / PayPal adapters, checkout, webhooks, subscriptions — see [draft-plan.md — Phase 2](specs/draft-plan.md#phase-2-billing-and-payments)), **AI response rating** (thumbs up/down per answer, feeds eval pipeline — see [draft-plan.md](specs/draft-plan.md#phase-2--ai-response-rating-thumbs-up--down)), and a **workspace knowledge mind map** (seed from any doc/note/query, edge-verified retrieval, progressive SSE streaming — see [draft-plan.md](specs/draft-plan.md#phase-2--workspace-knowledge-mind-map)). |
-| **Phase 2 — Enterprise & Access** | A second **access axis** — the L1–L5 ladder joined by group/principal ACLs, with the ladder's labels and level count becoming workspace config (see [draft-plan.md — Access model](specs/draft-plan.md#access-model-decided)); an **enterprise knowledge layer** (typed artifacts, a provenance-carrying knowledge graph, an agent registry, and Git/Jira/Confluence connectors — [draft-plan.md](specs/draft-plan.md#phase-2--enterprise-knowledge-layer-typed-artifacts-knowledge-graph--agent-context-api)); an **organization** above workspace for consolidated billing, SSO/SCIM and policy defaults, plus delegated group administration ([draft-plan.md](specs/draft-plan.md#phase-2--tenancy--delegated-administration)); and **agent access & accountability** — agents as principals bounded by their owner, the *broad* write scope (beyond the Phase-1 HITL-gated `note_edit`), and resource-level audit visible to the agent's owner ([draft-plan.md](specs/draft-plan.md#phase-2--agent-access--accountability)). |
+| **Phase 2 — Enterprise & Access** | A second **access axis** — the L1–L5 ladder joined by group/principal ACLs, with the ladder's labels and level count becoming workspace config (see [draft-plan.md — Access model](specs/draft-plan.md#access-model-decided)); an **enterprise knowledge layer** (typed artifacts, a provenance-carrying knowledge graph, an agent registry, and Git/Jira/Confluence connectors — [draft-plan.md](specs/draft-plan.md#phase-2--enterprise-knowledge-layer-typed-artifacts-knowledge-graph--agent-context-api)); an **organization** above workspace for consolidated billing, SSO/SCIM and policy defaults, plus delegated group administration ([draft-plan.md](specs/draft-plan.md#phase-2--tenancy--delegated-administration)); and **agent access & accountability** — agents as principals bounded by their owner, the *broad* write scope (beyond the Phase-1 HITL-gated `note_edit`) **including sandbox-backed code-gen / file-manipulation tools** (`run_script`/`transform_files`, run in a `tmpl-coderun` microVM over the Phase-1 [Sandbox Runtime](specs/001-contextengine-mvp/contracts/sandbox-runtime.md)), and resource-level audit visible to the agent's owner ([draft-plan.md](specs/draft-plan.md#phase-2--agent-access--accountability)). |
 | **Phase 3 — Trust & Knowledge Health** | Makes the Phase 2 substrate trustworthy and self-maintaining. **Agent orientation & business scope** — a bounded, per-caller `get_workspace_context` briefing (charter, domain map, governing rules, the agent's *own* effective scope) plus a `list_changes` cursor, so an agent knows what the organization does instead of only what it may read ([draft-plan.md](specs/draft-plan.md#phase-3--agent-orientation--business-scope)). **Knowledge health** — lifecycle-aware retrieval ranking (deprecated/stale/superseded demoted, not just badged), knowledge-usage telemetry with a coverage-gap backlog, and steward-driven recertification prioritized by what is actually load-bearing ([draft-plan.md](specs/draft-plan.md#phase-3--knowledge-health-lifecycle-aware-retrieval-usage-telemetry--recertification)). **Enterprise compliance & data lifecycle** — provable erasure across every derived store, per-workspace provider/residency policy at the LLM gateway, SIEM audit export, legal hold, access recertification, and isolation tiering ([draft-plan.md](specs/draft-plan.md#phase-3--enterprise-compliance--data-lifecycle)). **The expression layer** — grounded drafting, decision records, and change digests, so the corpus produces artifacts and not only answers ([draft-plan.md](specs/draft-plan.md#phase-3--the-expression-layer)). Plus **automated red-teaming** (NVIDIA Garak), principal anomaly detection, and expanded abuse controls. |
-| **Phase 4 — Scale & Resilience** | Worker autoscaling (KEDA on NATS lag), SSE connection ceilings and backpressure, PgBouncer, Qdrant/Redis HA, load & soak testing, per-tenant fairness — [draft-plan.md — Phase 4](specs/draft-plan.md#phase-4-scalability-and-resilience-hardening). |
+| **Phase 4 — Scale & Resilience** | Worker autoscaling (KEDA on NATS lag), **sandbox-fleet autoscaling** (two-level: KEDA on JetStream lag → orchestrators; E2B fleet / node-group autoscaler → microVM capacity on the KVM pool) + warm-pool tuning, SSE connection ceilings and backpressure, PgBouncer, Qdrant/Redis HA, load & soak testing, per-tenant fairness — [draft-plan.md — Phase 4](specs/draft-plan.md#phase-4-scalability-and-resilience-hardening). |
 
 ---
 

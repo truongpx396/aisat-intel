@@ -107,6 +107,57 @@ variable "node_disk_size" {
   default     = 50
 }
 
+# ---------------------------------------------------------------------------
+# Sandbox fleet node group — the dedicated KVM/bare-metal pool that runs the
+# microVM sandbox tier (crawl4ai, MarkItDown convert, code-gen). See sandbox.tf.
+# ---------------------------------------------------------------------------
+variable "sandbox_enabled" {
+  description = "Provision the dedicated KVM/bare-metal node group for the microVM sandbox fleet. Off by default (bare-metal instances are costly); enable when self-hosting the sandbox tier on EKS."
+  type        = bool
+  default     = false
+}
+
+variable "sandbox_instance_types" {
+  description = "Instance types for the sandbox node group. MUST expose /dev/kvm for Firecracker — i.e. bare-metal (*.metal). Standard nitro types (t3/m5 non-metal) cannot run Firecracker; use SANDBOX_KIND=daytona (gVisor) on normal nodes instead."
+  type        = list(string)
+  default     = ["m5.metal"]
+}
+
+variable "sandbox_capacity_type" {
+  description = "ON_DEMAND (stable) or SPOT (cheaper, interruptible) for the sandbox pool."
+  type        = string
+  default     = "ON_DEMAND"
+
+  validation {
+    condition     = contains(["ON_DEMAND", "SPOT"], var.sandbox_capacity_type)
+    error_message = "sandbox_capacity_type must be ON_DEMAND or SPOT."
+  }
+}
+
+variable "sandbox_desired_size" {
+  type        = number
+  description = "Desired sandbox node count."
+  default     = 1
+}
+
+variable "sandbox_min_size" {
+  type        = number
+  description = "Minimum sandbox node count."
+  default     = 0
+}
+
+variable "sandbox_max_size" {
+  type        = number
+  description = "Maximum sandbox node count (fleet scale-out ceiling)."
+  default     = 3
+}
+
+variable "sandbox_disk_size" {
+  type        = number
+  description = "Root EBS volume size (GiB) per sandbox node (microVM images + warm pool)."
+  default     = 100
+}
+
 # The IAM principals (role/user ARNs) granted cluster-admin via EKS access
 # entries — e.g. your SSO admin role. The GitHub deploy role is added
 # automatically (see github-oidc.tf), so it does NOT need to be listed here.
@@ -122,10 +173,12 @@ variable "cluster_admin_principal_arns" {
 variable "ecr_repositories" {
   description = "App image names to create ECR repos for. Match the CD image naming (IMAGE_PREFIX-<component>)."
   type        = list(string)
+  # NOTE: no `aisat-crawl` — the crawl role no longer has its own image; it runs
+  # from aisat-backend-python as a thin orchestrator over the sandbox tier, and the
+  # crawl4ai toolchain ships as an E2B microVM template (deploy/sandbox/templates/).
   default = [
     "aisat-backend-go",
     "aisat-backend-python",
-    "aisat-crawl",
     "aisat-frontend",
   ]
 }

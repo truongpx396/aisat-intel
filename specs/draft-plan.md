@@ -1599,6 +1599,34 @@ Audit rows gain:
 - **Resource-level audit** — table stakes in enterprise SaaS (directory admin audit logs,
   field history). The Phase 1 action-level trail sits below that bar; Decision 5 meets it.
 
+### Decision 7 — Code-gen & file-manipulation tools run in a sandbox, never on a pod
+
+**Status**: Draft / not started · **Depends on**: the Phase-1 Sandbox Runtime tier
+([sandbox-runtime.md](./001-contextengine-mvp/contracts/sandbox-runtime.md)).
+
+The broad "agent writes a script to manipulate files" capability is a **Category-D action tool**
+(`run_script` / `transform_files`) whose *implementation* runs the model-authored code inside an
+ephemeral, network-isolated **E2B microVM** (`tmpl-coderun`) over the `Sandbox` port — the same tier
+Phase 1 already uses to isolate crawl4ai and MarkItDown. No new isolation model is invented for
+code-gen; it inherits one.
+
+- **Isolation** — a microVM (hardware virtualization), not a shared worker pod. The sandbox holds
+  no provider key and no DB/Qdrant access; generated code that needs AI or knowledge calls **back
+  out through the LLM Gateway / MCP chokepoint only** (it cannot bypass them). Egress is default-deny.
+- **Governance is inherited, not bespoke** — this rides Decisions 1–5: bounded to `min(agent, owner)`
+  clearance (Decision 1), gated by explicit `can_write` (Decision 2), output can't widen access
+  (Decision 3), agent-authored (Decision 4), and resource-audited (Decision 5). Plus the Phase-1
+  human-gate: `approval_request(kind='run_script')` — **executes nothing until the member approves**,
+  fail-closed, no-spend-while-paused; output re-enters the index only through the accept gate.
+- **Metered** — sandbox compute (`vcpu_seconds`/`wall_ms`/`egress_bytes`) prices to
+  `operation_type='sandbox.run_script'` on the existing single-writer ledger; one `sandbox_run` audit
+  row per execution.
+- **Why it's here and not Phase 1** — Phase 1 ships the sandbox *substrate* (crawl + convert, internal
+  non-mutating steps, no per-run HITL) and the two narrow Category-D tools (`web_search`, `edit_note`).
+  The *general* code-execution tool is the broad-write capability deferred with the rest of Decision 2,
+  and lands behind the same `can_write` + wider `write_ops`. See the contract for the port interface,
+  templates, and contract-test obligations.
+
 ---
 
 ## Phase 3 — Agent Orientation & Business Scope

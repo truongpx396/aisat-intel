@@ -24,7 +24,8 @@ until a reviewer approves. CI runs on every PR and push regardless.
 ## 1. Docker Hub
 
 1. Create the repos (or let the first push create them): `aisat-backend-go`,
-   `aisat-backend-python`, `aisat-crawl`, `aisat-frontend`.
+   `aisat-backend-python`, `aisat-frontend`. (No `aisat-crawl` — the crawl role now
+   runs from `aisat-backend-python` as a thin orchestrator over the sandbox tier.)
 2. **Account → Security → New Access Token** (Read/Write). Save it for `DOCKERHUB_TOKEN`.
 
 ## 2. DigitalOcean droplet
@@ -130,7 +131,9 @@ The pipeline assumes the structure in [specs/001-contextengine-mvp/plan.md](../.
   `healthcheck` subcommand and a `migrate up` subcommand; serves `/livez` + `/readyz` on `:8080`.
 - **`backend-python/`** — `pyproject.toml` + `uv.lock`; `uvicorn src.main:app` serves `/livez`
   on `:8000`; `python -m src.worker` and `python -m src.mcp_server.server` roles exist; a
-  `crawl` optional-dependency extra + `src.services.ingestion.crawl_worker` module.
+  `src.services.ingestion.crawl_orchestrator` module (the crawl role drives crawl4ai inside a
+  sandbox microVM over the `Sandbox` port — the `crawl`/`convert` toolchains ship as microVM
+  templates in [deploy/sandbox/templates/](../sandbox/templates/), not this image).
 - **`frontend/`** — `package.json` with `build` (and ideally `lint`/`typecheck`/`test`) scripts;
   Vite emits to `dist/`.
 - Confirm the SSE path prefixes in [deploy/do/Caddyfile](./Caddyfile) against

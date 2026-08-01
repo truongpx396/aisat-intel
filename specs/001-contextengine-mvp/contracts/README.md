@@ -15,6 +15,7 @@ These contracts define the external/internal interfaces the system exposes. They
 | [mcp-tools.md](./mcp-tools.md) | 10 MCP tools across 4 categories (A–C read-only; D = HITL-gated `web_search` + `edit_note`) | LangGraph agent, local agents |
 | [agent-graph.md](./agent-graph.md) | LangGraph agent internal contract — `AgentState`, node I/O, checkpointing, streaming, Phase-2 seams | Python agent tier (`services/agent/`) |
 | [llm-gateway.md](./llm-gateway.md) | Standalone LLM gateway service (LiteLLM, Bifrost-swappable) + per-runtime client | All Go/Python LLM call sites |
+| [sandbox-runtime.md](./sandbox-runtime.md) | Standalone self-hosted sandbox tier (E2B/Firecracker microVMs, Daytona/gVisor-swappable) + `Sandbox` port — the single chokepoint for isolated code/tool exec (crawl4ai, MarkItDown convert, code-gen) | Python crawl/ingest/agent tiers |
 | [metering-ports.md](./metering-ports.md) | Reusable `Meter`/`Pricer`/`Ledger` ports for the credit backbone (domain-agnostic) | Go kernel `metering`/`billing`, all spend producers |
 | [notification-ports.md](./notification-ports.md) | Reusable `Notifier`/`Channel`/`Store` ports for the multi-channel notification backbone (domain-agnostic) | Go kernel `notify`, all notification producers |
 | [approval-ports.md](./approval-ports.md) | Reusable `HumanGate`/`ApprovalStore` ports — the durable, fail-closed, no-spend-while-paused human-in-the-loop gate (`interrupt()`/resume seam) | Go kernel `approval`, Go BFF, Python agent + ingestion tiers |

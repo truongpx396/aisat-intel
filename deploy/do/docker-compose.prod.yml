@@ -165,10 +165,16 @@ services:
     depends_on:
       nats: { condition: service_healthy }
 
+  # Thin crawl orchestrator: consumes ingestion.crawl.<ws> and drives crawl4ai inside
+  # an E2B microVM (tmpl-crawl) over the Sandbox port. Runs from the backend-python
+  # image (no bespoke -crawl image) — the headless browser lives in the sandbox fleet,
+  # not this container. Point SANDBOX_URL/SANDBOX_KIND (.env.production) at the fleet;
+  # on a single droplet without /dev/kvm, use SANDBOX_KIND=daytona (gVisor).
   crawl:
-    image: ${REGISTRY:-docker.io}/${DOCKERHUB_USERNAME:?set}/${IMAGE_PREFIX:-aisat}-crawl:${IMAGE_TAG:-latest}
+    image: ${REGISTRY:-docker.io}/${DOCKERHUB_USERNAME:?set}/${IMAGE_PREFIX:-aisat}-backend-python:${IMAGE_TAG:-latest}
     restart: unless-stopped
     <<: *app-env
+    command: ['python', '-m', 'src.services.ingestion.crawl_orchestrator']
     depends_on:
       nats: { condition: service_healthy }
 
