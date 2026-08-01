@@ -1,0 +1,17 @@
+# Trivy misconfiguration whitelist for the DigitalOcean Terraform root.
+# Add one check ID per line to accept a HIGH/CRITICAL finding (with a reason).
+# See the check ID in the Trivy CI output (the terraform job in ci.yml).
+# Both the short (DIG-0001) and AVD (AVD-DIG-0001) ID forms are listed so the
+# match is version-independent.
+
+# DIG-0001 — unrestricted ingress. Accepted: this is a public web droplet, so
+# HTTP/80 and HTTPS/443 are intentionally open to 0.0.0.0/0. SSH/22 is NOT open
+# by default — it is gated by var.ssh_allowed_cidrs (set it per deploy). See
+# digitalocean_firewall.web in network.tf.
+DIG-0001
+AVD-DIG-0001
+
+# DIG-0003 — unrestricted egress. Accepted: a general-purpose host needs
+# outbound internet (package updates, API calls, OTLP export, etc.).
+DIG-0003
+AVD-DIG-0003

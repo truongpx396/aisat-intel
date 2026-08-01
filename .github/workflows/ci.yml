@@ -65,6 +65,9 @@ jobs:
             terraform:
               - '**/*.tf'
               - '**/*.tftpl'
+              - '**/.tflint.hcl'
+              - '**/.trivyignore'
+              - '.github/workflows/ci.yml'
             helm:
               - 'deploy/eks/helm/**'
               - '.github/workflows/cd-eks.yml'
@@ -219,8 +222,9 @@ jobs:
           exit-code: '0' # report-only for now; flip to '1' to block (see SETUP.md)
 
   # ---------------------------------------------------------------------------
-  # Terraform — format check (advisory) + validate (blocking) for each root
-  # (DigitalOcean: deploy/do/terraform; AWS EKS: deploy/eks/terraform).
+  # Terraform — per root (DigitalOcean: deploy/do/terraform; AWS EKS:
+  # deploy/eks/terraform). Advisory: fmt. Blocking: validate, TFLint (lint +
+  # provider rules), Trivy config scan (HIGH/CRITICAL misconfigurations).
   # ---------------------------------------------------------------------------
   terraform:
     needs: changes
@@ -245,6 +249,37 @@ jobs:
         run: terraform init -backend=false
       - name: Validate
         run: terraform validate -no-color
+
+      # Lint — provider-aware checks validate can't do (deprecated syntax,
+      # invalid instance types, unused declarations). Config: <dir>/.tflint.hcl.
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.55.1
+      - name: TFLint
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # avoids plugin-download rate limits
+        run: |
+          tflint --init
+          tflint --format compact
+
+      # Security/compliance scan of the HCL source (no plan / no creds needed).
+      # We scan our own code, not vendored upstream modules `terraform init`
+      # pulled into .terraform/: skip-dirs drops their standalone files (e.g.
+      # example k8s manifests) and TRIVY_TF_EXCLUDE_DOWNLOADED_MODULES drops
+      # findings the terraform scanner attributes to those modules' resources.
+      # Blocks only on HIGH,CRITICAL; accept checks in a per-root .trivyignore.
+      - name: Trivy config scan (HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@v0.36.0
+        env:
+          TRIVY_TF_EXCLUDE_DOWNLOADED_MODULES: 'true'
+        with:
+          scan-type: config
+          scan-ref: ${{ matrix.dir }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          skip-dirs: '.terraform,**/.terraform'
+          trivyignores: ${{ matrix.dir }}/.trivyignore
 
   # ---------------------------------------------------------------------------
   # Helm chart (deploy/eks/helm) — lint, render both overlays, schema-validate.

@@ -1,0 +1,5 @@
+# Trivy misconfiguration whitelist for the AWS EKS Terraform root.
+# Add one check ID per line to accept a HIGH/CRITICAL finding (with a reason),
+# e.g.:
+#   AVD-AWS-0057  # cluster admin needs "*" actions on scoped resources
+# See the check ID in the Trivy CI output (the terraform job in ci.yml).
