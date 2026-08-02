@@ -80,6 +80,8 @@ So the tier takes **two** settings:
 | **`runc`** (default) | Namespaces + cgroups + seccomp — shared kernel | nothing | $0 |
 | **`runsc`** (gVisor) | User-space kernel — a real syscall boundary | **Linux** + `runsc` installed on the host/node | $0 infra, one runtime install |
 
+> **A candidate backend worth evaluating, not yet adopted.** [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox) (Apache-2.0, ~12.3k stars, active) ships gVisor/Kata/Firecracker across Docker **and** Kubernetes runtimes — a productized form of the ratchet above, and it would cover the still-unbuilt `k8s_pod` path. It would enter as `SANDBOX_KIND=opensandbox` behind this same port, replacing only the *mechanical* half: invariants 3, 4, 5, 7, 9 and 12 are domain obligations that stay in the port and the Go control plane whatever executes the container. Four blocking questions before adoption — socket posture, `max_runs = 1` support, default-deny egress, and RBAC narrowness — are recorded in [research §24](../research.md).
+
 > **Daytona is not adopted.** It is a legitimate vendor alternative to E2B if a managed sandbox control plane is ever wanted, but it is *not* how gVisor is enabled and is not in the enum. If it is adopted later it enters as a `SANDBOX_KIND`, alongside `e2b_*`.
 
 - **Swap by config, no caller change.** The port surface is vendor-neutral on both axes, so re-platforming crawl/convert/code-gen is a client-config change, invisible to callers (same seam discipline as `LLM_GATEWAY_KIND`). **This is the load-bearing property of the design** — it is what lets Phase 1 ship on the cheap boundary without foreclosing the strong one.
