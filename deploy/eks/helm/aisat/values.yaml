@@ -55,11 +55,29 @@ config:
   LLM_GATEWAY_KIND: litellm
 
   # Sandbox tier — the single chokepoint for isolated code/tool execution (crawl4ai,
-  # MarkItDown convert, code-gen). Self-hosted is primary; SANDBOX_KIND selects the
-  # backend behind the Sandbox port: e2b_selfhost | e2b_cloud | daytona | local_docker.
+  # MarkItDown convert, code-gen). SANDBOX_KIND selects the isolation backend behind
+  # the Sandbox port; the security contract is identical across all of them:
+  #   k8s_pod  — hardened pod on THIS node pool, created via an RBAC-scoped
+  #              ServiceAccount (no runtime socket). The EKS default, $0 incremental.
+  #              NOTE: the DO compose target has no Kubernetes API and uses
+  #              SANDBOX_KIND=docker instead — see deploy/do/.env.production.example.
+  #   e2b_selfhost  — Firecracker microVM. Needs the *.metal pool (sandbox_enabled=true
+  #                   in terraform, ~$3k/mo standing) — Phase 2, with tmpl-coderun.
+  #   e2b_cloud     — managed microVM, usage-billed; note user files leave your infra.
   # See specs/001-contextengine-mvp/contracts/sandbox-runtime.md and deploy/sandbox/.
   SANDBOX_URL: http://sandbox-orchestrator:49983
-  SANDBOX_KIND: e2b_selfhost
+  SANDBOX_KIND: k8s_pod
+
+  # SANDBOX_RUNTIME is a SEPARATE, ORTHOGONAL axis: the isolation runtime, not the
+  # orchestrator. gVisor is NOT a different backend — it is runtimeClassName: gvisor
+  # on this same k8s_pod path (--runtime=runsc under the docker kind).
+  #   runc  — default. Namespaces + cgroups + seccomp; shared kernel.
+  #   runsc — gVisor. A real syscall boundary; needs runsc installed on the nodes.
+  # Per-template overrides let tmpl-convert (untrusted user files, the higher-risk
+  # surface) run on gVisor while tmpl-crawl stays on runc — Chromium is gVisor's
+  # worst case (syscall-heavy, needs --no-sandbox).
+  SANDBOX_RUNTIME: runc
+  SANDBOX_RUNTIME_TMPL_CONVERT: runsc
 
   CASDOOR_ENDPOINT: http://casdoor:8000
   CASDOOR_ORG: aisat
@@ -265,11 +283,13 @@ components:
     command: ["python", "-m", "src.mcp_server.server"]
 
   # The crawl role is now a THIN ORCHESTRATOR: it consumes ingestion.crawl.<ws> and
-  # drives crawl4ai inside an E2B microVM (tmpl-crawl) over the Sandbox port — the
-  # headless browser lives in the fleet, not this pod. So it runs from the
-  # backend-python image (no bespoke -crawl image) and stays light on normal nodes.
-  # The microVM fleet itself is the tainted KVM/*.metal pool (deploy/eks/terraform/
-  # sandbox.tf), provisioned + GitOps-managed separately, not by this chart.
+  # drives crawl4ai inside a tmpl-crawl sandbox over the Sandbox port — the headless
+  # browser lives in the sandbox, not this pod. So it runs from the backend-python
+  # image (no bespoke -crawl image) and stays light on normal nodes.
+  # The sandbox pool itself is a separate deployment: under the Phase-1 k8s_pod
+  # backend it is hardened pods on this same node pool (no extra node group); only
+  # SANDBOX_KIND=e2b_selfhost needs the tainted KVM/*.metal pool in
+  # deploy/eks/terraform/sandbox.tf (sandbox_enabled, default false — Phase 2).
   crawl:
     enabled: true
     repo: backend-python

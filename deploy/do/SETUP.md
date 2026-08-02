@@ -132,7 +132,7 @@ The pipeline assumes the structure in [specs/001-contextengine-mvp/plan.md](../.
 - **`backend-python/`** — `pyproject.toml` + `uv.lock`; `uvicorn src.main:app` serves `/livez`
   on `:8000`; `python -m src.worker` and `python -m src.mcp_server.server` roles exist; a
   `src.services.ingestion.crawl_orchestrator` module (the crawl role drives crawl4ai inside a
-  sandbox microVM over the `Sandbox` port — the `crawl`/`convert` toolchains ship as microVM
+  sandbox over the `Sandbox` port — the `crawl`/`convert` toolchains ship as sandbox
   templates in [deploy/sandbox/templates/](../sandbox/templates/), not this image).
 - **`frontend/`** — `package.json` with `build` (and ideally `lint`/`typecheck`/`test`) scripts;
   Vite emits to `dist/`.

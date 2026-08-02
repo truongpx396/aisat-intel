@@ -166,15 +166,131 @@ services:
       nats: { condition: service_healthy }
 
   # Thin crawl orchestrator: consumes ingestion.crawl.<ws> and drives crawl4ai inside
-  # an E2B microVM (tmpl-crawl) over the Sandbox port. Runs from the backend-python
-  # image (no bespoke -crawl image) — the headless browser lives in the sandbox fleet,
-  # not this container. Point SANDBOX_URL/SANDBOX_KIND (.env.production) at the fleet;
-  # on a single droplet without /dev/kvm, use SANDBOX_KIND=daytona (gVisor).
+  # a tmpl-crawl sandbox over the Sandbox port. Runs from the backend-python image
+  # (no bespoke -crawl image) — the headless browser lives in sandbox-crawl below,
+  # not in this container.
   crawl:
     image: ${REGISTRY:-docker.io}/${DOCKERHUB_USERNAME:?set}/${IMAGE_PREFIX:-aisat}-backend-python:${IMAGE_TAG:-latest}
     restart: unless-stopped
     <<: *app-env
     command: ['python', '-m', 'src.services.ingestion.crawl_orchestrator']
+    depends_on:
+      nats: { condition: service_healthy }
+      sandbox-crawl: { condition: service_started }
+
+  # ------------------------- sandbox tier (SANDBOX_KIND=service) --------------
+  # NO DOCKER SOCKET IS MOUNTED ANYWHERE IN THIS FILE — that is the point of the
+  # `service` kind. On compose, per-job isolation would require creating containers
+  # at runtime, which means handing some component /var/run/docker.sock: HOST-
+  # EQUIVALENT privilege (and :ro does NOT restrict the API — read-only applies to
+  # the socket file, not the endpoint). Paying an UNBOUNDED control-plane risk to
+  # close a BOUNDED tenant-persistence risk is a bad trade at MVP volume. So these
+  # run as long-lived pools reached over HTTP, and nothing creates anything.
+  #
+  # On EKS the calculus inverts — per-job costs only an RBAC-scoped ServiceAccount —
+  # so SANDBOX_KIND=k8s_pod runs these per job and regains the hard workspace
+  # recycle boundary. Same images, same Sandbox port, callers unchanged.
+  #
+  # THE DELTA YOU ARE ACCEPTING HERE (contract invariant 12): these pools are
+  # STATELESS PER JOB but the workspace boundary is SOFT. Fresh state per job kills
+  # DATA carryover; it does NOT evict an attacker already resident in the process.
+  # That is bounded by recycle (max_runs + TTL), not eliminated. tmpl-coderun is
+  # therefore NEVER served from a service pool.
+  sandbox-crawl:
+    # tmpl-crawl as a warm browser pool. Per job: a fresh browser.newContext()
+    # (new cookie jar / localStorage / cache), and the browser PROCESS is recycled
+    # every max_runs jobs — which browsers need anyway for memory, and which is what
+    # bounds compromise persistence. Egress: SSRF allowlist only, via the proxy.
+    image: ${REGISTRY:-docker.io}/${DOCKERHUB_USERNAME:?set}/${IMAGE_PREFIX:-aisat}-sandbox-crawl:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    # DELIBERATELY *NOT* `<<: *app-env` — that would inject .env.production wholesale,
+    # handing this sandbox OPENAI_API_KEY, ANTHROPIC_API_KEY, DATABASE_URL, JWT_SECRET
+    # and every other secret. That is a direct violation of contract invariant 1
+    # ("a sandbox gets NO provider API keys, NO DB/Redis/Qdrant connection"). Sandboxes
+    # get an explicit, minimal env and nothing else — enumerate, never inherit.
+    environment:
+      ENV: ${ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SANDBOX_API_KEY: ${SANDBOX_API_KEY:?set}   # verifies INBOUND calls; not a provider key
+      SANDBOX_RUNTIME: ${SANDBOX_RUNTIME:-runc}
+    user: "65534:65534"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=256m']
+    pids_limit: 256              # Chromium is multi-process; a mem cap alone is not a cap
+    mem_limit: 2g
+    cpus: 1.0
+
+  sandbox-convert:
+    # tmpl-convert as a pool. Per job: a FRESH SUBPROCESS with its own rlimits plus a
+    # fresh temp dir — so a parser RCE lands in a short-lived child that dies with the
+    # job, inside an already non-root/read-only/caps-dropped container. Plus a TTL
+    # restart, because subprocess death is not the same as container death.
+    # This is the template that wants runsc (SANDBOX_RUNTIME_TMPL_CONVERT) — untrusted
+    # user files through parsers that have no internal sandbox of their own.
+    image: ${REGISTRY:-docker.io}/${DOCKERHUB_USERNAME:?set}/${IMAGE_PREFIX:-aisat}-sandbox-convert:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    # NOT `<<: *app-env` — see the note on sandbox-crawl. Invariant 1: no ambient creds.
+    environment:
+      ENV: ${ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SANDBOX_API_KEY: ${SANDBOX_API_KEY:?set}
+      SANDBOX_RUNTIME: ${SANDBOX_RUNTIME_TMPL_CONVERT:-runsc}
+    user: "65534:65534"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=256m']
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 1.0
+    network_mode: none           # conversion is fully offline — no route at all
+
+  # ---- tmpl-coderun: SANDBOX_KIND=oneshot (Phase 2) --------------------------
+  # NOT a `service` pool. Model-authored code must never touch a reused instance,
+  # so each replica: starts -> pulls EXACTLY ONE job from the NATS queue group ->
+  # runs it -> EXITS. Docker's restart policy recreates it with a fresh tmpfs over
+  # immutable image layers. That is REAL destruction, with no runtime socket.
+  # Scale concurrency with replicas:  docker compose up -d --scale sandbox-coderun=N
+  #
+  # THREE OBLIGATIONS, ALL SILENT WHEN BROKEN (contract invariant 12 + `oneshot`):
+  #  1. read_only + tmpfs-only. LOAD-BEARING: a restart reuses the same container ID
+  #     AND its writable layer, so a writable rootfs lets a dropped file survive the
+  #     restart — silently rebuilding the reuse this design exists to prevent.
+  #  2. The process MUST EXIT after one job. A `while True` around the handler is the
+  #     failure mode wearing the fix's clothes.
+  #  3. The model-authored code must NOT inherit this container's NATS route. PID 1 is
+  #     a thin supervisor holding the connection; it forks the untrusted code into a
+  #     child with NO network namespace. This is oneshot's weakest point vs k8s_pod,
+  #     where the job arrives via the API server and the sandbox needs no bus route.
+  #
+  # Restart backoff is fine HERE because coderun is rare + HITL-gated: a replica idles
+  # far longer than it runs, so uptime keeps resetting the backoff counter. A
+  # high-rate template under `oneshot` would thrash — hence this kind is code-gen only.
+  #
+  # Phase 2. Enable with:  docker compose --profile coderun up -d
+  sandbox-coderun:
+    profiles: [coderun]
+    image: ${REGISTRY:-docker.io}/${DOCKERHUB_USERNAME:?set}/${IMAGE_PREFIX:-aisat}-sandbox-coderun:${IMAGE_TAG:-latest}
+    restart: always              # the recreate mechanism — NOT `unless-stopped`
+    runtime: ${SANDBOX_OCI_RUNTIME:-runsc}   # gVisor; set to `runc` where runsc is absent
+    # NOT `<<: *app-env` — invariant 1. Enumerate, never inherit.
+    environment:
+      ENV: ${ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SANDBOX_API_KEY: ${SANDBOX_API_KEY:?set}
+      SANDBOX_KIND: oneshot
+      SANDBOX_MAX_RUNS: "1"      # non-negotiable: one job, then exit
+      NATS_URL: ${NATS_URL:-nats://nats:4222}   # held by the SUPERVISOR only (obligation 3)
+    user: "65534:65534"
+    read_only: true              # obligation 1 — do not remove
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=256m']   # the ONLY writable path
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 1.0
     depends_on:
       nats: { condition: service_healthy }
 

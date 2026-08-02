@@ -6,18 +6,38 @@
 # Contract: ../../../specs/001-contextengine-mvp/contracts/sandbox-runtime.md
 # Config home: ../../sandbox/
 #
-# WHY A SEPARATE POOL. Firecracker microVMs require /dev/kvm (hardware
-# virtualization). The default app node group (t3.large, nitro) does NOT expose
-# nested virt, so the fleet runs on a dedicated *.metal node group — provisioned in
-# eks.tf's eks_managed_node_groups under `var.sandbox_enabled`, tainted
-# `sandbox=true:NoSchedule` so only sandbox VMs land there (same blast-radius +
-# resource-divergence rationale the README gives for peeling out the crawl worker,
-# now hardware-enforced and reused by convert + code-gen).
+# NOT PROVISIONED IN PHASE 1 — var.sandbox_enabled defaults to FALSE, and nothing
+# in this file costs anything until it is flipped. Read that as the design intent,
+# not as an oversight.
 #
-# WHERE KVM IS UNAVAILABLE. If bare-metal is too costly, keep var.sandbox_enabled
-# = false and run the fleet with a gVisor/runsc backend (SANDBOX_KIND=daytona) on
-# the normal app nodes — a per-environment isolation choice behind the same Sandbox
-# port, not an app change.
+# WHY THIS POOL EXISTS AT ALL. Firecracker microVMs require /dev/kvm (hardware
+# virtualization). The default app node group (t3.large, nitro) does NOT expose
+# nested virt, so a self-hosted microVM fleet needs a dedicated *.metal node group —
+# provisioned in eks.tf's eks_managed_node_groups under `var.sandbox_enabled`,
+# tainted `sandbox=true:NoSchedule` so only sandbox VMs land there.
+#
+# WHY IT IS OFF. The smallest x86 *.metal SKU is a standing cost on the order of
+# $3k/month. The Phase-1 sandbox workloads are crawl (low-volume, member-initiated,
+# public https, HITL-gated) and convert — neither justifies that. Phase 1 therefore
+# runs SANDBOX_KIND=k8s_pod: hardened sandbox pods on the normal app nodes, at
+# $0 incremental, carrying the identical security contract (no ambient credentials,
+# default-deny egress, hard caps, metered, audited). See research §24 for the full
+# cost comparison and the rejected alternatives.
+#
+# WHEN TO TURN IT ON. Possibly NEVER. tmpl-coderun — once assumed to require a
+# microVM — lands on gVisor (runtime=runsc) + max_runs=1 on the ordinary k8s_pod
+# path instead: gVisor's designed purpose IS untrusted code, and Google runs
+# multi-tenant customer code on it. So NO Phase-1 or Phase-2 workload needs
+# /dev/kvm. Provision this pool only if the threat model changes — third-party-
+# authored code, hostile tenants, or a compliance rule naming hardware isolation.
+# The ratchet before that point is
+# SANDBOX_RUNTIME=runsc (gVisor) for tmpl-convert — an orthogonal runtime flag on the
+# existing k8s_pod path (runtimeClassName: gvisor), not a different backend. It needs
+# no /dev/kvm, so it runs on the existing pool for free. If microVMs are needed sooner, two escapes
+# avoid this cost: SANDBOX_KIND=e2b_cloud (usage-billed, no floor) or the same
+# Firecracker fleet on third-party bare metal (Hetzner/OVH, ~1/40th the AWS price).
+# All of it is a per-environment choice behind the same Sandbox port, not an app
+# change — which is the whole point of the port.
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------

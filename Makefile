@@ -63,6 +63,36 @@ docker-build: ## Build all present images locally (tag = IMAGE_TAG)
 	@# crawl has no image — it runs from backend-python; the crawl4ai toolchain is an E2B microVM template (deploy/sandbox/templates/).
 	@[ -f $(WEB_DIR)/Dockerfile ]         && docker build -t $(IMG)-frontend:$(IMAGE_TAG) $(WEB_DIR)                          || echo "skip web image"
 
+# ------------------------------ sandbox tier -------------------------------
+# The isolated-execution tier. Templates build from backend-python/ as the BUILD
+# CONTEXT (they COPY pyproject.toml + uv.lock) even though the Dockerfiles live in
+# deploy/sandbox/templates/ — that is why -f and the context path differ.
+#
+# macOS note: gVisor (runsc) is Linux-only and Docker Desktop ships only runc, so
+# local sandboxes run at a weaker boundary than the droplet. Dev-only concession.
+COMPOSE_SBX = docker compose -f deploy/sandbox/docker-compose.sandbox.yml
+SBX_TEMPLATES = crawl convert coderun
+.PHONY: sandbox-templates sandbox-up sandbox-coderun sandbox-down sandbox-logs sandbox-ps sandbox-verify
+sandbox-templates: ## Build the sandbox template images (context = backend-python/)
+	@[ -f $(PY_DIR)/pyproject.toml ] || { echo "skip: $(PY_DIR)/pyproject.toml not present yet (T003)"; exit 0; }
+	@for t in $(SBX_TEMPLATES); do \
+	  echo "==> tmpl-$$t"; \
+	  docker build -f deploy/sandbox/templates/tmpl-$$t.Dockerfile \
+	    -t $(IMAGE_PREFIX)-sandbox-$$t:$(IMAGE_TAG) $(PY_DIR) || exit 1; \
+	done
+sandbox-up: ## Start the local crawl + convert sandbox pools
+	IMAGE_TAG=$(IMAGE_TAG) $(COMPOSE_SBX) up -d
+sandbox-coderun: ## Add the oneshot coderun replicas (N=1; override: make sandbox-coderun N=3)
+	IMAGE_TAG=$(IMAGE_TAG) $(COMPOSE_SBX) --profile coderun up -d --scale sandbox-coderun=$(or $(N),1)
+sandbox-down: ## Stop the local sandbox tier
+	$(COMPOSE_SBX) --profile coderun down
+sandbox-logs: ## Tail local sandbox logs
+	$(COMPOSE_SBX) --profile coderun logs -f --tail=100
+sandbox-ps: ## Status of the local sandbox tier
+	$(COMPOSE_SBX) --profile coderun ps
+sandbox-verify: ## Assert the sandbox hardening invariants against the rendered config
+	@bash deploy/sandbox/verify-hardening.sh
+
 # ---------------------------- local prod stack -----------------------------
 COMPOSE_PROD = docker compose -f deploy/do/docker-compose.prod.yml --env-file deploy/do/.env.production
 .PHONY: prod-pull prod-up prod-down prod-logs migrate

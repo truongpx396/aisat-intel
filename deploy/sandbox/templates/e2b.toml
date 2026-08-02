@@ -1,10 +1,15 @@
 # Sandbox template manifest.
 #
-# Declares the microVM templates the self-hosted fleet boots from, their default
-# resource caps, and their warm-pool depth. `make sandbox-templates` (TODO) builds
-# each Dockerfile and publishes it to the self-hosted registry (or E2B Cloud when
-# SANDBOX_KIND=e2b_cloud). Resource/egress caps here are DEFAULTS — a caller's
-# SandboxSpec may lower them, never raise them past the fleet ceiling.
+# Declares the sandbox templates, their default resource caps, and warm-pool depth.
+# A template is ONE image; a sandbox is ONE running instance of it — there is no
+# nesting. The boundary SHAPE is chosen per environment by SANDBOX_KIND (container
+# under `docker`, pod under `k8s_pod`, microVM rootfs under `e2b_*`) and the
+# isolation RUNTIME by the orthogonal SANDBOX_RUNTIME (`runc` | `runsc`), which is
+# overridable per template — see the `runtime` key below.
+#
+# `make sandbox-templates` (TODO) builds each Dockerfile and publishes it to the
+# registry (or E2B Cloud when SANDBOX_KIND=e2b_cloud). Resource/egress caps here are
+# DEFAULTS — a caller's SandboxSpec may lower them, never raise them past the ceiling.
 #
 # Contract: ../../../specs/001-contextengine-mvp/contracts/sandbox-runtime.md
 
@@ -12,33 +17,112 @@
 # Where the fleet control plane lives. Overridden per-env by SANDBOX_URL.
 egress_default = "deny"          # default-deny; a template opts into an allowlist
 kill_on_timeout = true           # a run past timeout_s is force-killed (timed_out=true)
+ttl_s_default = 3600             # wall-clock instance lifetime; per-template `ttl_s` overrides.
+                                 # Recycle has TWO triggers — max_runs AND ttl_s — because a
+                                 # low-traffic pool would otherwise hold one instance for days.
+runtime_default = "runc"         # isolation runtime; per-template `runtime` overrides
+max_runs_per_sandbox = 20        # warm-sandbox reuse ceiling; ALWAYS recycled at a
+                                 # workspace boundary regardless of this (SC-001)
 
 [[template]]
 name        = "tmpl-crawl"
 dockerfile  = "tmpl-crawl.Dockerfile"
+context     = "backend-python"   # repo-root-relative BUILD CONTEXT, not the Dockerfile's
+                                 # dir: the COPY needs pyproject.toml + uv.lock, which live
+                                 # there. crawl4ai is never named in the Dockerfile — it comes
+                                 # from the `crawl` extra, version-locked to the app's uv.lock.
 vcpu        = 1
 mem_mb      = 2048               # Chromium is memory-hungry
 timeout_s   = 45
+pids_limit  = 256                # Chromium is multi-process; a mem cap alone is not a cap
 egress      = "ssrf_allowlist"   # https, public IPs, no redirects, bounded size/time
-warm_pool   = 2                  # hot path (note-enrichment fetch) — keep VMs pre-booted
+runtime     = "runc"             # NOT runsc: Chromium is gVisor's worst case (syscall-heavy,
+                                 # needs --no-sandbox) and it ships its own sandbox already
+warm_pool   = 2                  # hot path (note-enrichment fetch). NOTE: buy pre-pulled
+                                 # images + PriorityClass scheduling headroom FIRST — they
+                                 # cut cold start to ~1-2s with no freshness state to track.
+                                 # A pool is a lease protocol (atomic claim, claimed-never-
+                                 # returns, failure-paths-destroy, provably-pristine) whose
+                                 # bugs silently turn max_runs=1 into max_runs=N. 0 is a
+                                 # legitimate value if (1)+(2) measure fast enough.
+ttl_s       = 3600               # 1h. Browser processes leak memory anyway; the hourly
+                                 # recycle that fixes that also bounds compromise persistence.
 operation   = "sandbox.crawl"    # metering line item
 
 [[template]]
 name        = "tmpl-convert"
 dockerfile  = "tmpl-convert.Dockerfile"
+context     = "backend-python"   # same: MarkItDown arrives via the `convert` extra
 vcpu        = 1
 mem_mb      = 1024
 timeout_s   = 60
+pids_limit  = 128
 egress      = "deny"             # offline conversion
+runtime     = "runsc"            # THE gVisor ratchet: untrusted user files through parsers
+                                 # with no internal sandbox = the higher-risk Phase-1 surface.
+                                 # Needs Linux + runsc on the host; falls back to runc on
+                                 # macOS dev, where the boundary is weaker by necessity.
 warm_pool   = 1
+max_runs_per_sandbox = 5         # TIGHTER than the fleet default of 20: this is the
+                                 # highest-risk Phase-1 surface, so bound compromise
+                                 # persistence harder. Paired with a fresh subprocess
+                                 # per file (invariant 11) and a TTL restart.
+ttl_s       = 900                # 15m — tighter than crawl. Highest-risk Phase-1 surface, and
+                                 # a low-volume pool must not sit on one instance for hours.
 operation   = "sandbox.convert"
 
 [[template]]
 name        = "tmpl-coderun"     # Phase 2
 dockerfile  = "tmpl-coderun.Dockerfile"
-vcpu        = 1
-mem_mb      = 1024
-timeout_s   = 30
+context     = "backend-python"
+# ENVELOPE IS SIZED FOR DATA ANALYSIS, NOT "run a short script". The realistic job is
+# "parse and analyse the workspace's spreadsheets": pandas wants 5-10x file size
+# resident, and the per-file upload limit is 50 MB — so ONE 50 MB CSV becomes a
+# 250-500 MB frame before intermediates. At 1 GB / 30 s that OOMs or times out on a
+# perfectly ordinary request. These are CEILINGS: a SandboxSpec may lower them per
+# run (and should, for trivial scripts), never raise them.
+vcpu        = 2
+mem_mb      = 4096
+timeout_s   = 300
+pids_limit  = 128
+stdout_max_bytes = 262144        # 256 KiB, then truncate. Unbounded stdout flows into
+                                 # agent context — an analysis script printing a frame
+                                 # emits megabytes of billable tokens. Bulk output must
+                                 # go to files_out, not stdout.
 egress      = "deny"             # opt-in per-run allowlist, HITL-gated
-warm_pool   = 0                  # cold-start acceptable for a HITL-gated long-horizon action
+runtime     = "runsc"            # gVisor is the DEFAULT here, not a fallback. Its designed
+                                 # purpose IS untrusted code — Google runs multi-tenant
+                                 # customer code on it (Cloud Run, App Engine, GKE Sandbox).
+                                 # A microVM (SANDBOX_KIND=e2b_*) is STRONGER but NOT
+                                 # REQUIRED: buy it only if the threat model changes to
+                                 # third-party-authored code, hostile tenants, or a
+                                 # compliance rule naming hardware isolation.
+                                 # A Python transform script is also a far better gVisor fit
+                                 # than Chromium, which is why crawl stays on runc.
+pooled      = false              # NEVER served from a `service` pool (invariant 11) — a
+                                 # long-lived process that "resets" does not evict a resident
+                                 # attacker. This template needs REAL destruction.
+kinds       = ["k8s_pod", "oneshot", "e2b_selfhost", "e2b_cloud"]
+                                 # the kinds that actually destroy the instance. `service` is
+                                 # absent by design; `docker` is absent because it needs the
+                                 # runtime socket (invariant 8) for the highest-risk template.
+                                 # LOCAL MAC DEV is the documented exception — see
+                                 # docker-compose.sandbox.yml (runc, socket-free oneshot).
+# warm_pool and max_runs_per_sandbox are ORTHOGONAL — do not conflate them:
+#   max_runs_per_sandbox = 1  is the SECURITY property (never reuse an instance
+#                             after it ran model-authored code). Non-negotiable.
+#   warm_pool                 is a COST/LATENCY knob — how many PRISTINE, never-yet-
+#                             used instances to keep pre-started. Pre-warming an
+#                             unused sandbox is not a compromise; only reuse is.
+# warm_pool = 2 + max_runs = 1 is perfectly coherent: two clean instances ready,
+# each serving exactly one run, then destroyed and replaced.
+#
+# 0 here is a COST choice, not a security one: this action is HITL-gated and
+# long-horizon, so a human has just clicked approve and the boot is imperceptible.
+# Note cold start runs OPPOSITE to isolation strength — Firecracker boots in
+# ~150-250ms (that is what it exists for), well under a cold Kubernetes pod.
+# Raise this if run_script volume ever makes idle capacity worth it.
+warm_pool   = 0
+max_runs_per_sandbox = 1
+ttl_s       = 0                  # n/a — max_runs=1 means the instance dies after one run
 operation   = "sandbox.run_script"
