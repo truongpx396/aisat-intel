@@ -12,10 +12,18 @@ where you are deploying — the targets differ in topology:
 | Environment | `SANDBOX_KIND` | Why |
 |-------------|----------------|-----|
 | Local (macOS) | `docker` | gVisor is **Linux-only**; Docker Desktop ships only `runc`/`io.containerd.runc.v2`. No cluster either. |
-| **DO droplet — first deploy** | **`service`** + `SANDBOX_RUNTIME=runsc` | Long-lived pools, **no runtime socket anywhere**. Per-job would need one on compose, and that is host-equivalent privilege — a bad trade at MVP volume. Linux, so gVisor is a one-flag change. |
+| **DO droplet — first deploy** | **`service`** (+ `oneshot` for coderun) + `SANDBOX_RUNTIME=runsc` | Long-lived pools, **no runtime socket anywhere**. Per-job would need one on compose, and that is host-equivalent privilege — a bad trade at MVP volume. Linux, so gVisor is a one-flag change. |
 | k3s / EKS | `k8s_pod` | RBAC ServiceAccount instead of a socket. The preferred posture. |
 | EKS — `tmpl-coderun` | `k8s_pod` + `runsc` | gVisor is the **default** for model-authored code. No metal, no `/dev/kvm`, $0. |
 | Only if threat model changes | `e2b_selfhost` | Firecracker. **Not otherwise required** — see below. |
+
+> **No sandbox control plane runs on the droplet.** Every container there is declared up
+> front — `service` pools for crawl/convert, `oneshot` replicas for coderun — so nothing
+> creates anything at runtime and no socket is needed. `opensandbox` is the default backend
+> for `tmpl-coderun` (research §24 (i)), but it is a control plane that *spawns* containers,
+> and spawning on compose requires `/var/run/docker.sock`. So that default applies where its
+> **Kubernetes** runtime is available. Want spawn-per-job on the same droplet? Run **k3s** on
+> it — pods via an RBAC ServiceAccount, no socket. EKS is not required.
 
 Stronger boundaries are the same contract behind the same port — see
 [the ratchet](#the-isolation-ratchet) below.

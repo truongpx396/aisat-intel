@@ -179,6 +179,19 @@ services:
       sandbox-crawl: { condition: service_started }
 
   # ------------------------- sandbox tier (SANDBOX_KIND=service) --------------
+  # THERE IS NO SANDBOX CONTROL PLANE IN THIS FILE, AND THAT IS THE DESIGN.
+  # Every sandbox below is DECLARED up front; nothing spawns anything at runtime.
+  # Note research §24 (i) makes `opensandbox` the DEFAULT backend for tmpl-coderun
+  # — that default applies where its KUBERNETES runtime is available (k3s/EKS), NOT
+  # here. OpenSandbox is a control plane that CREATES containers, and creating
+  # containers on compose means mounting /var/run/docker.sock into it: host-
+  # equivalent privilege, in the component handling model-authored code (invariant
+  # 8, adoption gate 1). So on this droplet crawl/convert run as `service` pools and
+  # coderun runs as `oneshot` replicas. To get the spawn-per-job model on THIS
+  # hardware, run k3s here — then OpenSandbox uses the Kubernetes runtime and
+  # creates pods via an RBAC-scoped ServiceAccount, with no socket. EKS is not
+  # required; the constraint was never the hardware, it was the control plane.
+  #
   # NO DOCKER SOCKET IS MOUNTED ANYWHERE IN THIS FILE — that is the point of the
   # `service` kind. On compose, per-job isolation would require creating containers
   # at runtime, which means handing some component /var/run/docker.sock: HOST-
