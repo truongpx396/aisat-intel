@@ -102,8 +102,17 @@ runtime     = "runsc"            # gVisor is the DEFAULT here, not a fallback. I
 pooled      = false              # NEVER served from a `service` pool (invariant 11) — a
                                  # long-lived process that "resets" does not evict a resident
                                  # attacker. This template needs REAL destruction.
-kinds       = ["k8s_pod", "oneshot", "e2b_selfhost", "e2b_cloud"]
-                                 # the kinds that actually destroy the instance. `service` is
+default_kind = "opensandbox"     # DEFAULT for this template. OpenSandbox (Apache-2.0) is a
+                                 # purpose-built agent-sandbox runtime whose Kubernetes path
+                                 # builds on kubernetes-sigs/agent-sandbox; coderun was already
+                                 # gated on having a per-job substrate (k3s/EKS), so adopting it
+                                 # replaces work we would otherwise write, not a working system.
+                                 # ADOPTION IS GATED — see research §24 (i): its Docker runtime
+                                 # very likely needs a host socket (invariant 8), and
+                                 # max_runs=1 support is UNCONFIRMED. Until both are verified,
+                                 # `oneshot` remains the shipping fallback on plain compose.
+kinds       = ["opensandbox", "k8s_pod", "oneshot", "e2b_selfhost", "e2b_cloud"]
+                                 # every kind here actually DESTROYS the instance. `service` is
                                  # absent by design; `docker` is absent because it needs the
                                  # runtime socket (invariant 8) for the highest-risk template.
                                  # LOCAL MAC DEV is the documented exception — see

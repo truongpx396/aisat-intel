@@ -213,6 +213,7 @@ The `ingest` / `query` / `enrich` / `janitor` / `crawl` roles are **not** separa
 | **HITL gate** | no — internal step (FR-001) | no — internal step | **per run** for `transform_files` (writes); **per session** for read-only `run_script` |
 | **Metered as** | `sandbox.crawl` | `sandbox.convert` | `sandbox.run_script` |
 | **Lifecycle** | pooled, reset per job | pooled, reset per job | **destroyed after one run** — see the split below |
+| **Backend** (`SANDBOX_KIND`) | `service` (DO) / `k8s_pod` | `service` (DO) / `k8s_pod` | **`opensandbox`** — default, adoption gated |
 
 Two things this table is designed to keep separate. **`warm_pool` and `max_runs` are orthogonal**: `max_runs = 1` is the security property (never reuse an instance after it ran untrusted code), `warm_pool` is a cost knob (pre-warming a *pristine* instance is not a compromise) — `warm_pool = 2, max_runs = 1` is coherent and means zero cold start with zero reuse. And **"reset per job" is not "recycled"**: a fresh context clears *data* carryover, but it does not evict an attacker already resident in the process — that is what `max_runs`/`ttl_s` bound. Config lives in [`deploy/sandbox/templates/e2b.toml`](deploy/sandbox/templates/e2b.toml); the obligations behind it are contract invariants 1–12 in [sandbox-runtime.md](specs/001-contextengine-mvp/contracts/sandbox-runtime.md).
 
@@ -226,7 +227,7 @@ Two things this table is designed to keep separate. **`warm_pool` and `max_runs`
 |---|---|---|
 | `tmpl-crawl` | `service` — warm pool, fresh `browser.newContext()` per job | **same** — per-job pods buy nothing on a path already spending seconds on fetch + distill |
 | `tmpl-convert` | `service` — fresh subprocess + temp dir per file | **same** — per-job pods would add 1–2 s to a sub-second parse |
-| `tmpl-coderun` | **`oneshot`** — one job, then the process exits and is recreated | **`k8s_pod`** — a new Pod per job, created via RBAC |
+| `tmpl-coderun` | `oneshot` — **fallback**, since OpenSandbox's Docker runtime likely needs a socket | **`opensandbox`** — the default, on its Kubernetes runtime (`k8s_pod` remains supported) |
 | Control plane | **none** — every container is declared up front | RBAC ServiceAccount: `create`/`get`/`delete` pods in one namespace |
 | Runtime socket | **none** | **none** |
 | Isolation runtime | `runsc` (the droplet is Linux) | `runsc` via `runtimeClassName: gvisor` |
