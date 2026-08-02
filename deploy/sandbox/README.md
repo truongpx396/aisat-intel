@@ -194,6 +194,23 @@ mitigate this** — read-only applies to the socket *file*, not the API; `POST
   you cannot combine `docker` + `runsc` that way. The mitigation is **placement** (confine
   the socket, or split executor onto its own host) — or just use `k8s_pod`.
 
+**1b. Rootless Docker — optional host hardening for the DO droplet.** The rules above keep the
+socket away from the app, but `dockerd` itself still runs as **root** and still recreates
+`oneshot` containers, so a container escape lands as host root. Running the engine
+[rootless](https://docs.docker.com/engine/security/rootless/) drops that to an unprivileged
+user: an escape then yields a normal account, not the machine. It is genuine defense-in-depth
+and **orthogonal** to invariant 8 — it does not replace socket confinement, it reduces the
+blast radius if everything else fails. Two caveats decide whether it is worth it:
+
+- **It is mutually exclusive with gVisor.** `runsc` does not run cleanly under rootless Docker,
+  so this is an *alternative* to `SANDBOX_RUNTIME=runsc`, never additive. On a Linux droplet
+  gVisor is the stronger of the two — prefer it, and consider rootless only where `runsc` is
+  unavailable or a workload cannot tolerate its syscall overhead.
+- **`pids_limit` silently stops applying** unless the host has cgroup v2 with systemd
+  delegation. Losing the PID cap means a fork bomb in a sandbox can again exhaust the node's
+  process table — so if you enable rootless, re-run `make sandbox-verify` *and* confirm the cap
+  is actually enforced at runtime, not merely present in the config.
+
 **2. No bind mounts, ever.** Files enter only as S3-staged `files_in` and leave only as
 `files_out`. No host path is mounted into any sandbox, for any template. This is
 structural, not hygienic: it makes mount-argument injection impossible (there is no mount
