@@ -59,20 +59,40 @@ if sock:
 else:
     ok("invariant 8: no container-runtime socket mounted in any service")
 
-sandboxes = {n: s for n, s in svcs.items() if n.startswith("sandbox-")}
-if not sandboxes:
-    print("  (no sandbox-* services in this file)")
-    sys.exit(rc)
-
 SECRET = re.compile(
     r"(API_KEY|PASSWORD|SECRET|TOKEN|DATABASE_URL|_DSN|PRIVATE_KEY)", re.I)
 ALLOWED_SECRETS = {"SANDBOX_API_KEY"}   # authenticates INBOUND calls; not a provider key
 
+def env_of(s):
+    e = s.get("environment", {}) or {}
+    return dict(x.split("=", 1) for x in e if "=" in x) if isinstance(e, list) else e
+
+# --- sandbox CONTROL PLANE (e.g. an OpenSandbox server) --------------------
+# Not a sandbox, so the container-hardening rules below do not apply — but it
+# must still never inherit the app's env_file. This check exists because
+# `<<: *app-env` once silently handed every sandbox OPENAI_API_KEY,
+# DATABASE_URL and JWT_SECRET; a control plane is an even worse place for them.
+for name, s in sorted(svcs.items()):
+    if not re.match(r"(opensandbox|sandbox-orchestrator|sandbox-server)", name):
+        continue
+    env = env_of(s)
+    leaked = sorted(k for k in env if SECRET.search(k) and k not in ALLOWED_SECRETS)
+    if leaked:
+        bad(f"{name}: control plane holds app credentials: {leaked} — enumerate, never inherit")
+    elif len(env) > 20:
+        bad(f"{name}: control plane has {len(env)} env vars — looks like an inherited env_file")
+    else:
+        ok(f"{name}: control plane — {len(env)} env vars, no app credentials")
+
+sandboxes = {n: s for n, s in svcs.items() if n.startswith("sandbox-")
+             and not re.match(r"(sandbox-orchestrator|sandbox-server)", n)}
+if not sandboxes:
+    print("  (no sandbox-* workload services in this file)")
+    sys.exit(rc)
+
 for name, s in sorted(sandboxes.items()):
     # --- invariant 1: no ambient credentials -------------------------------
-    env = s.get("environment", {}) or {}
-    if isinstance(env, list):
-        env = dict(e.split("=", 1) for e in env if "=" in e)
+    env = env_of(s)
     leaked = sorted(k for k in env if SECRET.search(k) and k not in ALLOWED_SECRETS)
     if leaked:
         bad(f"{name}: invariant 1 — ambient credentials present: {leaked}")
