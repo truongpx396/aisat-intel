@@ -1,0 +1,24 @@
+# ---------------------------------------------------------------------------
+# LiteLLM gateway placeholder config — Stage 1 bootstrap (T005).
+#
+# This file exists ONLY so `docker compose config` / `docker compose up` has
+# a valid file to bind-mount for the llm-gateway service, and so the
+# container has a structurally valid config to boot with. It intentionally
+# has NO real routing table.
+#
+# The real model-alias routing (fast / smart / embed / rerank aliases →
+# provider models), provider API keys, multi-key load-balancing, one-hop
+# fallback, and circuit-breaker configuration are populated in T024b
+# ("Deploy the standalone LLM gateway service", Stage 2). Do not add real
+# provider wiring here before then.
+# ---------------------------------------------------------------------------
+
+model_list:
+  # Inert placeholder alias — references an environment variable that is
+  # never set anywhere in this stack, so it resolves to no working model.
+  # Present only so `model_list` is non-empty for a reliable boot; replaced
+  # wholesale by T024b's real aliases.
+  - model_name: placeholder
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/PLACEHOLDER_API_KEY

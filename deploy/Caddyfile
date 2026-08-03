@@ -1,0 +1,57 @@
+# ---------------------------------------------------------------------------
+# Local-dev reverse proxy (T006). Fronts the Go BFF (REST + SSE) and serves
+# the built SPA. Plain HTTP on :80 — no ACME/automatic HTTPS in local dev
+# (compare deploy/do/Caddyfile, which adds the `{$PRODUCTION_HOST}` site
+# block + ACME email for the droplet).
+#
+# BOOTSTRAP-STAGE NOTE (Stage 1, pre-application-code): `go-api` and
+# `go-relay` below are upstream hostnames that do NOT resolve yet — they are
+# not services in deploy/docker-compose.yml (T005) because the Go BFF doesn't
+# exist until later stages (T024 scaffolds cmd/api + cmd/relay sharing one
+# image). Likewise `/srv` has nothing mounted into it yet; the frontend build
+# output + its compose volume wiring land with the frontend app code.
+# Referencing not-yet-resolvable upstreams here is expected for a
+# bootstrap-stage reverse-proxy config, not a bug — `make up` will start
+# Caddy fine, and requests will simply 502 until those later stages land.
+# ---------------------------------------------------------------------------
+
+:80 {
+	encode zstd gzip
+
+	# Streaming (SSE) routes -> the relay tier. flush_interval -1 is load-
+	# bearing: without it Caddy buffers the response and the browser never
+	# sees incremental `token` events (contracts/sse-events.md). Path list
+	# mirrors deploy/do/Caddyfile's already-established @stream matcher.
+	@stream path /api/v1/query/*/stream /api/v1/ingest/*/status /api/v1/events*
+	handle @stream {
+		reverse_proxy go-relay:8080 {
+			flush_interval -1
+			transport http {
+				versions 1.1
+			}
+		}
+	}
+
+	# REST API -> the BFF.
+	handle /api/* {
+		reverse_proxy go-api:8080
+	}
+
+	# Everything else -> the SPA static build.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
