@@ -126,6 +126,40 @@ Recipient-scoped record of a workspace event, surfaced in-app and optionally by 
 - `payments` (K) — fiat transaction record (top-up or subscription invoice) for receipts/refunds/reconciliation; 1:1 with a `credit_ledger` grant via `idem_key`.
 - `payment_events` (K) — verified provider webhook dedup + audit (`UNIQUE (provider, provider_event_id)`, AP4).
 
+### Document Versioning (Phase 2 — agent file edits)
+
+Needed by the agent `transform_files` tool: an approved run **replaces the document's current
+content in place and retains the prior bytes as a version**. Append-only — a version row's
+`s3_key` is never overwritten or deleted, which is the entire reason this shape was chosen
+over an artifact-only write-back.
+
+- `document_versions` (P): `id`, `workspace_id` (RLS), `document_id` FK, `version_no` INT,
+  `s3_key`, `content_hash`, `byte_size`, `created_via` (`member_upload`|`agent_edit`),
+  `created_by_user_id`, `agent_run_id` FK NULL, `sandbox_run_id` FK NULL,
+  `approval_request_id` FK NULL, `created_at`. `UNIQUE (document_id, version_no)`.
+- `documents.current_version_no` INT — the pointer; `documents.s3_key` always resolves to the
+  current version's object.
+
+Five rules, each load-bearing:
+
+1. **Accountability lands on a human, not the agent.** On an `agent_edit`, `created_by_user_id`
+   is the **approving member** — never the agent or its owner-by-default. This is what keeps
+   FR-004's principle intact: a document's content still changes only through an authenticated
+   human context, with `agent_run_id` / `sandbox_run_id` recording *how* it was produced.
+2. **`access_level` never changes on an agent edit.** The `WriteEnvelope` floor that governs
+   `edit_note` applies unchanged — an agent may not raise a document's access level, and edits
+   are bounded by `min(agent, owner)` clearance.
+3. **Re-index REPLACES, it does not append.** On commit, the prior version's Qdrant points and
+   `chunks` rows are deleted and the new version is ingested (convert → chunk → embed) in the
+   same idempotent unit, keyed by `document_version.id`. Getting this wrong is silent and
+   corrupting: appending leaves stale chunks answering queries from content that no longer
+   exists, and a partial delete leaves a document unsearchable.
+4. **History is immutable; rollback moves forward.** Restoring version *N* creates version *N+1*
+   carrying *N*'s bytes. Versions are never mutated or removed, so an approved-then-regretted
+   agent edit is always recoverable.
+5. **Rollback is a member action.** Never an agent tool — otherwise an agent could launder a
+   rejected edit by restoring a version it authored.
+
 ## Vector store (Qdrant) payload schema
 
 Two collections: `personal`, `workspace`. Every chunk payload:

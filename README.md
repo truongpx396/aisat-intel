@@ -102,15 +102,15 @@ flowchart TB
     end
 
     subgraph CRAWL["🕷️ Crawl orchestrator — thin role"]
-        Crawl["consumes ingestion.crawl<br/>drives crawl4ai inside a sandbox microVM"]
+        Crawl["consumes ingestion.crawl<br/>drives crawl4ai inside a sandbox"]
     end
 
     subgraph GATEWAY["🔌 LLM Gateway — standalone service (LiteLLM · Bifrost-swappable)"]
         Gateway["aliases · multi-key LB · one-hop fallback<br/>only holder of provider keys"]
     end
 
-    subgraph SANDBOX["🧰 Sandbox Runtime — self-hosted E2B (Firecracker microVMs · Daytona-swappable)"]
-        Sbx["tmpl-crawl · tmpl-convert · tmpl-coderun<br/>ephemeral microVM · egress default-deny · metered<br/>the only chokepoint for untrusted / generated code"]
+    subgraph SANDBOX["🧰 Sandbox Runtime — hardened container, no microVM (gVisor / Firecracker-µVM swappable)"]
+        Sbx["tmpl-crawl · tmpl-convert · tmpl-coderun<br/>ephemeral · no ambient creds · egress default-deny · metered<br/>the only chokepoint for untrusted / generated code"]
     end
 
     subgraph DATA["🗄️ Backing Stores"]
@@ -149,7 +149,7 @@ flowchart TB
 - **Redis** is the low-latency control plane: credit fast-path, idempotency guards, rate limits / quotas, security throttling, LangGraph checkpoints, semantic answer-cache, and the outbox queue (see [Redis — the Production Hot Path](#-redis--the-production-hot-path)).
 - **The LLM Gateway** is a **standalone OpenAI-wire service** (LiteLLM, Bifrost-swappable) — the *only* place model IDs + provider keys live; both runtimes call it by alias through a thin client. Its own budget + cache are **off**: credit metering stays single-writer in Go, and the clearance-scoped answer-cache stays in the app (SC-006 / SC-001).
 - **The MCP server** is the *only* tool surface — every dispatch is allowlist-checked.
-- **The Sandbox Runtime** is the *only* place untrusted or model-**generated** code runs — a **standalone, self-hosted E2B tier** (Firecracker microVMs; Daytona/gVisor-swappable) that is the sole holder of the sandbox fleet + template registry + egress policy, exactly as the LLM Gateway is the sole holder of provider keys. crawl4ai fetch, MarkItDown convert, and the Phase-2 code-gen tools all run as ephemeral, egress-locked microVMs behind a thin `Sandbox` port — never on a worker pod, never with ambient credentials. See [sandbox-runtime.md](specs/001-contextengine-mvp/contracts/sandbox-runtime.md).
+- **The Sandbox Runtime** is the *only* place untrusted or model-**generated** code runs — a **standalone tier** that is the sole holder of the template registry + egress policy, exactly as the LLM Gateway is the sole holder of provider keys. crawl4ai fetch, MarkItDown convert, and the Phase-2 code-gen tools all run as ephemeral, credential-free, egress-locked sandboxes behind a thin `Sandbox` port — never in the orchestrator process, never with ambient credentials. **Phase 1 runs the cheapest boundary that carries that contract (a hardened pod, $0 incremental); gVisor and Firecracker microVMs are the same contract behind the same port, bought per workload.** See [sandbox-runtime.md](specs/001-contextengine-mvp/contracts/sandbox-runtime.md).
 
 #### Deployable runtimes at a glance
 
@@ -164,20 +164,20 @@ The system builds into **three images**, each deployed as one or more independen
 | | **`query`** | `query.agent.*` subject | LangGraph RAG agent (stream partials → Redis) | consumer lag (×3) |
 | | **`enrich`** | `enrich.note.*` subject | note-enrichment orchestration (distill → draft) | consumer lag |
 | | **`janitor`** | `agent.janitor.tick` | single-owner stale-`agent_run` re-queue | single-owner |
-| **`crawl` orchestrator** (runs from `backend-python`) | **`crawl`** | `ingestion.crawl.*` subject | thin orchestrator — drives crawl4ai **inside a `tmpl-crawl` sandbox microVM** (headless Chromium off the shared pods) | consumer lag |
+| **`crawl` orchestrator** (runs from `backend-python`) | **`crawl`** | `ingestion.crawl.*` subject | thin orchestrator — drives crawl4ai **inside a `tmpl-crawl` sandbox** (headless Chromium off the shared pods) | consumer lag |
 | **`llm-gateway`** (LiteLLM · Bifrost-swappable) | **standalone service** | `:4000` (OpenAI-wire) | aliases · multi-key LB · one-hop fallback · sole holder of provider keys | in-flight requests |
-| **`sandbox` / E2B self-host** (Firecracker · Daytona/gVisor-swappable) | **standalone tier** | fleet control plane + template registry + egress proxy | ephemeral microVMs: `tmpl-crawl` (crawl4ai) · `tmpl-convert` (markitdown) · `tmpl-coderun` (code-gen) — egress default-deny · metered per sandbox-second · sole holder of the fleet | sandbox demand (dedicated KVM / `*.metal` pool) |
+| **`sandbox`** (hardened container · `service`/`oneshot` on DO, per-job pods on k8s) | **standalone tier** | template registry + egress proxy | ephemeral sandboxes: `tmpl-crawl` (crawl4ai) · `tmpl-convert` (markitdown) · `tmpl-coderun` (code-gen) — no ambient creds · egress default-deny · metered per sandbox-second | sandbox demand (**Phase 1: the existing app node pool, $0 incremental**) |
 
-> **Note the two things people usually get wrong here:** the **email/notification** worker and the **billing** worker are **Go** (`cmd/worker`) roles — not Python — because they carry no ML; and the **crawl** role no longer ships as a bespoke Chromium image — it is a **thin orchestrator** (in the `backend-python` image) that offloads the headless browser into a **sandbox microVM** (see below). The two subsections that follow expand the Go and Python splits.
+> **Note the two things people usually get wrong here:** the **email/notification** worker and the **billing** worker are **Go** (`cmd/worker`) roles — not Python — because they carry no ML; and the **crawl** role no longer ships as a bespoke Chromium image — it is a **thin orchestrator** (in the `backend-python` image) that offloads the headless browser into a **sandbox** (see below). The two subsections that follow expand the Go and Python splits.
 
 #### One Python codebase, many worker roles
 
-The `ingest` / `query` / `enrich` / `janitor` / `crawl` roles are **not** separate repositories — they are logical roles inside the single `backend-python/` codebase (one image, one `pyproject.toml`). **The split happens at the deployment layer, not the code layer:** the same image is deployed as multiple pods, each with an entrypoint that subscribes to a different **NATS subject**. (Billing and the notification/email workers are **Go** [`cmd/worker`](#one-go-image-three-deployable-roles-api--sse-relay--worker) roles, not Python.) The heavy, security-sensitive workloads — the crawl fetch and document convert — are **not** run on these pods; they are offloaded into the **Sandbox Runtime** (self-hosted E2B microVMs), which the crawl/ingest roles drive over a thin `Sandbox` port:
+The `ingest` / `query` / `enrich` / `janitor` / `crawl` roles are **not** separate repositories — they are logical roles inside the single `backend-python/` codebase (one image, one `pyproject.toml`). **The split happens at the deployment layer, not the code layer:** the same image is deployed as multiple pods, each with an entrypoint that subscribes to a different **NATS subject**. (Billing and the notification/email workers are **Go** [`cmd/worker`](#one-go-image-three-deployable-roles-api--sse-relay--worker) roles, not Python.) The heavy, security-sensitive workloads — the crawl fetch and document convert — are **not** run on these pods; they are offloaded into the **Sandbox Runtime**, which the crawl/ingest roles drive over a thin `Sandbox` port:
 
 ```text
               ┌──────────────────────────────┐                       ┌────────────────────────────────────┐
-              │   backend-python/ (1 image)  │   Sandbox port        │   🧰 Sandbox Runtime (E2B)          │
-              │   shared code · schemas ·    │  (stage files · run · │   self-hosted · Firecracker µVMs   │
+              │   backend-python/ (1 image)  │   Sandbox port        │   🧰 Sandbox Runtime — pod default │
+              │   shared code · schemas ·    │  (stage files · run · │   $0 infra · gVisor/µVM-swappable  │
               │   LLM gateway · MCP · Sandbox│   metered · audited)  │   egress default-deny · torn down  │
               └───────────────┬──────────────┘ ────────────────────▶ │   tmpl-crawl · tmpl-convert ·      │
         same image, one entrypoint per NATS subject                  │   tmpl-coderun (Phase 2)           │
@@ -191,14 +191,65 @@ The `ingest` / `query` / `enrich` / `janitor` / `crawl` roles are **not** separa
                                                                                        └─────────┘
 ```
 
-**Why the browser + parsers run in a sandbox microVM.** Crawl4AI drives a full **headless browser** (Chromium) and MarkItDown parses **untrusted user files** — heavy, security-sensitive, resource-divergent workloads unlike the stateless Python pods, and both execute *attacker-influenceable* input (a pasted link, a crafted PDF). Running them inside an **ephemeral, network-isolated microVM** (hardware virtualization) keeps that footprint off the ingest/query/agent pods, lets the sandbox fleet scale independently, and gives a **strictly stronger blast-radius boundary** than the old separate-pod split — a compromised browser or parser can't touch the cluster. The `crawl` role is now just a **thin orchestrator**: it consumes `ingestion.crawl.*` — the **internal fetch step of member-initiated note enrichment** (FR-001), never an autonomous agent action — runs the fetch in a `tmpl-crawl` sandbox, and its distilled output enters the index only after the member accepts the draft. Full design: [sandbox-runtime.md](specs/001-contextengine-mvp/contracts/sandbox-runtime.md).
+**Why the browser + parsers run in a sandbox.** Crawl4AI drives a full **headless browser** (Chromium) and MarkItDown parses **untrusted user files** — heavy, security-sensitive, resource-divergent workloads unlike the stateless Python pods, and both execute *attacker-influenceable* input (a pasted link, a crafted PDF). Running them in an **ephemeral, credential-free, egress-locked sandbox** keeps that footprint off the ingest/query/agent pods, lets sandbox capacity scale independently, and bounds the blast radius: a compromised browser or parser holds no provider key, no DB/Qdrant route, and no network except a proxied allowlist.
+
+**Phase 1 buys the cheapest boundary that carries that contract — a hardened container, no microVM, $0 incremental.** Firecracker would be stronger, but it needs `/dev/kvm`, which on AWS means a `*.metal` node group at roughly **$3k/month standing**. Because everything runs behind the `Sandbox` port, isolation strength is a **deployment dial, not an architecture** — and it is set on **two orthogonal axes**: `SANDBOX_KIND` (orchestration: `service` on the DO droplet, `k8s_pod` on k3s/EKS, `docker` for local macOS) and `SANDBOX_RUNTIME` (`runc` | `runsc`, **per template**, which is what makes the ratchet below expressible). Notably, **no Phase-1 or Phase-2 workload requires `/dev/kvm`**: even `tmpl-coderun` lands on gVisor + never-reuse, so the metal pool may never need to exist. The same contract tests pass against every backend, so an upgrade is a config flip, not a migration.
+
+#### The sandbox tier at a glance
+
+| | `tmpl-crawl` | `tmpl-convert` | `tmpl-coderun` |
+|---|---|---|---|
+| **Toolchain** | Crawl4AI + Playwright/Chromium | MarkItDown + LibreOffice/pandoc | Python + Node, no secrets |
+| **Phase** | 1 | 1 | **2** |
+| **Runtime** (`SANDBOX_RUNTIME`) | `runc` — Chromium is gVisor's worst case and ships its own sandbox | **`runsc`** (gVisor) — parsers have no internal sandbox | **`runsc`** (gVisor) |
+| **Pooled?** | yes | yes | **no** (`pooled = false`) |
+| **`warm_pool`** | 2 | 1 | 0 |
+| **`max_runs_per_sandbox`** | 20 | **5** (tightened) | **1** — non-negotiable |
+| **`ttl_s`** | 3600 (1 h) | **900** (15 m) | n/a — dies after one run |
+| **Reset per job** | fresh `browser.newContext()` | fresh subprocess + temp dir | whole instance destroyed |
+| **Workspace boundary** | *hard* per-job (`k8s_pod`), *soft* under `service` | same | **always hard** |
+| **Egress** | SSRF allowlist only | **none** (offline) | none; opt-in per run, HITL |
+| **Caps** (vCPU/mem/wall/PID) | 1 · 2 GB · 45 s · 256 | 1 · 1 GB · 60 s · 128 | **2 · 4 GB · 300 s** · 128 — sized for *analysis*, not a short script |
+| **HITL gate** | no — internal step (FR-001) | no — internal step | **per run** for `transform_files` (writes); **per session** for read-only `run_script` |
+| **Metered as** | `sandbox.crawl` | `sandbox.convert` | `sandbox.run_script` |
+| **Lifecycle** | pooled, reset per job | pooled, reset per job | **destroyed after one run** — see the split below |
+| **Backend** (`SANDBOX_KIND`) | `service` (DO) / `k8s_pod` | `service` (DO) / `k8s_pod` | **`opensandbox`** — default, adoption gated |
+
+Two things this table is designed to keep separate. **`warm_pool` and `max_runs` are orthogonal**: `max_runs = 1` is the security property (never reuse an instance after it ran untrusted code), `warm_pool` is a cost knob (pre-warming a *pristine* instance is not a compromise) — `warm_pool = 2, max_runs = 1` is coherent and means zero cold start with zero reuse. And **"reset per job" is not "recycled"**: a fresh context clears *data* carryover, but it does not evict an attacker already resident in the process — that is what `max_runs`/`ttl_s` bound. Config lives in [`deploy/sandbox/templates/e2b.toml`](deploy/sandbox/templates/e2b.toml); the obligations behind it are contract invariants 1–12 in [sandbox-runtime.md](specs/001-contextengine-mvp/contracts/sandbox-runtime.md).
+
+#### DO droplet vs Kubernetes — what actually differs
+
+**The security contract is identical in both.** All twelve invariants hold, and the same contract tests pass unchanged. What differs is the **lifecycle**, and only because the two environments have opposite privilege economics:
+
+> **Per-job isolation is worth buying exactly when it doesn't cost you a runtime socket.** On compose, creating a container per job means mounting `/var/run/docker.sock` — *host-equivalent, unbounded* privilege sitting next to untrusted input. Paying that to close a *bounded* tenant-persistence risk is a bad trade. On Kubernetes the calculus inverts: per-job costs only an RBAC-scoped ServiceAccount, so you take it.
+
+| | **DO droplet** (compose) | **k3s / EKS** |
+|---|---|---|
+| `tmpl-crawl` | `service` — warm pool, fresh `browser.newContext()` per job | **same** — per-job pods buy nothing on a path already spending seconds on fetch + distill |
+| `tmpl-convert` | `service` — fresh subprocess + temp dir per file | **same** — per-job pods would add 1–2 s to a sub-second parse |
+| `tmpl-coderun` | `oneshot` — **fallback**, since OpenSandbox's Docker runtime likely needs a socket | **`opensandbox`** — the default, on its Kubernetes runtime (`k8s_pod` remains supported) |
+| Control plane | **none** — every container is declared up front | RBAC ServiceAccount: `create`/`get`/`delete` pods in one namespace |
+| Runtime socket | **none** | **none** |
+| Isolation runtime | `runsc` (the droplet is Linux) | `runsc` via `runtimeClassName: gvisor` |
+| Job transport *into* the sandbox | NATS — under `oneshot`, a supervisor holds the connection and forks the untrusted code with **no network** | the pod spec itself — **the sandbox needs no bus route at all** |
+| Freshness of an instance | true *by construction* (`read_only` + tmpfs + the process must exit) | *observable* — a new Pod object with a new UID |
+| Concurrency | fixed replica count | autoscales (KEDA / HPA) |
+| Workspace boundary | **soft** for pooled templates, **hard** for `oneshot` | **hard** everywhere per-job |
+
+**What moving to Kubernetes actually buys you** — three things, in order of importance: the sandbox stops needing a message-bus route (`oneshot`'s weakest point disappears, since the job arrives *with* the pod); freshness becomes observable rather than argued; and capacity autoscales. It does **not** buy a stronger boundary — that's `SANDBOX_RUNTIME`, which is `runsc` in both.
+
+> **Don't port the compose config to Kubernetes verbatim.** `oneshot` exists because compose has no safe control plane; Kubernetes does, so per-job creation is the right shape there. Two concrete traps: an `emptyDir` **survives a container restart** (it is scoped to the Pod, not the container), so the `read_only` + tmpfs guarantee that `oneshot` leans on does *not* transfer; and a container that exits after every job reads to the kubelet as `CrashLoopBackOff`.
+
+**On start latency.** A per-job pod is ~2–5 s cold, or ~1–2 s with pre-pulled images plus a `PriorityClass` headroom placeholder — and **sub-second is not achievable** for that primitive. It never bites here because the only template needing per-job pods is `tmpl-coderun`, which is HITL-gated: a human has just clicked approve. Crawl and convert stay pooled precisely so they never pay it. If you ever need per-job destruction *and* sub-second starts, the answer is a **microVM** (`e2b_*`, ~200 ms), not a pod — Firecracker is simultaneously the stronger boundary and the faster start.
+
+The `crawl` role is now just a **thin orchestrator**: it consumes `ingestion.crawl.*` — the **internal fetch step of member-initiated note enrichment** (FR-001), never an autonomous agent action — runs the fetch in a `tmpl-crawl` sandbox, and its distilled output enters the index only after the member accepts the draft. Full design: [sandbox-runtime.md](specs/001-contextengine-mvp/contracts/sandbox-runtime.md).
 
 | | |
 |---|---|
 | **What it gives you** | Independent horizontal scaling + per-subject failure isolation, while every in-image role shares the same code, schemas, LLM gateway, and MCP server. |
 | **What pattern it is** | A **modular monolith / distributed-worker** model — same family as Celery/Sidekiq queue-scoped workers or NATS/Kafka consumer groups ("one codebase → N specialized consumer deployments"). |
 | **Why this middle ground** | It sits between a do-everything monolith (can't scale roles independently) and a repo-per-service split (schema/version-skew tax). |
-| **Tradeoffs to manage** | Set **per-role resource limits & autoscaling** (ingest is bursty; query is latency-sensitive), and keep dependency hygiene tight since the in-image roles share one image. The heavy/untrusted workloads — headless-browser **crawl** and file-parsing **convert** — are **offloaded into sandbox microVMs** rather than fattening these pods (Chromium + parsers don't belong on stateless workers); a future audio/Whisper worker is the next natural candidate, either as another in-image role or a `tmpl-whisper` sandbox — the per-subject consumer boundary and the `Sandbox` port make each such split a low-friction refactor. |
+| **Tradeoffs to manage** | Set **per-role resource limits & autoscaling** (ingest is bursty; query is latency-sensitive), and keep dependency hygiene tight since the in-image roles share one image. The heavy/untrusted workloads — headless-browser **crawl** and file-parsing **convert** — are **offloaded into sandboxes** rather than fattening these pods (Chromium + parsers don't belong on stateless workers); a future audio/Whisper worker is the next natural candidate, either as another in-image role or a `tmpl-whisper` sandbox — the per-subject consumer boundary and the `Sandbox` port make each such split a low-friction refactor. |
 
 📐 Full architecture diagram: [system-architecture.excalidraw](specs/001-contextengine-mvp/diagrams/system-architecture.excalidraw)
 
@@ -457,7 +508,7 @@ Access control is **structural**, enforced at multiple layers — not by trustin
 - **Existence privacy** — cross-clearance / cross-workspace lookups return `not_found`, never `forbidden`, so restricted resources aren't probeable.
 - **Prompt-injection defense** — disallowed/injection inputs are refused *before* retrieval or credit spend; retrieved documents are treated as inert reference material.
 - **Human-in-the-loop gate** — any action that mutates the index, raises a document's clearance, or reaches outside the workspace pauses for an explicit human decision recorded *before* the action and *before* any spend; the gate is **fail-closed** (unresolved/rejected ⇒ never proceeds) and the decision is human-authored, never derived from model/tool output — so a poisoned page can at worst influence a *draft the human reviews*. One reusable port backs every such confirmation (see [contracts/approval-ports.md](specs/001-contextengine-mvp/contracts/approval-ports.md)).
-- **Sandbox isolation for untrusted / generated code** — every untrusted browser (crawl4ai), untrusted file parser (MarkItDown), and model-**generated** script runs inside an **ephemeral, network-isolated microVM** (self-hosted E2B / Firecracker), never on a worker pod. The sandbox holds **no provider key and no DB/Qdrant access**; egress is **default-deny + SSRF-allowlisted**, so generated code that needs AI or knowledge must call back through the LLM Gateway / MCP chokepoints — it can't bypass them. It operates only on S3-staged, clearance-scoped files, and its output re-enters the index only through the existing pipeline / HITL accept gate — so a crafted PDF or poisoned page can at worst influence a *draft a human reviews*, never widen access (SC-001). Every run is metered per sandbox-second and audited (`sandbox_run`). See [contracts/sandbox-runtime.md](specs/001-contextengine-mvp/contracts/sandbox-runtime.md).
+- **Sandbox isolation for untrusted / generated code** — every untrusted browser (crawl4ai), untrusted file parser (MarkItDown), and model-**generated** script runs inside an **ephemeral, credential-free, egress-locked sandbox**, never in the orchestrator process. Phase 1 uses a hardened container — long-lived pools for crawl/convert, and one-job-then-exit for code-gen; gVisor and Firecracker microVMs are the same contract behind the same port, bought per workload. The sandbox holds **no provider key and no DB/Qdrant access**; egress is **default-deny + SSRF-allowlisted**, so generated code that needs AI or knowledge must call back through the LLM Gateway / MCP chokepoints — it can't bypass them. It operates only on S3-staged, clearance-scoped files, and its output re-enters the index only through the existing pipeline / HITL accept gate — so a crafted PDF or poisoned page can at worst influence a *draft a human reviews*, never widen access (SC-001). Every run is metered per sandbox-second and audited (`sandbox_run`). See [contracts/sandbox-runtime.md](specs/001-contextengine-mvp/contracts/sandbox-runtime.md).
 
 These are aligned with **OWASP Top 10 (2025)** — see the repo-wide [security & OWASP instructions](.github/instructions/security-and-owasp.instructions.md).
 
@@ -750,7 +801,7 @@ Every answer is fully traceable. The **debug panel** (US5) surfaces, per query: 
 | **Go BFF / Gateway / Kernel** | Go 1.23 · Gin · GORM · nats.go · go-redis · OpenTelemetry · zerolog · Sentry |
 | **Python ML / Agent Tier** | Python 3.12 · FastAPI · LangGraph · Mem0 · BAML · FastMCP · MarkItDown · Crawl4AI · qdrant-client · Langfuse SDK |
 | **LLM Gateway** | LiteLLM (standalone, OpenAI-wire) · Bifrost-swappable · aliases · multi-key LB · one-hop fallback · sole provider-key holder |
-| **Sandbox Runtime** | E2B (self-hosted, Firecracker microVMs) · Daytona/gVisor-swappable · versioned templates (`tmpl-crawl`/`convert`/`coderun`) · default-deny + SSRF-allowlisted egress proxy · sole holder of the sandbox fleet |
+| **Sandbox Runtime** | Hardened container, **no runtime socket in any environment** — `service` pools + `oneshot` code-gen on the DO droplet, per-job pods via an RBAC-scoped ServiceAccount on k3s/EKS · gVisor (`runsc`) as the per-template runtime ratchet, Firecracker microVMs via **E2B** available but **not required** · versioned templates (`tmpl-crawl`/`convert`/`coderun`) · default-deny + SSRF-allowlisted egress proxy · no bind mounts, allowlisted create-args |
 | **Frontend** | React 19 · Vite · TypeScript 5.x · native EventSource/SSE · PostHog |
 | **Data** | PostgreSQL (RLS) · Redis · Qdrant (hybrid BM25/SPLADE + dense) · S3 |
 | **Async / Edge** | NATS · Caddy (reverse proxy + auto TLS) · CloudFront (prod CDN) |
@@ -809,7 +860,7 @@ aisat-intel/
 │   │   │   ├── llm_gateway.py         #     thin client to the standalone LLM gateway (LiteLLM/Bifrost): clearance-cache · PII scrub · budget gate · spend emit · trace
 │   │   │   ├── ingestion/             #     pipeline · chunker · captioner · markitdown · crawl_orchestrator · tagger
 │   │   │   ├── retrieval/             #     hybrid · reranker · hot_cold · filter
-│   │   │   ├── sandbox/               #     Sandbox port + client (E2B/Daytona-swappable) — isolated crawl/convert/code-gen exec
+│   │   │   ├── sandbox/               #     Sandbox port + client (pod default; gVisor/µVM-swappable) — isolated crawl/convert/code-gen exec
 │   │   │   └── agent/                 #     graph (7+1 nodes) · memory (Mem0) · semantic cache · suggestions
 │   │   ├── mcp_server/                #   server.py + tools/{knowledge,structured,utility} · billing/ledger.py
 │   │   ├── baml_client/               #   generated BAML client
@@ -829,7 +880,7 @@ aisat-intel/
 ├── deploy/
 │   ├── docker-compose.yml             # local dev: postgres · redis · qdrant · nats · casdoor · caddy · llm-gateway
 │   ├── llm-gateway/                   # standalone LLM gateway config (LiteLLM config.yaml; Bifrost-swappable) — aliases · keys · LB
-│   ├── sandbox/                       # standalone sandbox tier: microVM templates (tmpl-crawl/convert/coderun) + self-host/egress config
+│   ├── sandbox/                       # standalone sandbox tier: templates (tmpl-crawl/convert/coderun) + hardening/egress config
 │   └── Caddyfile                      # reverse proxy · automatic TLS · static SPA serving
 │
 ├── specs/001-contextengine-mvp/       # 📋 the full design package (source of truth)
@@ -917,7 +968,7 @@ A dark-first developer/observability aesthetic — *"code dark + run green"* (sl
 | **Phase 2 — Evaluation Suite & Billing** | Full Promptfoo + DeepEval + Ragas, **answer-groundedness self-correction** (CRAG/Self-RAG node — grade → re-retrieve / abstain, see [research §17](specs/001-contextengine-mvp/research.md)), context compression (Headroom seam), **complexity-based model routing** (RouteLLM-style strong/cheap selection — app-side decision, eval-gated, see [research §22](specs/001-contextengine-mvp/research.md)), audio ingestion (Whisper), the **billing & payments** layer (Stripe / Polar / PayPal adapters, checkout, webhooks, subscriptions — see [draft-plan.md — Phase 2](specs/draft-plan.md#phase-2-billing-and-payments)), **AI response rating** (thumbs up/down per answer, feeds eval pipeline — see [draft-plan.md](specs/draft-plan.md#phase-2--ai-response-rating-thumbs-up--down)), and a **workspace knowledge mind map** (seed from any doc/note/query, edge-verified retrieval, progressive SSE streaming — see [draft-plan.md](specs/draft-plan.md#phase-2--workspace-knowledge-mind-map)). |
 | **Phase 2 — Enterprise & Access** | A second **access axis** — the L1–L5 ladder joined by group/principal ACLs, with the ladder's labels and level count becoming workspace config (see [draft-plan.md — Access model](specs/draft-plan.md#access-model-decided)); an **enterprise knowledge layer** (typed artifacts, a provenance-carrying knowledge graph, an agent registry, and Git/Jira/Confluence connectors — [draft-plan.md](specs/draft-plan.md#phase-2--enterprise-knowledge-layer-typed-artifacts-knowledge-graph--agent-context-api)); an **organization** above workspace for consolidated billing, SSO/SCIM and policy defaults, plus delegated group administration ([draft-plan.md](specs/draft-plan.md#phase-2--tenancy--delegated-administration)); and **agent access & accountability** — agents as principals bounded by their owner, the *broad* write scope (beyond the Phase-1 HITL-gated `note_edit`) **including sandbox-backed code-gen / file-manipulation tools** (`run_script`/`transform_files`, run in a `tmpl-coderun` microVM over the Phase-1 [Sandbox Runtime](specs/001-contextengine-mvp/contracts/sandbox-runtime.md)), and resource-level audit visible to the agent's owner ([draft-plan.md](specs/draft-plan.md#phase-2--agent-access--accountability)). |
 | **Phase 3 — Trust & Knowledge Health** | Makes the Phase 2 substrate trustworthy and self-maintaining. **Agent orientation & business scope** — a bounded, per-caller `get_workspace_context` briefing (charter, domain map, governing rules, the agent's *own* effective scope) plus a `list_changes` cursor, so an agent knows what the organization does instead of only what it may read ([draft-plan.md](specs/draft-plan.md#phase-3--agent-orientation--business-scope)). **Knowledge health** — lifecycle-aware retrieval ranking (deprecated/stale/superseded demoted, not just badged), knowledge-usage telemetry with a coverage-gap backlog, and steward-driven recertification prioritized by what is actually load-bearing ([draft-plan.md](specs/draft-plan.md#phase-3--knowledge-health-lifecycle-aware-retrieval-usage-telemetry--recertification)). **Enterprise compliance & data lifecycle** — provable erasure across every derived store, per-workspace provider/residency policy at the LLM gateway, SIEM audit export, legal hold, access recertification, and isolation tiering ([draft-plan.md](specs/draft-plan.md#phase-3--enterprise-compliance--data-lifecycle)). **The expression layer** — grounded drafting, decision records, and change digests, so the corpus produces artifacts and not only answers ([draft-plan.md](specs/draft-plan.md#phase-3--the-expression-layer)). Plus **automated red-teaming** (NVIDIA Garak), principal anomaly detection, and expanded abuse controls. |
-| **Phase 4 — Scale & Resilience** | Worker autoscaling (KEDA on NATS lag), **sandbox-fleet autoscaling** (two-level: KEDA on JetStream lag → orchestrators; E2B fleet / node-group autoscaler → microVM capacity on the KVM pool) + warm-pool tuning, SSE connection ceilings and backpressure, PgBouncer, Qdrant/Redis HA, load & soak testing, per-tenant fairness — [draft-plan.md — Phase 4](specs/draft-plan.md#phase-4-scalability-and-resilience-hardening). |
+| **Phase 4 — Scale & Resilience** | Worker autoscaling (KEDA on NATS lag), **sandbox autoscaling** (two-level: KEDA on JetStream lag → orchestrators; a second scaler → sandbox capacity — pod replicas under `k8s_pod`, the E2B fleet / node-group autoscaler once microVMs are on) + warm-pool tuning, SSE connection ceilings and backpressure, PgBouncer, Qdrant/Redis HA, load & soak testing, per-tenant fairness — [draft-plan.md — Phase 4](specs/draft-plan.md#phase-4-scalability-and-resilience-hardening). |
 
 ---
 

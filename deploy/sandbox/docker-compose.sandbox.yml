@@ -1,0 +1,109 @@
+# ---------------------------------------------------------------------------
+# LOCAL SANDBOX TIER — macOS / laptop development.
+#
+#   make sandbox-templates     # build the three template images
+#   make sandbox-up            # crawl + convert pools
+#   make sandbox-coderun       # add the oneshot coderun replicas
+#   make sandbox-down
+#
+# WHAT DIFFERS FROM PRODUCTION, AND WHY
+#
+# 1. RUNTIME IS `runc`, NOT gVisor. runsc is a Linux syscall implementation and
+#    Docker Desktop's VM ships only runc / io.containerd.runc.v2 — it is NOT
+#    installable here. This is a LAPTOP constraint, not a DO one: the droplet is
+#    Linux, so it runs SANDBOX_OCI_RUNTIME=runsc. Local dev therefore has a
+#    genuinely weaker boundary. That is acceptable for dev and MUST NOT be the
+#    justification for weakening production.
+#
+# 2. NO DOCKER SOCKET, same as production. Everything here is declared up front,
+#    so nothing needs to create containers at runtime. `SANDBOX_KIND=docker`
+#    (per-job container creation) would need the socket — avoid it even locally,
+#    so dev and prod exercise the same wiring.
+#
+# 3. NO SECRETS. These containers deliberately do not read .env.production. A
+#    sandbox holds no provider key, no DB/Redis/Qdrant route (invariant 1). If a
+#    local sandbox appears to need one, the design is wrong, not the config.
+#
+# Contract: ../../specs/001-contextengine-mvp/contracts/sandbox-runtime.md
+# ---------------------------------------------------------------------------
+
+name: aisat-sandbox
+
+services:
+  # ---- tmpl-crawl: a warm browser pool (SANDBOX_KIND=service) ---------------
+  sandbox-crawl:
+    image: ${IMAGE_PREFIX:-aisat}-sandbox-crawl:${IMAGE_TAG:-dev}
+    build:
+      context: ../../backend-python        # NOT this dir — the COPY needs pyproject.toml + uv.lock
+      dockerfile: ../deploy/sandbox/templates/tmpl-crawl.Dockerfile
+    restart: unless-stopped
+    environment:
+      ENV: development
+      LOG_LEVEL: debug
+      SANDBOX_KIND: service
+      SANDBOX_RUNTIME: runc                # forced on macOS — see note 1
+      SANDBOX_MAX_RUNS: "20"
+      SANDBOX_TTL_S: "3600"
+    user: "65534:65534"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=256m']
+    pids_limit: 256                        # Chromium is multi-process
+    mem_limit: 2g
+    cpus: 1.0
+
+  # ---- tmpl-convert: offline parser pool (SANDBOX_KIND=service) -------------
+  sandbox-convert:
+    image: ${IMAGE_PREFIX:-aisat}-sandbox-convert:${IMAGE_TAG:-dev}
+    build:
+      context: ../../backend-python
+      dockerfile: ../deploy/sandbox/templates/tmpl-convert.Dockerfile
+    restart: unless-stopped
+    environment:
+      ENV: development
+      LOG_LEVEL: debug
+      SANDBOX_KIND: service
+      SANDBOX_RUNTIME: runc                # prod uses runsc here — gVisor is the ratchet
+      SANDBOX_MAX_RUNS: "5"
+      SANDBOX_TTL_S: "900"
+    user: "65534:65534"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=256m']
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 1.0
+    network_mode: none                     # conversion is fully offline
+
+  # ---- tmpl-coderun: oneshot (Phase 2) -------------------------------------
+  # One job per process lifetime, then EXIT; the restart policy recreates it with
+  # a fresh tmpfs. `service` is forbidden here — a resetting long-lived process
+  # does not evict a resident attacker. See the three obligations in the contract.
+  #
+  #   make sandbox-coderun          # or: docker compose --profile coderun up -d
+  #   docker compose --profile coderun up -d --scale sandbox-coderun=3
+  sandbox-coderun:
+    profiles: [coderun]
+    image: ${IMAGE_PREFIX:-aisat}-sandbox-coderun:${IMAGE_TAG:-dev}
+    build:
+      context: ../../backend-python
+      dockerfile: ../deploy/sandbox/templates/tmpl-coderun.Dockerfile
+    restart: always                        # the recreate mechanism — obligation 1's other half
+    environment:
+      ENV: development
+      LOG_LEVEL: debug
+      SANDBOX_KIND: oneshot
+      SANDBOX_RUNTIME: runc                # prod uses runsc
+      SANDBOX_MAX_RUNS: "1"                # non-negotiable
+      NATS_URL: ${NATS_URL:-nats://host.docker.internal:4222}  # SUPERVISOR only (obligation 3)
+    user: "65534:65534"
+    read_only: true                        # obligation 1 — do not remove
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=256m']   # the ONLY writable path
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 1.0
+    extra_hosts: ['host.docker.internal:host-gateway']

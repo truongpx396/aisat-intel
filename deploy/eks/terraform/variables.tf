@@ -108,17 +108,18 @@ variable "node_disk_size" {
 }
 
 # ---------------------------------------------------------------------------
-# Sandbox fleet node group — the dedicated KVM/bare-metal pool that runs the
-# microVM sandbox tier (crawl4ai, MarkItDown convert, code-gen). See sandbox.tf.
+# Sandbox fleet node group — the dedicated KVM/bare-metal pool for the OPTIONAL
+# microVM backend of the sandbox tier. Unused in Phase 1 (sandbox_enabled = false);
+# Phase 1 runs hardened sandbox pods on the app node pool. See sandbox.tf.
 # ---------------------------------------------------------------------------
 variable "sandbox_enabled" {
-  description = "Provision the dedicated KVM/bare-metal node group for the microVM sandbox fleet. Off by default (bare-metal instances are costly); enable when self-hosting the sandbox tier on EKS."
+  description = "Provision the dedicated KVM/bare-metal node group for the microVM sandbox fleet. OFF in Phase 1 by design: *.metal is a ~$3k/month standing cost, and Phase 1 runs SANDBOX_KIND=k8s_pod (hardened sandbox pods on the app node pool) at $0 incremental with the identical security contract. Possibly never needed: tmpl-coderun lands on gVisor (runsc) + max_runs=1 on the k8s_pod path, so no Phase-1 or Phase-2 workload requires /dev/kvm. Provision only if the threat model changes. See sandbox.tf and research §24."
   type        = bool
   default     = false
 }
 
 variable "sandbox_instance_types" {
-  description = "Instance types for the sandbox node group. MUST expose /dev/kvm for Firecracker — i.e. bare-metal (*.metal). Standard nitro types (t3/m5 non-metal) cannot run Firecracker; use SANDBOX_KIND=daytona (gVisor) on normal nodes instead."
+  description = "Instance types for the sandbox node group. MUST expose /dev/kvm for Firecracker — i.e. bare-metal (*.metal). Standard nitro types (t3/m5 non-metal) cannot run Firecracker; use SANDBOX_RUNTIME=runsc (gVisor — an orthogonal runtime flag on the normal k8s_pod path, not a different backend) on standard nodes instead."
   type        = list(string)
   default     = ["m5.metal"]
 }
