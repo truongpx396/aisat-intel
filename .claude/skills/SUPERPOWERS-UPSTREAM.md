@@ -1,0 +1,81 @@
+# Vendored: obra/superpowers
+
+The 14 skill directories listed below are vendored verbatim from an upstream project.
+They are **not** authored by this repo — do not edit them in place; see *Updating* below.
+
+| | |
+|---|---|
+| Upstream | https://github.com/obra/superpowers |
+| Version | `6.2.0` |
+| Commit | `44c9b2d6e889982ac18c27d05a19fefe335194e1` (2026-07-28) |
+| License | MIT — Copyright (c) 2025 Jesse Vincent — full text in [LICENSE-superpowers.txt](./LICENSE-superpowers.txt) |
+
+## Vendored skills
+
+`brainstorming` · `dispatching-parallel-agents` · `executing-plans` ·
+`finishing-a-development-branch` · `receiving-code-review` · `requesting-code-review` ·
+`subagent-driven-development` · `systematic-debugging` · `test-driven-development` ·
+`using-git-worktrees` · `using-superpowers` · `verification-before-completion` ·
+`writing-plans` · `writing-skills`
+
+## Why these are here
+
+`.github/skills/single-branch-development` and `.github/skills/executing-parallel-tracks`
+delegate their execution steps to these skills by name — `using-git-worktrees` for
+isolation, `dispatching-parallel-agents` and `subagent-driven-development` for the
+implement loop, `requesting-code-review` for the review gate, and
+`verification-before-completion` for the evidence gate. Without them installed, those
+pipelines reference skills that do not resolve.
+
+The full set is vendored rather than only the five named above, because the skills
+cross-reference each other with sibling-relative paths (e.g.
+`../using-superpowers/references/codex-tools.md`); a partial copy leaves dangling links.
+
+## Why `.claude/skills/` and not `.github/skills/`
+
+This repo otherwise tracks skills in `.github/skills/`. These are the exception, and the
+reason is discovery support, verified empirically rather than assumed:
+
+- **Claude Code** discovers **only** `.claude/skills/` (project) and `~/.claude/skills/`
+  (personal). A valid `SKILL.md` placed under `.github/skills/` never registers —
+  invoking it returns `Unknown skill`.
+- **GitHub Copilot** discovers **both**, per
+  [agent-skills.instructions.md](../../.github/instructions/agent-skills.instructions.md):
+  `.github/skills/` is its recommended location and `.claude/skills/` its documented
+  backward-compatible one.
+
+So a single copy here is readable by both harnesses, while a copy in `.github/skills/`
+would be invisible to Claude Code — the harness that actually runs these pipelines.
+Keeping one copy also avoids duplicating a third-party payload across two trees on every
+upstream sync.
+
+## Updating
+
+Do not hand-edit these directories — local edits are silently lost on the next sync.
+To move to a newer upstream release, replace the directories wholesale and update the
+version/commit in the table above:
+
+```bash
+git clone --depth 1 https://github.com/obra/superpowers.git /tmp/superpowers
+rm -rf .claude/skills/{brainstorming,dispatching-parallel-agents,executing-plans,\
+finishing-a-development-branch,receiving-code-review,requesting-code-review,\
+subagent-driven-development,systematic-debugging,test-driven-development,\
+using-git-worktrees,using-superpowers,verification-before-completion,\
+writing-plans,writing-skills}
+cp -R /tmp/superpowers/skills/* .claude/skills/
+cp /tmp/superpowers/LICENSE .claude/skills/LICENSE-superpowers.txt
+```
+
+### Alternative: the upstream plugin
+
+Upstream's supported install path for Claude Code is the plugin marketplace:
+
+```
+/plugin install superpowers@claude-plugins-official
+```
+
+That auto-updates and needs no vendoring, but it is **per-developer** — it does not
+travel with the repo, so a fresh clone or a CI/Copilot coding-agent run would not have
+the skills. Vendoring is the trade: reproducible for everyone who clones, at the cost of
+manual updates. If the team standardises on the plugin, delete these directories and this
+file.
