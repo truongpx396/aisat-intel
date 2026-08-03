@@ -1,11 +1,17 @@
 # Test Report — executing-parallel-tracks Skill
 
+> **Historical snapshot — not the current result.** This report records one manual run, on
+> 2026-07-04, in a *different* repo (`aisat-studio`), at 188 assertions. The suite is now **205
+> assertions** and runs on every push/PR via
+> [`.github/workflows/skill-tests.yml`](../../../workflows/skill-tests.yml) — CI is the authority on
+> whether the bundle is green. Do not read the counts below as current.
+
 | | |
 |---|---|
 | **Date** | 2026-07-04 |
 | **Last run** | `2026-07-04T11-07_local` |
 | **Script** | `test-skill.sh` regression suite |
-| **Repo** | `aisat-intel` |
+| **Repo** | `aisat-studio` |
 | **Result** | ✅ 188 PASSED · ⏭ 0 SKIPPED · ❌ 0 FAILED · 188 total |
 
 ---
