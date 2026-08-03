@@ -25,6 +25,18 @@
         "type": "command",
         "bash": "./.github/hooks/track-meter.sh",
         "timeoutSec": 5
+      },
+      {
+        "type": "command",
+        "bash": "./.github/hooks/track-compact.sh",
+        "timeoutSec": 5
+      }
+    ],
+    "postCompact": [
+      {
+        "type": "command",
+        "bash": "./.github/hooks/track-compact.sh",
+        "timeoutSec": 5
       }
     ],
     "subagentStart": [
@@ -56,6 +68,11 @@
         "type": "command",
         "bash": "./.github/hooks/track-sentinel.sh",
         "timeoutSec": 6
+      },
+      {
+        "type": "command",
+        "bash": "./.github/hooks/track-audit.sh --hook",
+        "timeoutSec": 8
       },
       {
         "type": "command",

@@ -9,11 +9,25 @@
 #                        emit JSON to stdout. READ-ONLY: writes nothing. Exit non-zero only
 #                        on a HARD prerequisite failure (missing gh/git/toolchain) — a
 #                        missing dep is not a preference, it blocks in every mode.
-#   --commit           — persist runs/<RUN_ID>.dispatch (the breadcrumb) after the caller
-#                        has confirmed. Idempotent: re-committing the same id is a no-op.
+#   --persist          — persist runs/<RUN_ID>.dispatch (the breadcrumb) after the caller
+#                        has confirmed. Idempotent: re-persisting the same id is a no-op.
+#                        (--commit stays as a deprecated alias for --persist.)
 #   --complete         — stamp completed_utc + duration_secs (now − created_utc) onto the
 #                        breadcrumb at draft-PR handoff. Write-once; the honest home for
 #                        "total run time" (a per-event hook never sees PR handoff).
+#
+# Confirmation waiver (--yes / AUTO_CONFIRM=1):
+#   The SKILL requires a HUMAN to approve the summary below before anything is created.
+#   That is impossible for a worker fanned out by executing-parallel-tracks: there is no
+#   human on the other end of a dispatched subagent, so an un-waivable confirm makes the
+#   worker either hang forever or silently self-waive — and N workers each guessing is
+#   worse than either. `--yes` (or AUTO_CONFIRM=1) is the EXPLICIT, RECORDED waiver: the
+#   orchestrator already took the human confirmation once, at its own wave-plan gate.
+#   It waives ONLY the interactive proceed-confirm. It does NOT waive prerequisites —
+#   a missing bin / unauthed gh still hard-fails, because a missing dep is not a
+#   preference. The waiver is stamped into the summary, the JSON (auto_confirm:true),
+#   and the persisted breadcrumb, so an audit can always tell an approved run from a
+#   waived one.
 #
 # Inputs (env or args):
 #   TRACK_ID     short track slug (e.g. setup, us1). REQUIRED.
@@ -46,13 +60,17 @@ if [ -f "$__env_dir/track-env.base.sh" ]; then . "$__env_dir/track-env.base.sh";
 unset __env_dir
 
 mode="inspect"
+auto_confirm="${AUTO_CONFIRM:-0}"
 for a in "$@"; do
   case "$a" in
-    --commit) mode="commit" ;;
+    --persist) mode="persist" ;;
+    --commit) mode="persist" ;;   # deprecated alias for --persist
     --inspect) mode="inspect" ;;
     --complete) mode="complete" ;;
+    --yes|-y) auto_confirm=1 ;;   # waive the interactive proceed-confirm (orchestrator runs)
   esac
 done
+[ "$auto_confirm" = "1" ] || auto_confirm=0
 
 RUNS_DIR="${RUNS_DIR:-runs}"
 track="${TRACK_ID:-}"
@@ -182,9 +200,9 @@ if [ -n "$branch_override" ]; then
 fi
 prereq_ok=true; [ -n "$missing" ] && prereq_ok=false
 
-# --- commit phase: persist the breadcrumb, then exit -------------------------------
-if [ "$mode" = "commit" ]; then
-  [ "$prereq_ok" = true ] || die "refusing to commit breadcrumb — unmet prerequisites:$missing"
+# --- persist phase: persist the breadcrumb, then exit ------------------------------
+if [ "$mode" = "persist" ]; then
+  [ "$prereq_ok" = true ] || die "refusing to persist breadcrumb — unmet prerequisites:$missing"
   if [ -f "$rec_dispatch" ]; then
     printf '%s\n' "preflight: breadcrumb already present ($rec_dispatch) — no-op." >&2
   else
@@ -194,7 +212,10 @@ if [ "$mode" = "commit" ]; then
       --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       --arg allowed "$allowed_prefixes" --arg frozen "$frozen_paths" \
       --arg toolchain "$require_toolchain" --arg required_evidence "$required_evidence" \
+      --argjson auto_confirm "$([ "$auto_confirm" = 1 ] && echo true || echo false)" \
       '{run_id:$run_id, track:$track, tasks:$tasks, branch:$branch, base_ref:$base, created_utc:$created,
+        auto_confirm:$auto_confirm,
+        confirmed_by:(if $auto_confirm then "orchestrator-waiver" else "human" end),
         allowed_prefixes:($allowed | if . == "" then [] else split(":") end),
         frozen_paths:($frozen | if . == "" then [] else split(":") end),
         scope_set:($allowed != ""),
@@ -241,7 +262,7 @@ fi
 # original finish time. This is the honest home for "total run time" — a single stamp at
 # a real boundary, not a per-event hook (a PostToolUse hook never sees PR handoff).
 if [ "$mode" = "complete" ]; then
-  [ -f "$rec_dispatch" ] || die "cannot complete — no breadcrumb at $rec_dispatch (run --commit first)."
+  [ -f "$rec_dispatch" ] || die "cannot complete — no breadcrumb at $rec_dispatch (run --persist first)."
   if [ "$(jq -r '.completed_utc // empty' "$rec_dispatch" 2>/dev/null)" != "" ]; then
     printf '%s\n' "preflight: breadcrumb already completed ($rec_dispatch) — no-op." >&2
     printf '%s\n' "$run_id"
@@ -262,9 +283,9 @@ if [ "$mode" = "complete" ]; then
   tmp="$(mktemp)"
   jq --arg done "$now_utc" --argjson dur "$dur" \
     '.completed_utc = $done | .duration_secs = $dur' "$rec_dispatch" >"$tmp" && mv "$tmp" "$rec_dispatch"
-  # Retire the persisted RUN_ID activation block (written at --commit) so a finished
+  # Retire the persisted RUN_ID activation block (written at --persist) so a finished
   # run stops steering the recorder hooks and can't bleed into an unrelated later run.
-  # Same installed-hooks guard as --commit (skip the scripts/ source mirror).
+  # Same installed-hooks guard as --persist (skip the scripts/ source mirror).
   _env_dir="$(cd "${BASH_SOURCE[0]%/*}" && pwd)"
   if [ -f "$_env_dir/track-env.base.sh" ]; then
     env_file="$_env_dir/track-env.sh"
@@ -307,7 +328,13 @@ fi
   fi
   if [ "$prereq_ok" = true ]; then
     echo "  Prereqs:      OK (git ✓ · runs/ ✓ writable$([ "$require_gh" = 1 ] && echo ' · gh ✓ authed')${PREFLIGHT_REQUIRE_TOOLCHAIN:+ · $PREFLIGHT_REQUIRE_TOOLCHAIN ✓})"
-    echo "  → Proceed?    confirm to dispatch (then re-run with --commit to persist the breadcrumb)"
+    if [ "$auto_confirm" = 1 ]; then
+      echo "  Confirm:      WAIVED (--yes / AUTO_CONFIRM) — orchestrator run; the human gate was taken upstream at the wave plan"
+      echo "  → Proceed     no interactive confirm; re-run with --persist to persist the breadcrumb"
+    else
+      echo "  Confirm:      REQUIRED — a human must approve this summary before anything is created"
+      echo "  → Proceed?    confirm to dispatch (then re-run with --persist to persist the breadcrumb)"
+    fi
   else
     echo "  Prereqs:      BLOCKED — missing:$missing"
     echo "  → Fix the missing prerequisite before dispatching."
@@ -323,9 +350,12 @@ jq -nc \
   --arg config_warn "$config_warn" \
   --arg allowed "$allowed_prefixes" --arg frozen "$frozen_paths" \
   --arg toolchain "$require_toolchain" --arg required_evidence "$required_evidence" \
+  --argjson auto_confirm "$([ "$auto_confirm" = 1 ] && echo true || echo false)" \
   '{run_id:$run_id, track:$track, tasks:$tasks, branch:$branch, base_ref:$base,
     mode:(if $resume then "resume" else "start" end),
     prereq_ok:$prereq_ok,
+    auto_confirm:$auto_confirm,
+    confirm_required:($auto_confirm | not),
     allowed_prefixes:($allowed | if . == "" then [] else split(":") end),
     frozen_paths:($frozen | if . == "" then [] else split(":") end),
     scope_set:($allowed != ""),

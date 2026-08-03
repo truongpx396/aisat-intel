@@ -1,12 +1,23 @@
 # Test Report — single-branch-development Skill
 
+> **Historical snapshot — not the current result.** This report records one manual run, on
+> 2026-07-04, in a *different* repo (`aisat-studio`), at 66 assertions. The suite is now **148
+> assertions** and runs on every push/PR via
+> [`.github/workflows/skill-tests.yml`](../../../workflows/skill-tests.yml) — CI is the authority on
+> whether the bundle is green. Kept for the §Bug Fixes history, which documents a real defect the
+> suite caught; do not read the counts below as current.
+>
+> The suite covers the **mechanical** gates only. The judgement gates (TDD ordering, maker/checker
+> split, governance-in-briefs) are audited by hand against
+> [`prompt-level-checklist.md`](prompt-level-checklist.md).
+
 | | |
 |---|---|
 | **Date** | 2026-07-04 |
 | **Last run** | `2026-07-04T07:59:32Z` |
 | **Branch** | `test/sbd-skill-1783151970` (temp branch created by suite) |
 | **Run by** | `test-skill.sh` regression suite |
-| **Repo** | `aisat-intel` |
+| **Repo** | `aisat-studio` |
 | **Result** | ✅ 65 PASSED · ⏭ 1 SKIPPED · ❌ 0 FAILED · 66 total |
 
 ---

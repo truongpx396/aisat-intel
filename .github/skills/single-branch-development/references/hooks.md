@@ -32,12 +32,72 @@ exit code `2` (stderr → model) or `hookSpecificOutput.permissionDecision: "den
 - **Bash + `jq` only.** The bundle ships no PowerShell port; on non-bash surfaces run the scripts
   under a bash-compatible shell.
 
+## Running Under Claude Code
+
+The hook **scripts are surface-agnostic** — they already read Claude Code's stdin JSON
+(`tool_name`, snake_case `tool_input.file_path` / `tool_input.command`, `hook_event_name`,
+`stop_hook_active`, `transcript_path`) and already emit Claude Code's contracts
+(`hookSpecificOutput.permissionDecision:"deny"` on `PreToolUse`; `{decision:"block", reason}` /
+`{continue:false, stopReason}` on `Stop`). Only the **wiring** that registers the scripts differs,
+and the bundle now ships both:
+
+- **Copilot** → [`../templates/track-hooks.json`](../templates/track-hooks.json) copied into
+  `.github/hooks/` (repo-scoped Copilot agent hooks).
+- **Claude Code** → [`../templates/claude-settings.json`](../templates/claude-settings.json)
+  merged into `.claude/settings.json`.
+
+Install the Claude Code wiring with the same installer:
+
+```bash
+install-hooks.sh --surface claude --apply   # or omit --surface (default: both) to wire both surfaces
+install-hooks.sh --surface claude --check   # reports whether .claude/settings.json is wired
+```
+
+`--apply` syncs the shared `track-*.sh` scripts, gitignores `runs/`, seeds `track-env.base.sh`, and
+**appends** the hooks block into `.claude/settings.json` — append-only and dedup'd by block, so your
+other settings and hooks are preserved and re-running is idempotent. The `track-*.sh` still live in
+`.github/hooks/` and travel into every worktree exactly as under Copilot; only the registration moves
+to `.claude/settings.json`.
+
+### Event & matcher mapping
+
+Claude Code **does** scope hooks by a `matcher` (an advantage over Copilot's fire-on-every-call
+model), so the wiring is tighter than the Copilot manifest:
+
+| Claude Code event | matcher | script(s) |
+|---|---|---|
+| `SessionStart` | — | `track-reconcile.sh` |
+| `PreToolUse` | `Write\|Edit\|MultiEdit\|NotebookEdit\|Bash` | `track-guard.sh` |
+| `PostToolUse` | `Bash` | `track-evidence.sh` |
+| `PostToolUse` | `*` | `track-meter.sh` |
+| `PostToolUse` | `Read\|Bash\|Grep` | `track-compact.sh` |
+| `PostCompact` | — | `track-compact.sh` |
+| `SubagentStop` | — | `track-trace.sh` |
+| `Stop` | — | `track-evidence-gate.sh`, `track-tokens.sh`, `track-sentinel.sh`, `track-audit.sh --hook`, `track-notify.sh` |
+
+### Two Claude Code deltas to know
+
+- **No `SubagentStart` event.** Claude Code exposes only `SubagentStop`, so `track-trace.sh` records
+  each subagent's **stop** (and stamps the heartbeat) but not its spawn `reason`. Claude Code's
+  `SubagentStop` payload is also minimal — it carries no `agent_type`/`agent_description` — so trace
+  entries under Claude Code count subagent boundaries without naming them. Subagent count + heartbeat
+  still work; the spawn-reason column is Copilot-only.
+- **No `applyTo` auto-injection.** VS Code auto-loads `.github/instructions/*` by their `applyTo`
+  globs; Claude Code does not. This is a **no-op for correctness** because the skill's governance gate
+  already mandates reading the matched instruction files in-session — the governance gate is driven by the
+  skill body, not by editor auto-injection.
+- **Stop-block exit code.** Claude Code blocks a stop only on exit **2** (exit 1 is a *non-blocking*
+  error that lets the stop proceed). The gates that block via `{decision:"block"}` JSON
+  (`track-evidence-gate.sh`, `track-sentinel.sh`) are exit-code-agnostic; `track-tokens.sh` blocks via
+  exit **2**, which is also non-zero so Copilot still blocks on it.
+
 ## Bundled Scripts
 
 | Pipeline gate | Bundled script (event) | What it does |
 |---|---|---|
-| Start gate / mint-or-recover RUN_ID | `track-preflight.sh` (manual / skill Step 1) | **Start gate.** `inspect` mints a stable `RUN_ID` = `<UTC>_<track>` on a fresh start, or **recovers** it from an existing `runs/<id>.dispatch` breadcrumb (resume), then checks prerequisites (git tree, `runs/` writable, opt. `gh` auth + `PREFLIGHT_REQUIRE_TOOLCHAIN` bins). Prints a confirm summary + JSON; **hard-fails non-zero** on any unmet prereq (both interactive and `auto_confirm`). `--persist` persists the breadcrumb (track, tasks, branch, base ref, plus the confirmed writable scope, frozen paths, required toolchain, and evidence floor with their `*_set` flags) so resume is self-recovering and the artifact records exactly what the human confirmed. `--persist` also persists `RUN_ID` as a managed block in the installed `.github/hooks/track-env.sh` (gated on the `track-env.base.sh` marker, so it never touches the skill's `scripts/` source mirror) — this **activates the recorder hooks for a solo run** with no manual export; `--complete` retires that block. `--complete` (at draft-PR handoff) stamps `completed_utc` + `duration_secs` (now − `created_utc`) onto the breadcrumb — write-once, the honest home for the run's total wall-clock. Run by the skill, not a hook, since it precedes RUN_ID. |
-| Resume / reconcile after interruption | `track-reconcile.sh` (`SessionStart`/`agentStart`) | **Read-only** preflight: from committed history + `runs/<RUN_ID>.json` only, emit `{head, dirty_worktree, evidence:{fresh,stale,missing,failed}, resumable}` at the current fingerprint — so a crashed/credit-out run resumes at the first not-done task and stashes untrusted uncommitted work, instead of the model guessing where it left off. Self-recovers `RUN_ID` from the `runs/<id>.dispatch` breadcrumb when none is exported. No-op unless a `RUN_ID` is set or recoverable. Mirrors `track-evidence-gate.sh`'s fingerprint logic exactly. |
+| Start gate / mint-or-recover RUN_ID | `track-preflight.sh` (manual / skill Step 1) | **Start gate.** `inspect` mints a stable `RUN_ID` = `<UTC>_<track>` on a fresh start, or **recovers** it from an existing `runs/<id>.dispatch` breadcrumb (resume), then checks prerequisites (git tree, `runs/` writable, opt. `gh` auth + `PREFLIGHT_REQUIRE_TOOLCHAIN` bins). Prints a confirm summary + JSON; **hard-fails non-zero** on any unmet prereq — including under `--yes`, because a missing dep is not a preference. `--yes` (or `AUTO_CONFIRM=1`) waives **only** the interactive proceed-confirm and exists for one caller: an orchestrator-dispatched worker, which has no human to ask and whose human gate was taken upstream at the wave plan. The waiver is recorded (`auto_confirm:true` / `confirmed_by:"orchestrator-waiver"`) in both the JSON and the breadcrumb so an audit can tell an approved run from a waived one. `--persist` persists the breadcrumb (track, tasks, branch, base ref, plus the confirmed writable scope, frozen paths, required toolchain, and evidence floor with their `*_set` flags) so resume is self-recovering and the artifact records exactly what the human confirmed. `--persist` also persists `RUN_ID` as a managed block in the installed `.github/hooks/track-env.sh` (gated on the `track-env.base.sh` marker, so it never touches the skill's `scripts/` source mirror) — this **activates the recorder hooks for a solo run** with no manual export; `--complete` retires that block. `--complete` (at draft-PR handoff) stamps `completed_utc` + `duration_secs` (now − `created_utc`) onto the breadcrumb — write-once, the honest home for the run's total wall-clock. Run by the skill, not a hook, since it precedes RUN_ID. |
+| Resume / reconcile after interruption | `track-reconcile.sh` (`SessionStart`/`agentStart`) | Preflight report (read-only w.r.t. the tree/git; it stamps `last_reconcile` into the run record so the audit can prove it ran): from committed history + `runs/<RUN_ID>.json` only, emit `{head, dirty_worktree, evidence:{fresh,stale,missing,failed}, resumable}` at the current fingerprint — so a crashed/credit-out run resumes at the first not-done task and stashes untrusted uncommitted work, instead of the model guessing where it left off. Self-recovers `RUN_ID` from the `runs/<id>.dispatch` breadcrumb when none is exported. No-op unless a `RUN_ID` is set or recoverable. Mirrors `track-evidence-gate.sh`'s fingerprint logic exactly. |
+| Compaction resilience — was the bundle re-read? | `track-compact.sh` (`PostCompact` + `PostToolUse`) | Records the two facts that make the post-compaction invariant auditable, both hook-observed and neither authored by the model: `compactions[]` (`{t, event, trigger}`) on every `PreCompact`/`PostCompact`, and `governance_reads[]` (`{t, tool}`) whenever a tool call touches the **pinned** governance bundle — a `Read` of the path, or a `Bash`/`Grep` command naming it, since `cat runs/<id>.governance.md` is just as valid a re-read. With both on record, `track-audit.sh`'s `I4` reduces the checklist's highest-value manual item to arithmetic: between every compaction and the **next** subagent dispatch there must be a bundle re-read. No-op unless `RUN_ID` is set and a bundle has been pinned. **It proves the re-read happened, never that the next brief carried it** — that residual stays a human check (`B2`). |
 | Scope / never edit frozen entrypoints | `track-guard.sh` (`PreToolUse`) | **Deny** an edit whose target path is outside `TRACK_ALLOWED_PREFIXES` or hits a `TRACK_FROZEN_PATHS` entrypoint (deny-by-default, per worktree). |
 | Never hand-edit generated or applied artifacts | `track-guard.sh` (`PreToolUse`) | **Deny** edits to any file carrying a `GENERATED — DO NOT EDIT` banner (re-run the generator), and to already-committed files under `TRACK_IMMUTABLE_PREFIXES` (e.g. applied migrations — add a NEW file instead). A brand-new file under the prefix is allowed. |
 | No auto-merge from a worker | `track-guard.sh` (`PreToolUse`) | **Deny** `git push`, `gh pr merge`, `--force`, `--no-verify`, `git reset --hard` on terminal calls. Workers physically stop at `gh pr create --draft`. Opt-in `TRACK_ALLOW_FF_PUSH=1` permits a plain fast-forward `git push` (for a PR-rework flow) while still denying `--force`/merge/`--no-verify`/`reset --hard`. |
@@ -46,6 +106,8 @@ exit code `2` (stderr → model) or `hookSpecificOutput.permissionDecision: "den
 | Evidence pack complete + fresh *(opt-in)* | `track-evidence-gate.sh` (`Stop`) | The closing “missing rows = not done” assertion. The required-kind set is **diff-conditional**: `TRACK_EVIDENCE_RULES` (`glob:kind` pairs) selects kinds by the paths the branch touched — so a frontend-only diff needs `ts`, a migration diff needs `pg-explain` — unioned with the optional always-on floor `TRACK_REQUIRED_EVIDENCE`. **`decision:block`** unless every selected kind has an entry whose `fingerprint` matches the **current** tree and whose response shows no failure marker — reporting exactly which are MISSING / STALE / FAILING. Selection is mechanical glob-matching (no model call); no-ops when both vars are unset or the diff selects nothing. Honors `stop_hook_active`; failure markers extend via `TRACK_FAIL_PATTERN`. Mechanizes verification-before-completion; CI stays authoritative. |
 | Tool-call counter + ceiling | `track-meter.sh` (`PostToolUse`) | Count tool calls into `tool_calls` and stamp the heartbeat on **every** call whenever `RUN_ID` is set (no ceiling required). When `TRACK_MAX_TOOL_CALLS` is *also* set, emit `continue:false` + set `status:no-progress` on trip. **Hook I/O carries no token/cost data**, so token/$ ceilings stay orchestrator-side. |
 | Activation trace | `track-trace.sh` (`SubagentStart`/`SubagentStop`) | Append a `trace` entry per subagent spawn/stop, capturing the agent name and — on `SubagentStart` — its one-line `agent_description` (the **reason** it was spawned) as `reason`; `SubagentStop` records a `stop_reason` instead. Field names are read across surfaces (`agent_type`/`agentName`, `agent_description`/`agentDescription`). The `Run-Id:` *commit trailer* is NOT set here — add it in the worker's commit command or a git `prepare-commit-msg` hook. |
+| Position / terminal state / governance pin | `track-note.sh` (manual, **not** a hook) | The model-asserted half of the record — everything a hook structurally cannot see. Five subcommands, all no-ops unless `RUN_ID` is set: `phase <mode> <step>` (**mandatory**, every core-step boundary — the compaction/crash anchor), `governance <file>` (**mandatory**, pins the persisted bundle + its sha), `status <success\|blocked\|no-progress\|budget-exceeded> [blocker] [next_step]` (terminal state — the only writer of `blocked`), `skill <name> [step]` and `loop [phase]` (optional trace). Everything it writes is provenance-tagged `self_reported:true`. |
+| Discipline audit — did the run follow the pipeline? *(CLI always; blocking Stop gate opt-in)* | `track-audit.sh` (manual / `Stop --hook`) | Re-derives the pipeline's **discipline** invariants from durable artifacts only — the run record, the governance bundle, the diff — never from the model's account of itself. Checks: isolation — worked on the default branch is a FAIL, branch-in-place a WARN (`I1`), breadcrumb branch matches the working branch (`I2`), reconcile left its `last_reconcile` stamp (`I3`), every compaction was followed by a governance-bundle re-read before the next subagent dispatch (`I4` — needs `track-compact.sh` wired, and WARNs plainly when it is not rather than passing an unobserved run); governance pinned + sha-stable (`G1`), bundle covers every `applyTo`-matched instruction file for the diff (`G2`), governance stamped **before** the first subagent (`G3`), trust-boundary surface pulls in `security-and-owasp` (`G4`), phase stamped + gate sequence advanced (`P1`/`P2`), ≥2 distinct subagent ids (`M1`), story mode recorded a genuine **RED before green** (`T1`), no `skip`/`only` added and no assertions removed from test files (`T2`), latest captures converged on one fingerprint (`E1`), no suspiciously short *passing* captures (`E2`), terminal state recorded (`F1`). Prints an explicit **NOT CHECKED HERE** list rather than implying a clean bill of health. CLI exits 2 on FAIL; `--hook` blocks the Stop with `{decision:"block"}` **only when `TRACK_AUDIT=1`** and honors `stop_hook_active`. |
 | Pre-handoff secret/leftover scan *(opt-in)* | `track-sentinel.sh` (`Stop`) | When `TRACK_SENTINEL` is set, scan the **staged diff** and `decision:block` if it finds a likely secret or debug leftover (`console.log`, `debugger`, `TODO(claude)`, `FIXME`). Honors `stop_hook_active` so it can't loop; patterns override via `TRACK_SECRET_PATTERN`/`TRACK_LEFTOVER_PATTERN`. Defense-in-depth — CI/secret-scanning stays authoritative. |
 | Token usage estimate + ceiling *(enforced by default)* | `track-tokens.sh` (`Stop`) | When `TRACK_MAX_TOKEN_ESTIMATE` is set to a positive integer (default: `200000` via `track-env.base.sh`), parse the `transcript_path` from the Stop payload, extract all text (user/assistant/tool-request fields), count chars, and write `token_estimate` (chars÷4) + `token_estimate_chars` + `token_estimate_method` into the run record. **Ceiling enforcement**: if the estimate exceeds `TRACK_MAX_TOKEN_ESTIMATE` and the run record does not already carry `status:"budget-exceeded"`, the hook writes that status, prints a message, and exits non-zero to block the stop — the agent must not open a PR. On the next stop attempt the status is already set so the hook exits 0, letting the run end cleanly. OVERWRITES on each Stop (transcript is cumulative; adding would double-count). The estimate **undercounts** — it cannot see the hidden system prompt, injected tool-schema definitions, or cached-token discounts. Disable by setting `TRACK_MAX_TOKEN_ESTIMATE=0`. |
 
@@ -60,14 +122,20 @@ evidence fingerprint; a missing base preset runs the resume ungated):
 install-hooks.sh --check   # exit 3 if installed bundle is missing/stale (drift probe)
 install-hooks.sh           # DRY-RUN: print the plan, write nothing
 install-hooks.sh --apply   # sync bundle + gitignore runs/ + seed stack-aware track-env.base.sh
+                           #   + install the hook WIRING for the chosen surface(s)
 ```
+
+By default the installer wires **both** surfaces (Copilot `track-hooks.json` + Claude Code
+`.claude/settings.json`). Scope it with `--surface`: `--surface copilot`, `--surface claude`, or
+`--surface both` (default). See [Running Under Claude Code](#running-under-claude-code) for the
+Claude Code specifics.
 
 It (1) syncs `scripts/track-*.sh` + `templates/track-hooks.json` into `.github/hooks/`, (2) ensures
 `runs/` is gitignored, and (3) seeds `.github/hooks/track-env.base.sh` **only if absent**, pre-filled
 from detected repo signals (`go.mod`→go-test, `pyproject.toml`→py, `package.json`→ts, `migrations/`,
 default branch) — REPO-POLICY vars filled, TASK-DERIVED scope/floor left EMPTY so an unedited copy
 fails loud. An existing base preset is never clobbered. `--apply` writes into shared repo config, so
-the skill's Step 0 runs the dry-run, gets consent, then applies.
+the skill's first-run bootstrap runs the dry-run, gets consent, then applies.
 
 ### Manual install (equivalent)
 
@@ -110,7 +178,7 @@ for one run:
 
 ```bash
 export TRACK_ALLOWED_PREFIXES="src/feature:test/feature"   # guard: this branch's writable scope
-export RUN_ID="2026-06-27T14-03_feat"                       # <UTC-timestamp>_<track> — usually MINTED by track-preflight.sh (SKILL Step 1), not hand-set; STABLE across restarts so reconcile resumes the same record
+export RUN_ID="2026-06-27T14-03_feat"                       # <UTC-timestamp>_<track> — usually MINTED by track-preflight.sh at preflight, not hand-set; STABLE across restarts so reconcile resumes the same record
 export TRACK_FROZEN_PATHS="cmd/main.go:internal/app/app.go" # guard: frozen entrypoints (see caveat)
 export RUNS_DIR="runs"                                       # RUN_ID keys the record + runs/<id>.dispatch breadcrumb. GITIGNORE THIS DIR: it's local run state, and if tracked, evidence writes shift the fingerprint (gate sees its own capture as STALE) and reconcile reads the tree as dirty (see Gotchas).
 # OPTIONAL — each stays off until set
@@ -126,7 +194,12 @@ export TRACK_EVIDENCE_KINDS="go-test:go test -race;py:uv run pytest;ts:tsc --noE
 export TRACK_EVIDENCE_RULES="*.go:go-test;*.py:py;*.tsx:ts;*.ts:ts;migrations/*:pg-explain"  # Stop gate: diff path → required kind
 export TRACK_REQUIRED_EVIDENCE=""             # Stop gate: kinds required on EVERY diff (floor); empty = rules-only
 export TRACK_BASE_REF="main"                  # Stop gate / reconcile: diff base. STRONGLY RECOMMENDED — without it, once work is COMMITTED the diff-vs-HEAD is empty so the gate requires nothing and silently passes (see Gotchas). Falls back to branch upstream, then HEAD-only.
+export TRACK_DEFAULT_BRANCH=""                # audit I1 only: the branch work must NEVER land on. Empty = derived from origin/HEAD, then init.defaultBranch, then "main". Set it when neither exists (bare clone, no remote). NOT derived from TRACK_BASE_REF's fallback: an unset base falls back to the branch's OWN upstream, which would make I1 fail every correctly-isolated run.
 export TRACK_MAX_TOOL_CALLS=200                                       # tool-call ceiling (hard stop). NOTE: counting/heartbeat are always-on when RUN_ID is set — this var only ADDS the halt.
+export TRACK_MAX_TOKEN_ESTIMATE=200000        # Stop: chars÷4 transcript ceiling; blocks the stop + writes status:"budget-exceeded" on trip. 0 disables. UNDERCOUNTS (blind to system prompt + cached tokens).
+export TRACK_AUDIT=1                          # make track-audit.sh a BLOCKING Stop gate. Unset = the CLI still works, it just never blocks a stop. Deliberately opt-in: a repo that adopts the hooks but not the governance discipline would otherwise be unable to end a session.
+export TRACK_TRUST_BOUNDARY_PATTERN="auth|secret|token|..."   # audit G4: which diff paths demand security-and-owasp in the bundle. Defaults cover auth/secrets/network/persistence/deploy.
+export TRACK_SELF_HEAL_ATTEMPTS=2             # retries per DISTINCT failure before halting `blocked`. PROMPT-enforced (no hook can count review rounds) — it lives here so the number survives a context compaction instead of only in the model's head. Distinct from the orchestrator's no-progress detector, which counts STALLED PASSES; this counts FIX ATTEMPTS.
 export TRACK_NOTIFY_WEBHOOK="https://hooks.slack.com/services/..."     # notify
 export TRACK_ALLOW_FF_PUSH=1                   # guard: permit a plain (fast-forward) git push — for a PR-rework flow updating an existing PR branch. --force/merge/--no-verify/reset --hard STAY denied. Leave unset for the default push lockout (worker stops at the draft PR).
 ```
@@ -145,7 +218,17 @@ holds what hooks can actually observe. It is **opt-in**: every field below stays
 hook *and* its env are set — launch without them and the run still works but records nothing. The
 one convenience: `track-preflight.sh --persist` persists `RUN_ID` into the installed `track-env.sh`, so
 the **mechanical** fields (`tool_calls`, `trace[]`, heartbeat) record automatically even in a solo run;
-the **self-reported** fields (`skills[]`, `iterations`) still require the model to call `track-note.sh`.
+the **self-reported** fields (`phase`, `governance_bundle`, `status`, `skills[]`, `iterations`) still
+require the model to call `track-note.sh` — and the first two are **mandatory**, not decoration: they
+are what a compacted or crashed session re-anchors on.
+
+> **The guard resolves scope by worktree root, but reads env where the agent runs.**
+> `track-guard.sh` checks each write path against the git worktree it belongs to
+> (`git rev-parse --show-toplevel`), not `$PWD` — so writes into a **sibling** worktree are
+> scope-checked normally. But it **sources `track-env.sh` from the checkout the agent process runs
+> in**, so per-run overrides (`TRACK_ALLOWED_PREFIXES`, `TRACK_ALLOW_FF_PUSH=1`) must live in *that*
+> checkout, not the target worktree's, or the guard never sees them. Simplest robust option: re-root
+> the workspace **into** the worktree so `$PWD`, file tools and env all agree.
 
 | Recorded | Field | Written on | Source |
 |---|---|---|---|
@@ -153,7 +236,10 @@ the **self-reported** fields (`skills[]`, `iterations`) still require the model 
 | Heartbeat | `started_ts` (first event) / `last_ts` (latest event) | **every** hook write (`track-meter.sh` / `track-trace.sh` / `track-evidence.sh`) | orchestrator derives **idle/staleness** = `now − last_ts` (a hung/crashed worker stops advancing it — the count-based caps can't see that) and **run wall-clock** = `last_ts − started_ts`. Resolution = frequency of whichever hooks are enabled: `track-trace.sh` (RUN_ID-only) stamps on subagent boundaries; `track-meter.sh` (also RUN_ID-only now) stamps on **every** tool call for finer granularity. |
 | Tool-call count | `tool_calls` (running integer) | **every** `PostToolUse` | `track-meter.sh` — `+1` per call whenever `RUN_ID` is set; halts only if `TRACK_MAX_TOOL_CALLS` is also set |
 | Subagent spawn/stop timeline | `trace[]` (`{t, kind, event, agent_id, agent_type, reason?, stop_reason?}`) | `SubagentStart` / `SubagentStop` | `track-trace.sh` — `reason` (the agent's `agent_description`) is present on **start** only; `stop_reason` on **stop** only. |
-| **Self-reported** skill order | `skills[]` (`{t, skill, step, self_reported:true}`) | skill calls `track-note.sh skill …` at each core step | `track-note.sh` — the model's **own claim**, not hook-observed (no hook can see a skill name). Provenance-tagged so it can't be mistaken for verified truth. |
+| **Self-reported** pipeline position | `phase` (`{mode, step, t, self_reported:true}`, overwritten) + `phase_log[]` (append-only) | skill calls `track-note.sh phase <mode> <step>` at **every** core-step boundary — **mandatory** | `track-note.sh` — the durable answer to "where am I?". No hook can see it, and evidence freshness cannot substitute (that says which test kinds are current, never which core you chose or whether the tests are frozen). `track-reconcile.sh` replays it as `position.phase` + a `resume_action`. **This is the compaction anchor** — see [Surviving a compaction](#surviving-a-compaction). |
+| **Self-reported** governance bundle | `governance_bundle` (`{path, sha, t, self_reported:true}`) | skill calls `track-note.sh governance <file>` once the bundle is persisted — **mandatory** | `track-note.sh` — pins `runs/<RUN_ID>.governance.md` so a compacted session re-reads the binding constraints from disk. The `sha` reveals a bundle changed after briefs were built; reconcile reports `governance_bundle_present:false` if the file has since vanished. |
+| **Self-reported** terminal state | `status` + `status_self_reported:true` (+ `blocker`, `next_step`) | skill calls `track-note.sh status <state> [blocker] [next_step]` | `track-note.sh` — constrained to `success\|blocked\|no-progress\|budget-exceeded`, the same set `executing-parallel-tracks` routes on. This is the path for states no hook can observe (chiefly `blocked`, which nothing else ever writes). |
+| **Self-reported** skill order | `skills[]` (`{t, skill, step, self_reported:true}`) | skill calls `track-note.sh skill …` at each core step (optional) | `track-note.sh` — the model's **own claim**, not hook-observed (no hook can see a skill name). Provenance-tagged so it can't be mistaken for verified truth. |
 | **Self-reported** loop count | `iterations` (integer) + `iterations_self_reported:true` (+ optional `iteration_log[]`) | skill calls `track-note.sh loop …` once per RED→GREEN→review cycle | `track-note.sh` — asserted by the model; hooks never see a reasoning loop. `tool_calls` remains the only mechanical turns-proxy. |
 | Test evidence | `evidence[]` (`{t, kind, cmd, response, fingerprint}`) | `PostToolUse` matching a **test** command only | `track-evidence.sh` |
 | Terminal state | `status` (`no-progress` only) | when the tool-call ceiling trips | `track-meter.sh` — the **only** hook that writes `status` |
@@ -175,14 +261,36 @@ the **self-reported** fields (`skills[]`, `iterations`) still require the model 
   edits) tick it but are not itemized. Only **test** commands land in `evidence[]`.
 - **`response` is textual, not an exit code.** `PostToolUse` exposes a (possibly truncated) text
   result, so CI — not the recorded string — remains the authoritative pass/fail.
-- **No `blocked`/`passed` status.** `track-evidence-gate.sh` enforces the Stop gate by **returning a
-  block decision + message**, not by stamping a field — so a blocked run leaves no `status` in the
-  record, and a passing gate is **silent** (no positive marker). Only `track-meter.sh` writes
-  `status:"no-progress"`. Treat "block" as a prompt/CI concern, not a recorded terminal state.
+- **No hook-observed `blocked`/`passed` status.** `track-evidence-gate.sh` enforces the Stop gate by
+  **returning a block decision + message**, not by stamping a field — so a gate-blocked stop leaves no
+  `status`, and a passing gate is **silent** (no positive marker). Of the hooks, only
+  `track-meter.sh` (`no-progress`) and `track-tokens.sh` (`budget-exceeded`) write `status`. The
+  `blocked` state is **model-asserted** via `track-note.sh status` — nothing observes it mechanically,
+  which is exactly why the skill must write it rather than quietly opening a PR.
+
+## Surviving a compaction
+
+Everything above is written **per hook event**, and hooks fire on tool calls, subagent boundaries and
+stops. **A context compaction is none of those.** It happens inside a live session, so no
+`SessionStart` fires, `track-reconcile.sh` does not re-run, and nothing re-injects what the compaction
+dropped — first to go being bulk pasted file content, i.e. the governance excerpts every subagent
+brief depends on. The model's *belief* that it complied survives; the content does not.
+
+The bundle's answer is to keep the three things a compaction can destroy in files instead:
+
+| At risk | Kept in | Restored by |
+|---|---|---|
+| Where in the pipeline you are | `phase` / `phase_log[]` (`track-note.sh phase`) | `track-reconcile.sh` → `position.phase` + `resume_action` |
+| The binding governance constraints | `runs/<RUN_ID>.governance.md` (pinned by `track-note.sh governance`) | re-read the file before the next dispatch |
+| Retry budget, ceilings, scope | `track-env.base.sh` (`TRACK_SELF_HEAL_ATTEMPTS`, …) + the `.dispatch` breadcrumb | auto-sourced by every hook |
+
+So after any compaction: re-run `track-reconcile.sh`, act on `resume_action`, re-read the governance
+bundle. Never rebuild position by reading the worktree — that is the failure the reconcile step exists
+to prevent, and it applies identically after a compaction and after a crash.
 
 ## Rendering a Completion / PR Report
 
-`track-report.sh` (Step 8, run by the skill — not a hook) renders the **deterministic half** of a
+`track-report.sh` (at the draft-PR boundary, run by the skill — not a hook) renders the **deterministic half** of a
 PR/stage report straight from state that already exists, so the factual part cannot drift from reality:
 
 ```bash
@@ -194,7 +302,7 @@ It emits an **Auto block** (files changed + `--shortstat` from the `TRACK_BASE_R
 as a fingerprint + pass/fail table; `tool_calls`; the `trace[]` subagent order; and — under a clearly
 separate *self-reported* heading — `skills[]` / `iterations`). It also emits a **Compliance warnings**
 section: if the record shows an *empty evidence pack* or *no `requesting-code-review` activation*, it
-prints a ⚠️ for each (also surfaced as a `warnings[]` array in `--json`) so a skipped Step-5 review or
+prints a ⚠️ for each (also surfaced as a `warnings[]` array in `--json`) so a skipped review gate or
 an un-captured verification is visible in the PR body itself rather than in a later audit — the one
 mechanical backstop for the two gaps a hook cannot otherwise observe. It is **read-only**: it never
 mutates the record, the tree, or git. The **narrative half** (constitution/OWASP compliance, caveats,

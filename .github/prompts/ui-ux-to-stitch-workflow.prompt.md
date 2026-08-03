@@ -121,7 +121,7 @@ Save output to: `.stitch/designs/<page>.html`
 Upload each `.stitch/designs/<page>.html` to Stitch:
 
 ```bash
-python3 .github/skills/stitch-upload-to-stitch/scripts/upload_to_stitch.py \
+python3 .github/skills/stitch/stitch-upload-to-stitch/scripts/upload_to_stitch.py \
   --project-id <PROJECT_ID> \
   --file-path .stitch/designs/<page>.html \
   --api-key <API_KEY> \
