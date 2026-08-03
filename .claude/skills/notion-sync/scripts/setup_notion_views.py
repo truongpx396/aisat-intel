@@ -13,7 +13,7 @@ Creates views based on exact settings confirmed from the Notion UI:
     Done          — Table  | Filter: Status = "Done"
 
 Usage (from repo root):
-    python3 .github/skills/notion-sync/scripts/setup_notion_views.py
+    python3 .claude/skills/notion-sync/scripts/setup_notion_views.py
 
 Requires NOTION_TOKEN and NOTION_DB_ID in .env (or exported as env vars).
 Idempotent: skips views whose names already exist.
@@ -29,7 +29,7 @@ import sys
 NOTION_VERSION = "2026-03-11"
 NOTION_VERSION_PROPS = "2022-06-28"  # older version returns properties reliably
 
-# ── REPO_ROOT: 4 levels up from .github/skills/notion-sync/scripts/ ─────────
+# ── REPO_ROOT: 4 levels up from .claude/skills/notion-sync/scripts/ ─────────
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
 
 

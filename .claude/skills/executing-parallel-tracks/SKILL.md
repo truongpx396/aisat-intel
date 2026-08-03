@@ -381,7 +381,7 @@ with its **Auto** block rendered by [`track-report.sh`](../single-branch-develop
 ```bash
 gh pr create --draft \
   --title "track/<id> [run <run-id>]" \
-  --body "$(bash .github/skills/single-branch-development/scripts/track-report.sh <run-id>)" \
+  --body "$(bash .claude/skills/single-branch-development/scripts/track-report.sh <run-id>)" \
   --label agent-generated
 ```
 The PR body carries the run-id, the goal contract, and the pasted evidence (test output, cost) — the

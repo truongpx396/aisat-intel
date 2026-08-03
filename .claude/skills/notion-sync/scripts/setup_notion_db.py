@@ -7,7 +7,7 @@ Creates all properties required by sync_tasks.py on a blank Notion database
 properties are left untouched by the Notion API.
 
 Usage (from repo root):
-    python3 .github/skills/notion-sync/scripts/setup_notion_db.py
+    python3 .claude/skills/notion-sync/scripts/setup_notion_db.py
 
 Requires NOTION_TOKEN and NOTION_DB_ID in .env (or exported as env vars).
 
@@ -26,7 +26,7 @@ import os
 import subprocess
 import sys
 
-# ── REPO_ROOT: 4 levels up from .github/skills/notion-sync/scripts/ ─────────
+# ── REPO_ROOT: 4 levels up from .claude/skills/notion-sync/scripts/ ─────────
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
 
 
@@ -141,7 +141,7 @@ def main() -> None:
         print(f"\n✅ Schema setup complete!")
         print(f"   Properties: {final}")
         print("\nYou can now push tasks:")
-        print("   python3 .github/skills/notion-sync/scripts/sync_tasks.py push --push-status")
+        print("   python3 .claude/skills/notion-sync/scripts/sync_tasks.py push --push-status")
     else:
         print(f"\n❌ Error: {resp.get('message', resp)}")
         sys.exit(1)

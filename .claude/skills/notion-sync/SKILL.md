@@ -40,7 +40,7 @@ Keeps `specs/*/tasks.md` and a Notion database in sync via a Python script that 
    > (default `Phase`).
 
 > **REPO_ROOT note:** The script resolves paths 4 levels up from its own location
-> (`.github/skills/notion-sync/scripts/` → repo root). Always run commands from
+> (`.claude/skills/notion-sync/scripts/` → repo root). Always run commands from
 > the repo root directory (the folder containing `specs/` and `.env`).
 
 ## Quick Reference
@@ -63,7 +63,7 @@ If the Notion database is new (blank or only has a `Name` column), run the
 setup script **once** to create all required properties:
 
 ```bash
-python3 .github/skills/notion-sync/scripts/setup_notion_db.py
+python3 .claude/skills/notion-sync/scripts/setup_notion_db.py
 ```
 
 This creates: `Task ID` (Title), `Status` (Select w/ options), the work-bucket
@@ -78,7 +78,7 @@ full property table, manual setup steps, and troubleshooting.
 ### 1. Check Current Sync State
 
 ```bash
-python3 .github/skills/notion-sync/scripts/sync_tasks.py status
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py status
 ```
 
 Always run this first to understand what's out of sync before making changes.
@@ -89,10 +89,10 @@ After editing `tasks.md` (new tasks, updated descriptions, or marking tasks done
 
 ```bash
 # Push content only (preserves Notion status)
-python3 .github/skills/notion-sync/scripts/sync_tasks.py push
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py push
 
 # Push content AND status (when you've marked tasks done in tasks.md)
-python3 .github/skills/notion-sync/scripts/sync_tasks.py push --push-status
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py push --push-status
 ```
 
 ### 3. Pull Notion Status into tasks.md
@@ -100,13 +100,13 @@ python3 .github/skills/notion-sync/scripts/sync_tasks.py push --push-status
 After a PM or teammate updates statuses in Notion:
 
 ```bash
-python3 .github/skills/notion-sync/scripts/sync_tasks.py pull
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py pull
 ```
 
 ### 4. Full Bidirectional Sync (Recommended After Sprints)
 
 ```bash
-python3 .github/skills/notion-sync/scripts/sync_tasks.py sync
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py sync
 ```
 
 Runs pull (Notion → tasks.md), re-parses, then push with status (tasks.md → Notion).
@@ -115,17 +115,17 @@ Runs pull (Notion → tasks.md), re-parses, then push with status (tasks.md → 
 
 ```bash
 # Assign a single sprint
-python3 .github/skills/notion-sync/scripts/sync_tasks.py sprint 1
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py sprint 1
 
 # Assign all sprints at once
-python3 .github/skills/notion-sync/scripts/sync_tasks.py sprint all
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py sprint all
 ```
 
 ### 6. Dry-Run Any Command
 
 ```bash
-python3 .github/skills/notion-sync/scripts/sync_tasks.py sync --dry-run
-python3 .github/skills/notion-sync/scripts/sync_tasks.py sprint all --dry-run
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py sync --dry-run
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py sprint all --dry-run
 ```
 
 ## Typical Agent Flow
@@ -133,15 +133,15 @@ python3 .github/skills/notion-sync/scripts/sync_tasks.py sprint all --dry-run
 When an agent finishes implementing a task:
 
 1. Edit `tasks.md` to mark the task done: `- [x] T042  ...`
-2. Run: `python3 .github/skills/notion-sync/scripts/sync_tasks.py push --push-status`
-3. Verify with: `python3 .github/skills/notion-sync/scripts/sync_tasks.py status`
+2. Run: `python3 .claude/skills/notion-sync/scripts/sync_tasks.py push --push-status`
+3. Verify with: `python3 .claude/skills/notion-sync/scripts/sync_tasks.py status`
 
 ### 7. Set Up Notion Views (One Command)
 
 Create all recommended views programmatically:
 
 ```bash
-python3 .github/skills/notion-sync/scripts/setup_notion_views.py
+python3 .claude/skills/notion-sync/scripts/setup_notion_views.py
 ```
 
 This creates all 5 views (idempotent — skips any that already exist):
