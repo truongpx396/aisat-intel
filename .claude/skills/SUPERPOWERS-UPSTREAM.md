@@ -20,34 +20,32 @@ They are **not** authored by this repo — do not edit them in place; see *Updat
 
 ## Why these are here
 
-`.github/skills/single-branch-development` and `.github/skills/executing-parallel-tracks`
-delegate their execution steps to these skills by name — `using-git-worktrees` for
-isolation, `dispatching-parallel-agents` and `subagent-driven-development` for the
-implement loop, `requesting-code-review` for the review gate, and
-`verification-before-completion` for the evidence gate. Without them installed, those
-pipelines reference skills that do not resolve.
+`single-branch-development` and `executing-parallel-tracks` (both in this same
+`.claude/skills/` directory) delegate their execution steps to these skills by name —
+`using-git-worktrees` for isolation, `dispatching-parallel-agents` and
+`subagent-driven-development` for the implement loop, `requesting-code-review` for the
+review gate, and `verification-before-completion` for the evidence gate. Without them
+installed, those pipelines reference skills that do not resolve.
 
 The full set is vendored rather than only the five named above, because the skills
 cross-reference each other with sibling-relative paths (e.g.
 `../using-superpowers/references/codex-tools.md`); a partial copy leaves dangling links.
 
-## Why `.claude/skills/` and not `.github/skills/`
+## Why `.claude/skills/`
 
-This repo otherwise tracks skills in `.github/skills/`. These are the exception, and the
-reason is discovery support, verified empirically rather than assumed:
+Discovery support, verified empirically rather than assumed:
 
 - **Claude Code** discovers **only** `.claude/skills/` (project) and `~/.claude/skills/`
   (personal). A valid `SKILL.md` placed under `.github/skills/` never registers —
   invoking it returns `Unknown skill`.
 - **GitHub Copilot** discovers **both**, per
   [agent-skills.instructions.md](../../.github/instructions/agent-skills.instructions.md):
-  `.github/skills/` is its recommended location and `.claude/skills/` its documented
-  backward-compatible one.
+  `.claude/skills/` is its documented backward-compatible location.
 
-So a single copy here is readable by both harnesses, while a copy in `.github/skills/`
-would be invisible to Claude Code — the harness that actually runs these pipelines.
-Keeping one copy also avoids duplicating a third-party payload across two trees on every
-upstream sync.
+All repo skills (this vendored set plus the project-authored ones) now live under
+`.claude/skills/` for that reason — a single copy is readable by both harnesses, while a
+copy under `.github/skills/` would be invisible to Claude Code, the harness that actually
+runs these pipelines.
 
 ## Updating
 

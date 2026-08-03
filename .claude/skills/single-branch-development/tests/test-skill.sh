@@ -13,7 +13,7 @@
 # Run automatically on every push/PR by .github/workflows/skill-tests.yml.
 #
 # Usage:
-#   bash .github/skills/single-branch-development/tests/test-skill.sh
+#   bash .claude/skills/single-branch-development/tests/test-skill.sh
 #   bash tests/test-skill.sh          # from inside single-branch-development/ dir
 #
 # Requirements: bash, jq, git (gh auth bypassed via PREFLIGHT_REQUIRE_GH=0).

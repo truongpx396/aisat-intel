@@ -26,7 +26,7 @@ NOTION_DB_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ls -la .env
 
 # Dry-run status (no writes, no auth required beyond read)
-python3 .github/skills/notion-sync/scripts/sync_tasks.py status
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py status
 ```
 
 ---
@@ -38,13 +38,13 @@ python3 .github/skills/notion-sync/scripts/sync_tasks.py status
 Upserts every task from `tasks.md` into the Notion database. Creates missing pages, updates changed content. **Preserves** Notion `Status` by default.
 
 ```bash
-python3 .github/skills/notion-sync/scripts/sync_tasks.py push
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py push
 ```
 
 With `--push-status`: also writes checkbox states (`[ ]`, `[-]`, `[x]`) to Notion Status:
 
 ```bash
-python3 .github/skills/notion-sync/scripts/sync_tasks.py push --push-status
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py push --push-status
 ```
 
 **Fields pushed:** Task ID, work-bucket (`Phase`/`Stage`), Story, Parallel flag, Description, (optionally) Status.
@@ -56,7 +56,7 @@ python3 .github/skills/notion-sync/scripts/sync_tasks.py push --push-status
 Reads each task's `Status` from Notion and rewrites the corresponding checkbox marker in `tasks.md`.
 
 ```bash
-python3 .github/skills/notion-sync/scripts/sync_tasks.py pull
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py pull
 ```
 
 **Status mapping:**
@@ -74,13 +74,13 @@ python3 .github/skills/notion-sync/scripts/sync_tasks.py pull
 Runs pull then push in sequence. Pulls Notion statuses first (re-parses the file), then pushes all content **plus** status back to Notion.
 
 ```bash
-python3 .github/skills/notion-sync/scripts/sync_tasks.py sync
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py sync
 ```
 
 Equivalent to:
 ```bash
-python3 .github/skills/notion-sync/scripts/sync_tasks.py pull && \
-python3 .github/skills/notion-sync/scripts/sync_tasks.py push --push-status
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py pull && \
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py push --push-status
 ```
 
 ---
@@ -90,7 +90,7 @@ python3 .github/skills/notion-sync/scripts/sync_tasks.py push --push-status
 Prints a report of differences between `tasks.md` and Notion. Makes **no changes**.
 
 ```bash
-python3 .github/skills/notion-sync/scripts/sync_tasks.py status
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py status
 ```
 
 Output includes:
@@ -107,8 +107,8 @@ Output includes:
 Assigns the Notion `Sprint` select property for all tasks whose work-bucket (`Phase`/`Stage`) belongs to the given sprint. Uses the mapping below.
 
 ```bash
-python3 .github/skills/notion-sync/scripts/sync_tasks.py sprint 1
-python3 .github/skills/notion-sync/scripts/sync_tasks.py sprint all
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py sprint 1
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py sprint all
 ```
 
 **Sprint → Work-bucket Mapping** (labels below use the default `Phase`; with `NOTION_WORK_BUCKET=Stage` the word becomes `Stage`):
@@ -128,10 +128,10 @@ python3 .github/skills/notion-sync/scripts/sync_tasks.py sprint all
 Append `--dry-run` to any command to preview what would happen without making any writes:
 
 ```bash
-python3 .github/skills/notion-sync/scripts/sync_tasks.py push --dry-run
-python3 .github/skills/notion-sync/scripts/sync_tasks.py pull --dry-run
-python3 .github/skills/notion-sync/scripts/sync_tasks.py sync --dry-run
-python3 .github/skills/notion-sync/scripts/sync_tasks.py sprint all --dry-run
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py push --dry-run
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py pull --dry-run
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py sync --dry-run
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py sprint all --dry-run
 ```
 
 ---
@@ -145,16 +145,16 @@ python3 .github/skills/notion-sync/scripts/sync_tasks.py sprint all --dry-run
 #    - [x] T042  Implement ingestion pipeline webhook [US1]
 
 # 2. Push status and content to Notion
-python3 .github/skills/notion-sync/scripts/sync_tasks.py push --push-status
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py push --push-status
 
 # Or, do a full bidirectional sync (pulls any Notion updates first)
-python3 .github/skills/notion-sync/scripts/sync_tasks.py sync
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py sync
 ```
 
 **Scenario: PM updated statuses in Notion, agent needs latest state in `tasks.md`.**
 
 ```bash
-python3 .github/skills/notion-sync/scripts/sync_tasks.py pull
+python3 .claude/skills/notion-sync/scripts/sync_tasks.py pull
 ```
 
 ---
@@ -199,7 +199,7 @@ If starting from a blank Notion database (only has `Name` column), run the
 setup script to create all required properties and rename `Name` → `Task ID`:
 
 ```bash
-python3 .github/skills/notion-sync/scripts/setup_notion_db.py
+python3 .claude/skills/notion-sync/scripts/setup_notion_db.py
 ```
 
 This script:
@@ -247,7 +247,7 @@ Alternatively, create each property manually in the Notion database:
 ### REPO_ROOT Note
 
 The sync script computes `REPO_ROOT` relative to its own file location
-(`.github/skills/notion-sync/scripts/` → 4 levels up = repo root). If you
+(`.claude/skills/notion-sync/scripts/` → 4 levels up = repo root). If you
 move the script, update the `../` count in `REPO_ROOT` at the top of
 `sync_tasks.py` accordingly.
 
@@ -258,7 +258,7 @@ move the script, update the `../` count in `REPO_ROOT` at the top of
 All views are created automatically via the `setup_notion_views.py` script:
 
 ```bash
-python3 .github/skills/notion-sync/scripts/setup_notion_views.py
+python3 .claude/skills/notion-sync/scripts/setup_notion_views.py
 ```
 
 The script is idempotent — it skips views that already exist. Requires API

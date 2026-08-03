@@ -53,7 +53,7 @@ design-system/
 ## Phase 1 — Generate design system locally (ui-ux-pro-max)
 
 ```bash
-python3 .github/skills/ui-ux-pro-max/scripts/search.py \
+python3 .claude/skills/ui-ux-pro-max/scripts/search.py \
   "<product_type> <industry> <keywords>" \
   --design-system --persist -p "<Project Name>"
 # → creates design-system/MASTER.md
@@ -61,7 +61,7 @@ python3 .github/skills/ui-ux-pro-max/scripts/search.py \
 
 For a page-specific override:
 ```bash
-python3 .github/skills/ui-ux-pro-max/scripts/search.py \
+python3 .claude/skills/ui-ux-pro-max/scripts/search.py \
   "<query>" --design-system --persist -p "<Project Name>" --page "<page-name>"
 # → creates design-system/pages/<page-name>.md
 ```
@@ -121,7 +121,7 @@ Save output to: `.stitch/designs/<page>.html`
 Upload each `.stitch/designs/<page>.html` to Stitch:
 
 ```bash
-python3 .github/skills/stitch/stitch-upload-to-stitch/scripts/upload_to_stitch.py \
+python3 .claude/skills/stitch/stitch-upload-to-stitch/scripts/upload_to_stitch.py \
   --project-id <PROJECT_ID> \
   --file-path .stitch/designs/<page>.html \
   --api-key <API_KEY> \

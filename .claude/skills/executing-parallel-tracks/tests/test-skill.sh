@@ -2,7 +2,7 @@
 # test-skill.sh — Regression suite for the executing-parallel-tracks skill.
 #
 # Usage (from repo root):
-#   bash .github/skills/executing-parallel-tracks/tests/test-skill.sh
+#   bash .claude/skills/executing-parallel-tracks/tests/test-skill.sh
 #
 # 27 suites / ~186 assertions. Exit 0 if all non-skipped tests pass, 1 if any fail.
 # Requires: bash 4+, jq, git, awk.
@@ -39,8 +39,8 @@ assert_pipe() {
 
 # ─── paths ───────────────────────────────────────────────────────────────────
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
-SKILL_DIR="$REPO_ROOT/.github/skills/executing-parallel-tracks"
-SBD_DIR="$REPO_ROOT/.github/skills/single-branch-development"
+SKILL_DIR="$REPO_ROOT/.claude/skills/executing-parallel-tracks"
+SBD_DIR="$REPO_ROOT/.claude/skills/single-branch-development"
 SKILL="$SKILL_DIR/SKILL.md"
 MANIFEST_TPL="$SKILL_DIR/track-manifest.template.md"
 GUARD="$SBD_DIR/scripts/track-guard.sh"

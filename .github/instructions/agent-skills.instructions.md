@@ -28,6 +28,12 @@ Skills are stored in specific locations:
 | `~/.github/skills/<skill-name>/` | Personal (user-wide) | Recommended for personal skills |
 | `~/.claude/skills/<skill-name>/` | Personal (user-wide) | Legacy, for backward compatibility |
 
+> **This repo's convention:** all project skills live under `.claude/skills/`, not
+> `.github/skills/` — Claude Code (used alongside Copilot here) only discovers
+> `.claude/skills/`, and Copilot reads both, so a single copy there is visible to both
+> harnesses. See [SUPERPOWERS-UPSTREAM.md](../../.claude/skills/SUPERPOWERS-UPSTREAM.md)
+> for the full rationale. New skills in this repo should go in `.claude/skills/` too.
+
 Each skill **must** have its own subdirectory containing at minimum a `SKILL.md` file.
 
 ## Required SKILL.md Format
