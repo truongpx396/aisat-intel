@@ -74,13 +74,19 @@ specs/001-contextengine-mvp/
 ├── data-model.md        # Phase 1 output (/speckit.plan command)
 ├── quickstart.md        # Phase 1 output (/speckit.plan command)
 ├── contracts/           # Phase 1 output (/speckit.plan command)
-│   ├── README.md            # Contract index + conventions
-│   ├── bff-rest.md          # Go BFF public REST + SSE endpoints
-│   ├── nats-subjects.md     # NATS subject schema (ingestion/query/billing)
-│   ├── mcp-tools.md         # 10 MCP tools across 4 categories
-│   ├── llm-gateway.md       # LLM gateway service (LiteLLM/Bifrost-swappable) + per-runtime client
-│   ├── sandbox-runtime.md   # Sandbox tier (hardened pod default; gVisor/microVM-swappable) + Sandbox port
-│   └── sse-events.md        # SSE event taxonomy (BFF ↔ frontend)
+│   ├── README.md             # Contract index + conventions
+│   ├── bff-rest.md           # Go BFF public REST + SSE endpoints
+│   ├── sse-events.md         # SSE event taxonomy (BFF ↔ frontend)
+│   ├── auth-flow.md          # Casdoor OIDC login + session/PAT auth flow
+│   ├── nats-subjects.md      # NATS subject schema (ingestion/query/billing)
+│   ├── mcp-tools.md          # 10 MCP tools across 4 categories
+│   ├── agent-graph.md        # LangGraph node/edge contract (durable + inline forms)
+│   ├── llm-gateway.md        # LLM gateway service (LiteLLM/Bifrost-swappable) + per-runtime client
+│   ├── sandbox-runtime.md    # Sandbox tier (hardened pod default; gVisor/microVM-swappable) + Sandbox port
+│   ├── authorizer-ports.md   # Go Authorizer port (SingleAxisPolicy + SQL/Qdrant lowerers)
+│   ├── approval-ports.md     # Human-in-the-loop gate (HumanGate/ApprovalStore) port
+│   ├── metering-ports.md     # Credits/metering port (billing.deduct ledger writer)
+│   └── notification-ports.md # Notification fan-out ports (ChannelRegistry/topics)
 ├── checklists/
 │   └── requirements.md  # Spec quality checklist
 └── tasks.md             # Phase 2 output (/speckit.tasks command - NOT created by /speckit.plan)
