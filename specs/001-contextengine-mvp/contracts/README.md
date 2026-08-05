@@ -19,6 +19,7 @@ These contracts define the external/internal interfaces the system exposes. They
 | [metering-ports.md](./metering-ports.md) | Reusable `Meter`/`Pricer`/`Ledger` ports for the credit backbone (domain-agnostic) | Go kernel `metering`/`billing`, all spend producers |
 | [notification-ports.md](./notification-ports.md) | Reusable `Notifier`/`Channel`/`Store` ports for the multi-channel notification backbone (domain-agnostic) | Go kernel `notify`, all notification producers |
 | [approval-ports.md](./approval-ports.md) | Reusable `HumanGate`/`ApprovalStore` ports — the durable, fail-closed, no-spend-while-paused human-in-the-loop gate (`interrupt()`/resume seam) | Go kernel `approval`, Go BFF, Python agent + ingestion tiers |
+| [audit-ports.md](./audit-ports.md) | Reusable `Recorder`/`Sink`/`HashChain` ports — the append-only, tamper-evident, tenant-scoped audit backbone (domain-agnostic; unifies `audit_log` + `agent_audit_log` behind one opaque `Actor`/`Tenant`) | Go kernel `audit`, all audit producers (auth/billing/invite/agent/admin/approval/sandbox) |
 | [sse-events.md](./sse-events.md) | SSE event taxonomy | Go BFF ↔ React SPA |
 
 ## Conventions
