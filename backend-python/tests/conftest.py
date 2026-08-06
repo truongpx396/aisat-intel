@@ -18,8 +18,8 @@ from collections.abc import Iterator
 import pytest
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.waiting_utils import wait_for_logs
-from testcontainers.postgres import PostgresContainer
-from testcontainers.redis import RedisContainer
+from testcontainers.community.redis import RedisContainer
+from testcontainers.community.postgres import PostgresContainer
 
 # Pinned to the same image tags used by deploy/docker-compose.yml and
 # deploy/do/docker-compose.prod.yml so integration tests exercise the same
