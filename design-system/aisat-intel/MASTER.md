@@ -32,6 +32,33 @@
 
 **Color Notes:** "Code dark + run green" — a slate-900 canvas with slate-800 elevated surfaces, run-green for primary/success actions, and a small semantic accent set (cyan/amber/red) reserved for status, scores, and credit states. This is a dark-first developer/observability product; there is no light mode in Phase 1.
 
+**Authoring form — channel triplets, not hex.** Each colour above is declared in `:root` as a **space-separated RGB triplet** (`--color-primary-rgb: 34 197 94`) and consumed as `rgb(var(--color-primary-rgb) / <alpha-value>)`. The hex column is the human-readable reference; the triplet is what ships. This is not cosmetic — Tailwind cannot inject an alpha channel into an opaque `var()`, so declaring the token as a plain hex `var()` silently breaks every `/opacity` modifier in the system (`bg-primary/15`, `border-primary/40`, `bg-warning/10` — all of which this design system uses heavily for status pills and elevated states).
+
+### Reusable-surface theme contract (`--su-*`)
+
+The chat + trace-inspector surface ships as an **app-independent package** (`frontend/src/stream-ui/`, [stream-ui-ports.md](../../specs/001-contextengine-mvp/contracts/stream-ui-ports.md)). It never reads the `--color-*` tokens above — it reads its own `--su-*` contract, so it can be dropped into a client app with a completely different palette, corner radius, density, and typeface.
+
+The binding between the two lives in **one place** (`frontend/src/theme.css`), and that mapping layer is the only file that knows both vocabularies:
+
+```css
+:root{
+  --su-accent-rgb:  var(--color-primary-rgb);   /* colour: ours → the contract */
+  --su-surface-rgb: var(--color-surface-rgb);
+  --su-radius-card: 12px;  --su-radius-control: 8px;  --su-radius-pill: 9999px;
+  --su-space: 4px;  --su-row-gap: 2px;  --su-indent: 16px;
+  --su-font-sans: "Fira Sans";  --su-font-mono: "Fira Code";
+}
+```
+
+| Group | Tokens |
+|---|---|
+| Colour | `--su-canvas-rgb` · `--su-surface-rgb` · `--su-surface-2-rgb` · `--su-border-rgb` · `--su-text-rgb` · `--su-text-muted-rgb` · `--su-accent-rgb` · `--su-info-rgb` · `--su-warn-rgb` · `--su-danger-rgb` |
+| Shape | `--su-radius-card` · `--su-radius-control` · `--su-radius-pill` · `--su-border-width` |
+| Density | `--su-space` · `--su-row-gap` · `--su-indent` |
+| Type | `--su-font-sans` · `--su-font-mono` · `--su-text-size` · `--su-text-size-mono` |
+
+Inside that surface, **use `rounded-card` / `rounded-control` / `rounded-pill`, never `rounded-lg`/`rounded-md`/`rounded-full`** — a literal radius utility is a hard-coded shape decision a client app cannot override, and it is as much a coupling as a hard-coded colour. Enforced by the T100a static scan.
+
 ### Typography
 
 - **Heading Font:** Fira Code

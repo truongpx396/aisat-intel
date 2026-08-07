@@ -58,9 +58,37 @@ Browser auth is **OIDC Authorization Code + PKCE** against Casdoor (behind the k
 
 | Method | Path | Purpose | Notes |
 |--------|------|---------|-------|
-| POST | `/query` | Ask a question | Returns `{ stream_id }`; publishes `query.agent.<ws>`. Moderation gate may short-circuit → `injection_blocked`/`disallowed` before any spend (FR-010, SC-007). Credit-affecting (Idempotency-Key). |
+| POST | `/query` | Ask a question | Returns `{ stream_id }`; publishes `query.agent.<ws>`. Optional `doc_ids[]` **scopes** retrieval to those documents (FR-042) — see below. Optional `clarifies: { id, option_id? }` marks this as the answer to a prior `clarification` (FR-045) — a **new run**, not a resumption; the field exists so eval can measure whether asking helped (SC-017). Moderation gate may short-circuit → `injection_blocked`/`disallowed` before any spend (FR-010, SC-007). Credit-affecting (Idempotency-Key). |
 | GET | `/query/{streamId}` (SSE) | Stream tokens + debug trace | Events per [sse-events.md](./sse-events.md); `done` carries `credits_deducted` |
 | GET | `/query/{streamId}/debug` | Full debug trace object | Debug panel (FR-021); includes `langfuse_trace_url` |
+
+### Scoped questions & chat attachments (US2, FR-042–FR-044)
+
+**`doc_ids[]` scopes retrieval; it never widens authorization.** With `doc_ids` present, the `retrieve` node searches **only** those documents — the clearance/ownership pre-filter still applies underneath, unchanged. Naming a document the caller cannot read yields **`404 not_found`**, identical to naming one that does not exist, so scoping can never be used to probe for a document's existence (FR-042, SC-001). An empty or omitted `doc_ids` is the normal workspace-wide query. Scoped queries meter and audit identically to unscoped ones.
+
+**A chat attachment is a normal personal-scope ingestion, not a hidden copy.** It reuses `POST /ingest/presign` with `scope='personal'` — same size ceiling (`413 oversize`), same unsupported-type rule (`501` for video/audio), same pipeline, same library visibility, same delete path. Two additions:
+
+| Method | Path | Purpose | Notes |
+|--------|------|---------|-------|
+| POST | `/chat/sessions/{id}/attachments` | Register an uploaded file as an attachment of this conversation | Body `{ document_id }` — the document must already exist from `/ingest/presign` + PUT and be **owned by the caller** (non-owner → `404`). Links the document to the session for provenance and returns the ingestion job so the composer can show progress. Does **not** re-upload or copy bytes. |
+| GET | `/chat/sessions/{id}/attachments` | List this conversation's attachments | `{ document_id, filename, status, source_type }`; `status` mirrors the ingestion job (`converting`…`indexed`/`failed`). |
+
+**Answering before indexing completes.** Chunk + embed + index is the slow stage; **conversion** is fast. So a small attachment (under a configured token ceiling) is answered **from its converted text in that same turn** while indexing continues in the background; a large one shows in-thread ingestion progress and answers when `indexed`. Either way the document is fully indexed afterwards and behaves like any library document from then on. Without this split, an attachment inherits the asynchronous library budget — SC-004 allows *five minutes* from upload to answer, which is correct for the library and unusable in a conversation.
+
+**Deleting.** An attachment is deleted like any document (`DELETE /documents/{id}`). Deleting the **conversation** does not delete its attachments — they are real library documents the member may still want, and the delete confirmation says so. This is deliberately the opposite of the Mem0 rule (where memory *is* purged with the session), because a memory is a derived artifact of the conversation while an attachment is content the member supplied.
+
+### Chat sessions (US2, FR-009)
+
+| Method | Path | Purpose | Notes |
+|--------|------|---------|-------|
+| GET | `/chat/sessions` | List the caller's conversations | Ordered by `last_message_at` **DESC** (never `created_at` — see [data-model.md](../data-model.md)); cursor-paginated (`?cursor=&limit=`, default 30). `?archived=true` returns the archived set; default excludes it. Returns `{ id, title, last_message_at, archived_at }` — never another member's sessions, even at L5. |
+| GET | `/chat/sessions/{id}` | One conversation + its turns | Non-owner → `404`, never `403` (existence privacy, same rule as documents — SC-001). |
+| PATCH | `/chat/sessions/{id}` | Rename / archive / unarchive | Body `{ title? , archived? }`. A member-set `title` is **sticky** — the system never overwrites it. Title max 200 chars, trimmed; empty string resets to the derived title rather than blanking the row. |
+| DELETE | `/chat/sessions/{id}` | Delete conversation **and its memories** | **Purges the Mem0 namespace (`mem0_session_id`) as part of the same operation**, not just the row — otherwise deleted-but-remembered context keeps shaping later answers (FR-009 + the memory invariant in [data-model.md](../data-model.md)). Idempotent. Returns `202` while the purge is in flight; the session reports `deleting` until Mem0 confirms, and a failed purge **retries** rather than reporting success. |
+
+**Title provenance.** `title` is written once after the first turn from the `rewrite` node's normalized query — already computed on the critical path, so a title costs **no extra LLM call and no credit spend** ([agent-graph.md](./agent-graph.md)). If `rewrite` degraded, the truncated raw first message is the fallback. This is a derivation, never a new billable operation: no `operation_type`, no ledger row, nothing for SC-006 to reconcile.
+
+**Archive ≠ delete.** Archiving hides a conversation from the default list and **retains** its memories; deleting destroys both. The two are never presented as the same action, and the delete confirmation must state that memory is purged — a member who believes "deleted" only removed a list entry has been misled about what the system still knows.
 
 ## Credits & admin (US4, US6)
 
