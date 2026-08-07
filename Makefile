@@ -19,6 +19,44 @@ help: ## List targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | \
 	  awk -F':.*?## ' '{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
+# ---------------------------- local dev infra stack -------------------------
+# T005's Stage-1 backing-services stack (postgres/redis/qdrant/nats/minio/
+# casdoor/caddy/llm-gateway). The three app runtimes run on the HOST via
+# `make dev` below, not as containers here — compare COMPOSE_PROD further
+# down, which runs the built app images together with their own backing
+# services. Matches specs/001-contextengine-mvp/quickstart.md exactly.
+COMPOSE_DEV = docker compose -f deploy/docker-compose.yml
+.PHONY: up down migrate dev
+up: ## Start the local dev infra stack (postgres/redis/qdrant/nats/minio/casdoor/caddy/llm-gateway)
+	$(COMPOSE_DEV) up -d
+down: ## Stop the local dev infra stack
+	$(COMPOSE_DEV) down
+migrate: ## Apply Postgres migrations + Qdrant collection bootstrap against the local dev stack (placeholder; real steps land in T018/T034)
+	@if [ -f $(GO_DIR)/migrations/0001_init.sql ]; then \
+	  cd $(GO_DIR) && go run ./cmd/api migrate up; \
+	else \
+	  echo "migrate: $(GO_DIR)/migrations/0001_init.sql not present yet (T018) — nothing to run"; \
+	fi
+	@# Qdrant collection bootstrap (backend-python/src/services/retrieval/bootstrap.py)
+	@# lands with T034 — wire its invocation in here once that script exists.
+dev: ## Run all three runtimes concurrently for local dev: go-api :8080, uvicorn :8000, SPA :5173 (Ctrl+C stops all)
+	@pids=""; \
+	trap 'echo; echo "stopping dev runtimes..."; [ -n "$$pids" ] && kill $$pids 2>/dev/null; wait 2>/dev/null' INT TERM EXIT; \
+	if [ -f $(GO_DIR)/go.mod ]; then \
+	  (cd $(GO_DIR) && go run ./cmd/api) & pids="$$pids $$!"; \
+	else echo "skip go dev (no $(GO_DIR)/go.mod)"; fi; \
+	if [ -f $(PY_DIR)/pyproject.toml ]; then \
+	  (uv run --project $(PY_DIR) uvicorn src.main:app --reload --port 8000) & pids="$$pids $$!"; \
+	else echo "skip python dev (no $(PY_DIR)/pyproject.toml)"; fi; \
+	if [ -f $(WEB_DIR)/package.json ]; then \
+	  (npm --prefix $(WEB_DIR) run dev) & pids="$$pids $$!"; \
+	else echo "skip web dev (no $(WEB_DIR)/package.json)"; fi; \
+	if [ -z "$$pids" ]; then \
+	  echo "dev: no runtime scaffolded yet (T002/T003/T004) — nothing to run"; \
+	  exit 0; \
+	fi; \
+	wait $$pids
+
 # ------------------------------- lint --------------------------------------
 .PHONY: lint lint-go lint-python lint-web
 lint: lint-go lint-python lint-web ## Lint all present runtimes
@@ -46,6 +84,15 @@ build-go: ## Build Go entrypoints
 	@if [ -f $(GO_DIR)/go.mod ]; then cd $(GO_DIR) && for c in api relay worker; do [ -d ./cmd/$$c ] && go build -o /dev/null ./cmd/$$c || true; done; else echo "skip go"; fi
 build-web: ## Build frontend
 	@if [ -f $(WEB_DIR)/package.json ]; then cd $(WEB_DIR) && npm run build --if-present; else echo "skip web"; fi
+
+# ------------------------------- eval ---------------------------------------
+.PHONY: eval
+eval: ## Run the Python evals harness (placeholder until T125 lands)
+	@if [ -f $(PY_DIR)/evals/run.py ]; then \
+	  cd $(PY_DIR) && uv run python evals/run.py; \
+	else \
+	  echo "eval: $(PY_DIR)/evals/run.py not present yet (T125) — nothing to run"; \
+	fi
 
 # ------------------------------- security ----------------------------------
 .PHONY: scan
@@ -95,7 +142,7 @@ sandbox-verify: ## Assert the sandbox hardening invariants against the rendered 
 
 # ---------------------------- local prod stack -----------------------------
 COMPOSE_PROD = docker compose -f deploy/do/docker-compose.prod.yml --env-file deploy/do/.env.production
-.PHONY: prod-pull prod-up prod-down prod-logs migrate
+.PHONY: prod-pull prod-up prod-down prod-logs prod-migrate
 prod-pull: ## Pull the prod images referenced by deploy/do/.env.production
 	IMAGE_TAG=$(IMAGE_TAG) $(COMPOSE_PROD) pull
 prod-up: ## Bring the prod stack up locally (needs deploy/do/.env.production)
@@ -104,7 +151,7 @@ prod-down: ## Stop the prod stack
 	$(COMPOSE_PROD) down
 prod-logs: ## Tail prod logs
 	$(COMPOSE_PROD) logs -f --tail=100
-migrate: ## Run DB migrations against the prod stack
+prod-migrate: ## Run DB migrations against the prod stack (renamed from `migrate` — T007's `migrate` now targets the LOCAL dev stack)
 	IMAGE_TAG=$(IMAGE_TAG) $(COMPOSE_PROD) --profile migrate run --rm migrate
 
 # ---------------------- monitoring overlay (DO droplet) --------------------
