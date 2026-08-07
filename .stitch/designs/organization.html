@@ -18,7 +18,8 @@
           surface2:"rgb(var(--su-surface-2-rgb) / <alpha-value>)", line:"rgb(var(--su-border-rgb) / <alpha-value>)",
           primary:"rgb(var(--su-accent-rgb) / <alpha-value>)",     info:"rgb(var(--su-info-rgb) / <alpha-value>)",
           warning:"rgb(var(--su-warn-rgb) / <alpha-value>)",       danger:"rgb(var(--su-danger-rgb) / <alpha-value>)",
-          ink:"rgb(var(--su-text-rgb) / <alpha-value>)",           muted:"rgb(var(--su-text-muted-rgb) / <alpha-value>)"
+          ink:"rgb(var(--su-text-rgb) / <alpha-value>)",           muted:"rgb(var(--su-text-muted-rgb) / <alpha-value>)",
+          faint:"rgb(var(--su-text-faint-rgb) / <alpha-value>)"
         },
         borderRadius: { card:"var(--su-radius-card)", control:"var(--su-radius-control)", pill:"var(--su-radius-pill)" },
         fontFamily: {
@@ -28,6 +29,30 @@
       } }
     }
   </script>
+  <style id="shell-style">
+    /* Meter: the shared credit/progress bar. Driven by --meter-pct so the painted
+       width and the ARIA value read from one source and cannot drift apart. */
+    /* display:block, NOT inline-block — a bare `.meter` with no width utility must fill
+       its container (the balance hero, the ceiling cards). Width-constrained instances
+       (the top-bar meters) carry their own w-* utility. */
+    .meter { overflow: hidden; border-radius: var(--su-radius-pill); background: rgb(var(--su-canvas-rgb)); display: block; }
+    .meter > .meter-fill { display: block; height: 100%; width: var(--meter-pct, 0%); transition: width 200ms ease; }
+
+    :where(a, button, [tabindex]):focus-visible {
+      outline: 2px solid rgb(var(--su-accent-rgb));
+      outline-offset: 2px;
+      border-radius: var(--su-radius-control);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+  </style>
   <style>
     /* ---------------------------------------------------------------------
        Design tokens. Two layers, deliberately:
@@ -45,6 +70,8 @@
       --color-text-rgb:      248 250 252;  --color-text-muted-rgb: 148 163 184;
       --color-primary-rgb:    34 197 94;   --color-info-rgb:       56 189 248;
       --color-warning-rgb:   251 191 36;   --color-danger-rgb:    239 68 68;
+      /* darkest text step that still clears 4.5:1 on these surfaces (slate-500/600 do not) */
+      --color-text-faint-rgb: 128 143 166;
 
       /* colour: client tokens -> the --su-* contract */
       --su-canvas-rgb:     var(--color-background-rgb);
@@ -52,6 +79,7 @@
       --su-surface-2-rgb:  var(--color-surface-2-rgb);
       --su-border-rgb:     var(--color-border-rgb);
       --su-text-rgb:       var(--color-text-rgb);
+      --su-text-faint-rgb: var(--color-text-faint-rgb);
       --su-text-muted-rgb: var(--color-text-muted-rgb);
       --su-accent-rgb:     var(--color-primary-rgb);
       --su-info-rgb:       var(--color-info-rgb);
@@ -107,10 +135,39 @@
     .sidebar-texture > * { position: relative; z-index: 1; }
     [x-cloak] { display: none !important; }
   </style>
+  <script>
+    // Mockup-only state shared by the preview bar and the billing views.
+    document.addEventListener("alpine:init", () => {
+      Alpine.store("org", {
+        role: "org_admin",   // who is looking: only admin/owner may check out (403 otherwise)
+        fulfil: "none",      // none | processing | granted — the post-checkout return state
+      });
+    });
+  </script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body class="font-sans text-ink antialiased">
-  <div class="flex h-screen overflow-hidden" x-data="{ tab: 'workspaces' }">
+  <!-- Preview toggle bar (design tool, not part of app) -->
+  <div class="flex flex-wrap items-center gap-2 border-b border-line bg-black/80 px-4 py-2 font-mono text-xs text-muted" x-data>
+    <span class="mr-2">Billing viewer:</span>
+    <button @click="$store.org.role = 'org_admin'" :class="$store.org.role === 'org_admin' ? 'text-primary' : 'text-muted hover:text-ink'">org admin</button>
+    <span class="text-line">|</span>
+    <button @click="$store.org.role = 'member'" :class="$store.org.role === 'member' ? 'text-primary' : 'text-muted hover:text-ink'">workspace admin (cannot buy)</button>
+    <span class="ml-4 mr-2">Fulfilment:</span>
+    <button @click="$store.org.fulfil = 'none'" :class="$store.org.fulfil === 'none' ? 'text-primary' : 'text-muted hover:text-ink'">none</button>
+    <span class="text-line">|</span>
+    <button @click="$store.org.fulfil = 'processing'" :class="$store.org.fulfil === 'processing' ? 'text-primary' : 'text-muted hover:text-ink'">payment processing</button>
+    <span class="text-line">|</span>
+    <button @click="$store.org.fulfil = 'granted'" :class="$store.org.fulfil === 'granted' ? 'text-primary' : 'text-muted hover:text-ink'">credits granted</button>
+  </div>
+
+  <!-- Deep links from the Credits screen land here: #plans (tier change) and #packs
+       (blocked right now, wants a top-up). The catalogue lives on the organization, so
+       those CTAs navigate rather than duplicating a catalogue on the workspace screen. -->
+  <div class="flex h-screen overflow-hidden"
+       x-data="{ tab: 'workspaces', billingView: 'summary', interval: 'month' }"
+       x-init="if (['#plans','#packs'].includes(location.hash)) { tab = 'billing'; billingView = 'plans';
+                 if (location.hash === '#packs') $nextTick(() => document.getElementById('packs')?.scrollIntoView({ block: 'center' })); }">
 
     <!-- Sidebar -->
     <aside class="hidden md:flex w-60 shrink-0 flex-col border-r border-line bg-surface sidebar-texture">
@@ -153,11 +210,11 @@
     <!-- Main -->
     <div class="flex flex-1 flex-col min-w-0">
       <header class="flex h-16 shrink-0 items-center gap-4 border-b border-line bg-canvas/80 px-5 backdrop-blur">
-        <h1 class="flex items-center gap-2 text-lg font-semibold text-gradient">
+        <h1 class="shrink-0 flex items-center gap-2 text-lg font-semibold text-gradient">
           <svg class="h-5 w-5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/></svg>
           Acme Corp
         </h1>
-        <span class="rounded-full bg-slate-600/30 px-2 py-0.5 font-mono text-[10px] text-muted">Organization</span>
+        <span class="rounded-full bg-surface2 px-2 py-0.5 font-mono text-[10px] text-muted">Organization</span>
         <nav class="ml-2 flex gap-1 text-sm">
           <button @click="tab = 'workspaces'" :class="tab === 'workspaces' ? 'rounded-lg bg-surface2 px-3 py-1.5 font-medium' : 'rounded-lg px-3 py-1.5 text-muted hover:text-ink'">Workspaces</button>
           <button @click="tab = 'billing'" :class="tab === 'billing' ? 'rounded-lg bg-surface2 px-3 py-1.5 font-medium' : 'rounded-lg px-3 py-1.5 text-muted hover:text-ink'">Billing</button>
@@ -165,6 +222,62 @@
           <button @click="tab = 'policy'" :class="tab === 'policy' ? 'rounded-lg bg-surface2 px-3 py-1.5 font-medium' : 'rounded-lg px-3 py-1.5 text-muted hover:text-ink'">Policy</button>
         </nav>
         <span class="ml-auto rounded-lg border border-line bg-surface px-3 py-1.5 font-mono text-xs text-muted">org_admin</span>
+        <!-- @shell:chrome -->
+        <div class="flex items-center gap-3">
+          <!-- Credit meters. MASTER.md requires these on EVERY screen: a balance you have
+               to navigate to is a balance you discover after it blocks you. -->
+          <div class="hidden sm:flex items-center gap-3">
+          <div class="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-1.5" title="Shared workspace balance — all members draw from this pool">
+            <svg class="h-3.5 w-3.5 text-warning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span class="font-mono text-sm">12,480</span>
+            <span class="text-xs text-muted">ws left</span>
+            <span class="meter h-1.5 w-12" style="--meter-pct:82%" role="progressbar"
+                  aria-label="Shared workspace balance — all members draw from this pool" aria-valuenow="82" aria-valuemin="0" aria-valuemax="100"
+                  aria-valuetext="82% of 70,000 used, 12,480 left"><span class="meter-fill bg-warning"></span></span>
+          </div>
+          <div class="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-1.5" title="Your personal daily allowance — resets at midnight UTC">
+            <svg class="h-3.5 w-3.5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/></svg>
+            <span class="font-mono text-sm">410</span>
+            <span class="text-xs text-muted">daily left</span>
+            <span class="meter h-1.5 w-12" style="--meter-pct:59%" role="progressbar"
+                  aria-label="Your personal daily allowance — resets at midnight UTC" aria-valuenow="59" aria-valuemin="0" aria-valuemax="100"
+                  aria-valuetext="59% of 1,000 used, 410 left"><span class="meter-fill bg-primary"></span></span>
+          </div>
+          </div>
+          <!-- Notification bell -->
+          <div class="relative" x-data="{ notifOpen: false }">
+            <button @click="notifOpen = !notifOpen" class="relative grid h-9 w-9 place-items-center rounded-lg border border-line bg-surface text-muted transition hover:border-line hover:text-ink cursor-pointer" title="Notifications" aria-label="Notifications" :aria-expanded="notifOpen">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+              <span class="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 font-mono text-[10px] font-bold text-[#04210F]">3</span>
+            </button>
+            <div x-show="notifOpen" @click.outside="notifOpen = false" x-transition style="display:none" class="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-xl border border-line bg-surface2 shadow-xl">
+              <div class="flex items-center justify-between border-b border-line px-4 py-2.5">
+                <span class="text-sm font-semibold">Notifications <span class="ml-1 font-mono text-xs text-muted">3 unread</span></span>
+                <button class="text-xs text-primary hover:underline cursor-pointer">Mark all read</button>
+              </div>
+              <div class="max-h-80 divide-y divide-line overflow-y-auto">
+              <a href="library.html" class="flex gap-3 bg-surface2 px-4 py-3 transition hover:bg-surface">
+                <span class="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-info/15 text-info"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="m9 15 2 2 4-4"/></svg></span>
+                <span class="min-w-0 flex-1"><span class="block text-sm text-ink">Ingestion complete — <span class="font-medium">Q3-revenue.pdf</span></span><span class="block text-xs text-muted">Ready to query · 2m ago</span></span>
+                <span class="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary"></span>
+              </a>
+              <a href="credits.html" class="flex gap-3 bg-surface2 px-4 py-3 transition hover:bg-surface">
+                <span class="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-warning/15 text-warning"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></span>
+                <span class="min-w-0 flex-1"><span class="block text-sm text-ink">Workspace credits 82% used</span><span class="block text-xs text-muted">12,480 of 70,000 left · 1h ago</span></span>
+                <span class="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary"></span>
+              </a>
+              <a href="agents.html" class="flex gap-3 bg-surface2 px-4 py-3 transition hover:bg-surface">
+                <span class="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-warning/15 text-warning"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/></svg></span>
+                <span class="min-w-0 flex-1"><span class="block text-sm text-ink">Agent task halted at cost cap</span><span class="block text-xs text-muted">“Competitor scan” · 3h ago</span></span>
+                <span class="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary"></span>
+              </a>
+              </div>
+              <a href="notifications.html" class="block border-t border-line px-4 py-2.5 text-center text-xs font-medium text-primary transition hover:bg-surface">View all notifications</a>
+            </div>
+          </div>
+          <button class="grid h-9 w-9 place-items-center rounded-full bg-surface2 font-mono text-sm cursor-pointer" title="Truong P." aria-label="Account menu">TP</button>
+        </div>
+        <!-- /@shell:chrome -->
       </header>
 
       <div class="flex-1 overflow-y-auto px-6 py-6 space-y-6">
@@ -214,29 +327,29 @@
                     <td class="px-5 py-3 text-right font-mono text-xs">9</td>
                     <td class="px-5 py-3 text-right font-mono text-xs">142</td>
                     <td class="px-5 py-3">
-                      <div class="flex items-center gap-2"><span class="font-mono text-xs">70,000</span><span class="h-1.5 w-16 overflow-hidden rounded-full bg-canvas"><span class="block h-full bg-warning" style="width:82%"></span></span></div>
+                      <div class="flex items-center gap-2"><span class="font-mono text-xs">70,000</span><span class="meter h-1.5 w-16" style="--meter-pct:82%" role="progressbar" aria-label="Acme · Research allocation used" aria-valuenow="82" aria-valuemin="0" aria-valuemax="100"><span class="meter-fill bg-warning"></span></span></div>
                       <span class="text-[11px] text-muted">82% used</span>
                     </td>
                     <td class="px-5 py-3 text-right"><button class="text-xs text-primary hover:underline cursor-pointer">Manage</button></td>
                   </tr>
                   <tr class="border-b border-line/60">
                     <td class="px-5 py-3"><span class="flex items-center gap-2"><span class="grid h-5 w-5 place-items-center rounded bg-primary/20 font-mono text-[10px] text-primary">NC</span>Northwind (client)</span><span class="ml-7 block text-xs text-muted">client-isolated</span></td>
-                    <td class="px-5 py-3"><span class="rounded-full bg-slate-600/30 px-2 py-0.5 font-mono text-[10px] text-muted">client isolation</span></td>
+                    <td class="px-5 py-3"><span class="rounded-full bg-surface2 px-2 py-0.5 font-mono text-[10px] text-muted">client isolation</span></td>
                     <td class="px-5 py-3 text-right font-mono text-xs">4</td>
                     <td class="px-5 py-3 text-right font-mono text-xs">61</td>
                     <td class="px-5 py-3">
-                      <div class="flex items-center gap-2"><span class="font-mono text-xs">25,000</span><span class="h-1.5 w-16 overflow-hidden rounded-full bg-canvas"><span class="block h-full bg-primary" style="width:34%"></span></span></div>
+                      <div class="flex items-center gap-2"><span class="font-mono text-xs">25,000</span><span class="meter h-1.5 w-16" style="--meter-pct:34%" role="progressbar" aria-label="Northwind allocation used" aria-valuenow="34" aria-valuemin="0" aria-valuemax="100"><span class="meter-fill bg-primary"></span></span></div>
                       <span class="text-[11px] text-muted">34% used</span>
                     </td>
                     <td class="px-5 py-3 text-right"><button class="text-xs text-primary hover:underline cursor-pointer">Manage</button></td>
                   </tr>
                   <tr>
                     <td class="px-5 py-3"><span class="flex items-center gap-2"><span class="grid h-5 w-5 place-items-center rounded bg-warning/20 font-mono text-[10px] text-warning">MA</span>Project Atlas</span><span class="ml-7 block text-xs text-muted">restricted diligence</span></td>
-                    <td class="px-5 py-3"><span class="rounded-full bg-slate-600/30 px-2 py-0.5 font-mono text-[10px] text-muted">pre-close M&amp;A</span></td>
+                    <td class="px-5 py-3"><span class="rounded-full bg-surface2 px-2 py-0.5 font-mono text-[10px] text-muted">pre-close M&amp;A</span></td>
                     <td class="px-5 py-3 text-right font-mono text-xs">3</td>
                     <td class="px-5 py-3 text-right font-mono text-xs">28</td>
                     <td class="px-5 py-3">
-                      <div class="flex items-center gap-2"><span class="font-mono text-xs">10,000</span><span class="h-1.5 w-16 overflow-hidden rounded-full bg-canvas"><span class="block h-full bg-primary" style="width:12%"></span></span></div>
+                      <div class="flex items-center gap-2"><span class="font-mono text-xs">10,000</span><span class="meter h-1.5 w-16" style="--meter-pct:12%" role="progressbar" aria-label="Project Atlas allocation used" aria-valuenow="12" aria-valuemin="0" aria-valuemax="100"><span class="meter-fill bg-primary"></span></span></div>
                       <span class="text-[11px] text-muted">12% used</span>
                     </td>
                     <td class="px-5 py-3 text-right"><button class="text-xs text-primary hover:underline cursor-pointer">Manage</button></td>
@@ -249,23 +362,61 @@
 
         <!-- ===================== BILLING ===================== -->
         <div x-show="tab === 'billing'" x-cloak class="space-y-4">
+
+          <!-- ============================================================
+               FULFILMENT BANNER — the state after returning from the provider.
+               Credits are granted on the VERIFIED WEBHOOK, never on the redirect
+               back from checkout, so the honest state here is "processing", not
+               "credits added". This banner is the designed form of that rule
+               (pages/credits.md Don'ts) — without it the return lands on a screen
+               still showing the OLD balance, which reads as a failed payment.
+               ============================================================ -->
+          <div x-show="$store.org.fulfil === 'processing'" x-cloak class="flex items-start gap-3 rounded-xl border border-info/40 bg-info/10 px-4 py-3">
+            <svg class="mt-0.5 h-5 w-5 shrink-0 animate-spin text-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium text-info">Payment processing</p>
+              <p class="mt-1 text-xs leading-relaxed text-muted">Your payment went through at the provider. Credits appear once we receive and verify the provider's confirmation — usually seconds, occasionally a minute. <span class="text-ink">Nothing is lost if you close this page</span>; the grant is keyed to the payment, so it lands exactly once either way.</p>
+            </div>
+            <span class="shrink-0 rounded-full bg-info/15 px-2 py-0.5 font-mono text-[10px] text-info">awaiting webhook</span>
+          </div>
+          <div x-show="$store.org.fulfil === 'granted'" x-cloak class="flex items-start gap-3 rounded-xl border border-primary/40 bg-primary/10 px-4 py-3">
+            <svg class="mt-0.5 h-5 w-5 shrink-0 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium text-primary">Credits added — <span class="font-mono">+250,000</span></p>
+              <p class="mt-1 text-xs leading-relaxed text-muted">Confirmed by the provider and written to the ledger. The receipt is in the table below.</p>
+            </div>
+          </div>
+
+          <div x-show="billingView === 'summary'" class="space-y-4">
           <div>
             <h2 class="text-base font-semibold">Billing</h2>
             <p class="mt-0.5 text-xs text-muted">One contract and one invoice for the whole organization. Workspaces draw allocations from this pool.</p>
           </div>
 
           <div class="grid gap-4 lg:grid-cols-3">
+            <!-- Two different "remaining"s live here and they are NOT the same number:
+                 what is left unspent (182,780) and what is left un-handed-out (145,000).
+                 Both are shown because an admin asks two different questions of them —
+                 "will we run out?" and "can I raise a workspace's allocation?" — and
+                 collapsing them into one figure is how the earlier draft ended up with
+                 an unallocated total that double-counted consumption. Reconciles:
+                 250,000 allotment − 67,220 spent = 182,780 left;
+                 250,000 − 105,000 allocated = 145,000 headroom. -->
             <div class="rounded-xl border border-line bg-surface p-5">
               <p class="text-[11px] uppercase tracking-wider text-muted">Organization pool</p>
               <div class="mt-2 flex items-end gap-2">
-                <span class="font-mono text-3xl font-semibold">148,200</span>
-                <span class="mb-1 text-sm text-muted">credits</span>
+                <span class="font-mono text-3xl font-semibold">182,780</span>
+                <span class="mb-1 text-sm text-muted">credits left</span>
               </div>
-              <p class="mt-1 text-xs text-muted">of 250,000 this period</p>
-              <div class="mt-3 h-2 overflow-hidden rounded-full bg-canvas"><span class="block h-full bg-primary" style="width:41%"></span></div>
+              <p class="mt-1 text-xs text-muted">of a <span class="font-mono text-ink">250,000</span> allotment this period</p>
+              <div class="meter mt-3 h-2 w-full" style="--meter-pct:27%" role="progressbar"
+                   aria-label="Organization pool spent this period" aria-valuenow="27" aria-valuemin="0" aria-valuemax="100"
+                   aria-valuetext="27% of the 250,000 allotment spent; 182,780 left"><span class="meter-fill bg-primary"></span></div>
+              <p class="mt-1 text-[11px] text-faint">27% spent across all workspaces</p>
               <dl class="mt-4 space-y-1.5 text-xs">
+                <div class="flex justify-between"><dt class="text-muted">Spent this period</dt><dd class="font-mono text-ink">67,220</dd></div>
                 <div class="flex justify-between"><dt class="text-muted">Allocated to workspaces</dt><dd class="font-mono text-ink">105,000</dd></div>
-                <div class="flex justify-between"><dt class="text-muted">Unallocated</dt><dd class="font-mono text-primary">43,200</dd></div>
+                <div class="flex justify-between"><dt class="text-muted">Unallocated headroom</dt><dd class="font-mono text-primary">145,000</dd></div>
               </dl>
             </div>
 
@@ -275,32 +426,47 @@
                 <span class="rounded-full bg-primary/15 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-primary">active</span>
               </div>
               <p class="mt-2 text-lg font-semibold">Scale <span class="text-sm font-normal text-muted">· monthly</span></p>
-              <p class="mt-0.5 font-mono text-sm text-muted">$199.00 <span class="text-slate-600">USD / month</span></p>
+              <p class="mt-0.5 font-mono text-sm text-muted">$199.00 <span class="text-faint">USD / month</span></p>
               <dl class="mt-4 space-y-1.5 text-xs">
                 <div class="flex justify-between"><dt class="text-muted">Credit allotment</dt><dd class="font-mono text-ink">250,000 / period</dd></div>
                 <div class="flex justify-between"><dt class="text-muted">Renews</dt><dd class="font-mono text-ink">Aug 1, 2026</dd></div>
                 <div class="flex justify-between"><dt class="text-muted">Billing email</dt><dd class="truncate pl-2 text-ink">finance@acme.co</dd></div>
               </dl>
+              <!-- Checkout is admin/owner-only (403 otherwise), so a viewer who cannot buy
+                   is told that instead of being handed a control that fails on click. -->
               <div class="mt-4 flex items-center gap-2">
-                <button class="flex-1 rounded-lg border border-line bg-surface2 px-3 py-1.5 text-xs font-medium transition hover:border-slate-500 cursor-pointer">Change plan</button>
+                <template x-if="$store.org.role === 'org_admin'">
+                  <button @click="billingView = 'plans'" class="flex-1 rounded-lg border border-line bg-surface2 px-3 py-1.5 text-xs font-medium transition hover:border-slate-500 cursor-pointer">Change plan</button>
+                </template>
+                <template x-if="$store.org.role !== 'org_admin'">
+                  <span class="flex-1 rounded-lg border border-line border-dashed px-3 py-1.5 text-center text-xs text-muted" title="Only an organization admin or owner can change the plan">Change plan — org admin only</span>
+                </template>
                 <a href="#" class="rounded-lg border border-line px-3 py-1.5 text-xs text-muted transition hover:text-ink cursor-pointer">Portal ↗</a>
               </div>
             </div>
 
             <div class="rounded-xl border border-line bg-surface p-5">
               <p class="text-[11px] uppercase tracking-wider text-muted">Allocation per workspace</p>
+              <!-- Same percentages as the Workspaces tab and the Credits screen. They
+                   disagreed before (82% there, 67% here) for the same workspace. -->
               <ul class="mt-3 space-y-3 text-xs">
                 <li>
                   <div class="flex justify-between"><span>Acme · Research</span><span class="font-mono text-ink">70,000</span></div>
-                  <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-canvas"><span class="block h-full bg-warning" style="width:67%"></span></div>
+                  <div class="meter mt-1 h-1.5 w-full" style="--meter-pct:82%" role="progressbar"
+                       aria-label="Acme · Research allocation used" aria-valuenow="82" aria-valuemin="0" aria-valuemax="100"
+                       aria-valuetext="82% of 70,000 used"><span class="meter-fill bg-warning"></span></div>
                 </li>
                 <li>
                   <div class="flex justify-between"><span>Northwind (client)</span><span class="font-mono text-ink">25,000</span></div>
-                  <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-canvas"><span class="block h-full bg-primary" style="width:24%"></span></div>
+                  <div class="meter mt-1 h-1.5 w-full" style="--meter-pct:34%" role="progressbar"
+                       aria-label="Northwind allocation used" aria-valuenow="34" aria-valuemin="0" aria-valuemax="100"
+                       aria-valuetext="34% of 25,000 used"><span class="meter-fill bg-primary"></span></div>
                 </li>
                 <li>
                   <div class="flex justify-between"><span>Project Atlas</span><span class="font-mono text-ink">10,000</span></div>
-                  <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-canvas"><span class="block h-full bg-primary" style="width:9%"></span></div>
+                  <div class="meter mt-1 h-1.5 w-full" style="--meter-pct:12%" role="progressbar"
+                       aria-label="Project Atlas allocation used" aria-valuenow="12" aria-valuemin="0" aria-valuemax="100"
+                       aria-valuetext="12% of 10,000 used"><span class="meter-fill bg-primary"></span></div>
                 </li>
               </ul>
               <p class="mt-3 text-[11px] leading-relaxed text-muted">A workspace that exhausts its allocation stops spending — it never silently draws down another workspace's budget.</p>
@@ -324,6 +490,178 @@
               </table>
             </div>
           </div>
+          </div><!-- /billingView summary -->
+
+          <!-- ============================================================
+               PLAN CATALOGUE  (GET /billing/plans → POST /billing/checkout)
+               Reached from "Change plan", and from the Credits screen's Upgrade /
+               Add-credits CTAs. It lives HERE and nowhere else: billing anchors to
+               the organization, so a catalogue on the workspace screen would be a
+               second place to change one thing.
+
+               Two purchase kinds sit on this screen because they answer two
+               different questions. A SUBSCRIPTION tier answers "we keep running
+               out"; a ONE-TIME pack answers "we are blocked right now". Sending a
+               blocked user to an annual-plan decision is why the exhausted-state
+               CTA deep-links to the packs section rather than the tier grid.
+               ============================================================ -->
+          <div x-show="billingView === 'plans'" x-cloak class="space-y-4">
+
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div class="min-w-0">
+                <button @click="billingView = 'summary'" class="flex items-center gap-1.5 text-xs text-muted transition hover:text-ink cursor-pointer">
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg> Back to billing
+                </button>
+                <h2 class="mt-1 text-base font-semibold">Choose a plan</h2>
+                <p class="mt-0.5 text-xs text-muted">One contract for <span class="text-ink">Acme Corp</span>. The allotment lands in the organization pool, and you allocate it to workspaces.</p>
+              </div>
+              <!-- Interval toggle. Yearly is shown as a per-month equivalent because a
+                   $1,990 figure beside a $199 one is not a comparison a reader can make. -->
+              <div class="flex items-center gap-1 rounded-xl border border-line bg-surface p-1">
+                <button @click="interval = 'month'" :class="interval === 'month' ? 'rounded-lg bg-surface2 px-3 py-1.5 text-sm font-medium text-ink' : 'rounded-lg px-3 py-1.5 text-sm text-muted hover:text-ink'">Monthly</button>
+                <button @click="interval = 'year'" :class="interval === 'year' ? 'rounded-lg bg-surface2 px-3 py-1.5 text-sm font-medium text-ink' : 'rounded-lg px-3 py-1.5 text-sm text-muted hover:text-ink'">Yearly <span class="ml-1 rounded-full bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] text-primary">−17%</span></button>
+              </div>
+            </div>
+
+            <!-- Non-buyer state. The 403 is enforced server-side; the UI must not
+                 render a control that is guaranteed to fail. -->
+            <div x-show="$store.org.role !== 'org_admin'" x-cloak class="flex items-start gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3">
+              <svg class="mt-0.5 h-5 w-5 shrink-0 text-warning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <div class="min-w-0 flex-1">
+                <p class="text-sm font-medium text-warning">You can view plans but not purchase</p>
+                <p class="mt-1 text-xs leading-relaxed text-muted">Buying and changing the plan is restricted to organization admins and owners. You are a workspace admin — full reach inside <span class="text-ink">Acme · Research</span>, none over the organization's contract.</p>
+                <button class="mt-2 rounded-lg border border-warning/40 px-3 py-1.5 text-xs font-medium text-warning transition hover:bg-warning/10 cursor-pointer">Request an upgrade from an org admin</button>
+              </div>
+            </div>
+
+            <!-- ---------- Subscription tiers ---------- -->
+            <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+
+              <!-- Starter — below the committed allocations, so it carries the guard -->
+              <div class="flex flex-col rounded-xl border border-line bg-surface p-5">
+                <p class="text-sm font-semibold">Starter</p>
+                <p class="mt-0.5 text-xs text-muted">Trying it out</p>
+                <p class="mt-3 font-mono text-2xl font-semibold">$0</p>
+                <p class="mt-0.5 text-[11px] text-faint">free forever</p>
+                <dl class="mt-4 space-y-1.5 text-xs">
+                  <div class="flex justify-between"><dt class="text-muted">Credits</dt><dd class="font-mono text-ink">10,000 <span class="text-faint">/ mo</span></dd></div>
+                  <div class="flex justify-between"><dt class="text-muted">Workspaces</dt><dd class="font-mono text-ink">1</dd></div>
+                  <div class="flex justify-between"><dt class="text-muted">SSO / SCIM</dt><dd class="text-faint">—</dd></div>
+                </dl>
+                <div class="mt-auto pt-4">
+                  <p class="mb-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-warning">
+                    <svg class="mt-0.5 h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                    Below your committed allocations
+                  </p>
+                  <button :disabled="$store.org.role !== 'org_admin'" class="w-full rounded-lg border border-line bg-surface2 px-3 py-2 text-xs font-medium transition hover:border-slate-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40">Downgrade</button>
+                </div>
+              </div>
+
+              <!-- Team — also below committed allocations -->
+              <div class="flex flex-col rounded-xl border border-line bg-surface p-5">
+                <p class="text-sm font-semibold">Team</p>
+                <p class="mt-0.5 text-xs text-muted">A single working group</p>
+                <p class="mt-3 font-mono text-2xl font-semibold"><span x-text="interval === 'month' ? '$49' : '$41'"></span></p>
+                <p class="mt-0.5 text-[11px] text-faint"><span x-text="interval === 'month' ? 'USD / month' : 'USD / month, billed $490 yearly'"></span></p>
+                <dl class="mt-4 space-y-1.5 text-xs">
+                  <div class="flex justify-between"><dt class="text-muted">Credits</dt><dd class="font-mono text-ink">60,000 <span class="text-faint">/ mo</span></dd></div>
+                  <div class="flex justify-between"><dt class="text-muted">Workspaces</dt><dd class="font-mono text-ink">3</dd></div>
+                  <div class="flex justify-between"><dt class="text-muted">SSO / SCIM</dt><dd class="text-faint">—</dd></div>
+                </dl>
+                <div class="mt-auto pt-4">
+                  <p class="mb-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-warning">
+                    <svg class="mt-0.5 h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                    Below your committed allocations
+                  </p>
+                  <button :disabled="$store.org.role !== 'org_admin'" class="w-full rounded-lg border border-line bg-surface2 px-3 py-2 text-xs font-medium transition hover:border-slate-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40">Downgrade</button>
+                </div>
+              </div>
+
+              <!-- Scale — current -->
+              <div class="flex flex-col rounded-xl border border-primary/50 bg-surface p-5 ring-1 ring-primary/20">
+                <div class="flex items-center justify-between">
+                  <p class="text-sm font-semibold">Scale</p>
+                  <span class="rounded-full bg-primary/15 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-primary">current</span>
+                </div>
+                <p class="mt-0.5 text-xs text-muted">Several teams, one contract</p>
+                <p class="mt-3 font-mono text-2xl font-semibold"><span x-text="interval === 'month' ? '$199' : '$166'"></span></p>
+                <p class="mt-0.5 text-[11px] text-faint"><span x-text="interval === 'month' ? 'USD / month' : 'USD / month, billed $1,990 yearly'"></span></p>
+                <dl class="mt-4 space-y-1.5 text-xs">
+                  <div class="flex justify-between"><dt class="text-muted">Credits</dt><dd class="font-mono text-ink">250,000 <span class="text-faint">/ mo</span></dd></div>
+                  <div class="flex justify-between"><dt class="text-muted">Workspaces</dt><dd class="font-mono text-ink">10</dd></div>
+                  <div class="flex justify-between"><dt class="text-muted">SSO / SCIM</dt><dd class="font-mono text-primary">included</dd></div>
+                </dl>
+                <div class="mt-auto pt-4">
+                  <p class="mb-2 text-[11px] leading-relaxed text-muted">Renews <span class="font-mono text-ink">Aug 1, 2026</span></p>
+                  <button disabled class="w-full cursor-not-allowed rounded-lg border border-line px-3 py-2 text-xs font-medium text-muted">Your current plan</button>
+                </div>
+              </div>
+
+              <!-- Enterprise — no self-serve price, so no checkout affordance -->
+              <div class="flex flex-col rounded-xl border border-line bg-surface p-5">
+                <p class="text-sm font-semibold">Enterprise</p>
+                <p class="mt-0.5 text-xs text-muted">Procurement, DPA, custom terms</p>
+                <p class="mt-3 font-mono text-2xl font-semibold">Custom</p>
+                <p class="mt-0.5 text-[11px] text-faint">annual contract</p>
+                <dl class="mt-4 space-y-1.5 text-xs">
+                  <div class="flex justify-between"><dt class="text-muted">Credits</dt><dd class="font-mono text-ink">custom</dd></div>
+                  <div class="flex justify-between"><dt class="text-muted">Workspaces</dt><dd class="font-mono text-ink">unlimited</dd></div>
+                  <div class="flex justify-between"><dt class="text-muted">SSO / SCIM</dt><dd class="font-mono text-primary">included</dd></div>
+                </dl>
+                <div class="mt-auto pt-4">
+                  <p class="mb-2 text-[11px] leading-relaxed text-muted">Invoiced, not checked out</p>
+                  <button class="w-full rounded-lg border border-line bg-surface2 px-3 py-2 text-xs font-medium transition hover:border-slate-500 cursor-pointer">Contact sales</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- ---------- Downgrade guard ----------
+                 Surfaced BEFORE the irreversible step, not after. Committed
+                 allocations total 105,000; Starter and Team cannot cover that, and
+                 committing anyway would either fail or silently shrink a workspace's
+                 budget. Same shape as the clearance-level removal guard on Policy:
+                 the remedy is to reduce allocations first, never "proceed anyway". -->
+            <div class="rounded-xl border border-warning/40 bg-warning/10 p-4">
+              <div class="flex items-start gap-3">
+                <svg class="mt-0.5 h-5 w-5 shrink-0 text-warning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                <div class="min-w-0 flex-1">
+                  <p class="text-sm font-medium text-warning">Downgrading needs your allocations reduced first</p>
+                  <p class="mt-1 text-xs leading-relaxed text-muted">You have <span class="font-mono text-ink">105,000</span> credits committed across three workspaces. <span class="text-ink">Starter</span> (10,000) and <span class="text-ink">Team</span> (60,000) cannot cover that, and a plan change never silently shrinks a workspace's budget — so the allocations have to come down before the plan can.</p>
+                  <div class="mt-2.5 flex flex-wrap items-center gap-2">
+                    <button @click="billingView = 'summary'" class="rounded-lg border border-warning/40 px-3 py-1.5 text-xs font-medium text-warning transition hover:bg-warning/10 cursor-pointer">Review allocations</button>
+                    <span class="font-mono text-[11px] text-faint">Acme · Research 70,000 · Northwind 25,000 · Atlas 10,000</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ---------- One-time credit packs ---------- -->
+            <section id="packs" class="rounded-xl border border-line bg-surface p-5">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="text-sm font-medium">Need credits now — one-time packs</p>
+                  <p class="mt-1 text-xs leading-relaxed text-muted">A pack tops the pool up immediately and does not change your plan or renewal. Use one to unblock work today; change tier if you run out every period.</p>
+                </div>
+                <span class="shrink-0 rounded-full bg-surface2 px-2 py-0.5 font-mono text-[10px] text-muted">no subscription change</span>
+              </div>
+              <div class="mt-4 grid gap-3 sm:grid-cols-3">
+                <div class="flex items-center justify-between rounded-lg border border-line bg-canvas p-3">
+                  <div><p class="font-mono text-sm text-ink">10,000</p><p class="text-[11px] text-faint">credits</p></div>
+                  <button :disabled="$store.org.role !== 'org_admin'" @click="$store.org.fulfil = 'processing'; billingView = 'summary'" class="rounded-lg border border-line bg-surface2 px-3 py-1.5 font-mono text-xs transition hover:border-slate-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40">$29</button>
+                </div>
+                <div class="flex items-center justify-between rounded-lg border border-line bg-canvas p-3">
+                  <div><p class="font-mono text-sm text-ink">50,000</p><p class="text-[11px] text-faint">credits</p></div>
+                  <button :disabled="$store.org.role !== 'org_admin'" @click="$store.org.fulfil = 'processing'; billingView = 'summary'" class="rounded-lg border border-line bg-surface2 px-3 py-1.5 font-mono text-xs transition hover:border-slate-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40">$129</button>
+                </div>
+                <div class="flex items-center justify-between rounded-lg border border-line bg-canvas p-3">
+                  <div><p class="font-mono text-sm text-ink">200,000</p><p class="text-[11px] text-faint">credits</p></div>
+                  <button :disabled="$store.org.role !== 'org_admin'" @click="$store.org.fulfil = 'processing'; billingView = 'summary'" class="rounded-lg border border-line bg-surface2 px-3 py-1.5 font-mono text-xs transition hover:border-slate-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40">$449</button>
+                </div>
+              </div>
+            </section>
+
+            <p class="text-[11px] leading-relaxed text-muted">Payment is handled by our provider — we never see or store card details, and no provider identifiers appear in this product. Credits are added when the provider's confirmation is verified, not when you return from checkout.</p>
+          </div><!-- /billingView plans -->
         </div>
 
         <!-- ===================== IDENTITY ===================== -->
@@ -344,7 +682,7 @@
                 <div class="flex justify-between"><dt class="text-muted">Domain</dt><dd class="font-mono text-ink">acme.co</dd></div>
                 <div class="flex justify-between"><dt class="text-muted">Enforced</dt><dd class="font-mono text-primary">all members</dd></div>
               </dl>
-              <button class="mt-3 w-full rounded-lg border border-line bg-surface2 px-3 py-1.5 text-xs font-medium transition hover:border-slate-500 cursor-pointer">Configure</button>
+              <button class="mt-3 w-full rounded-lg border border-line bg-surface2 px-3 py-1.5 text-xs font-medium transition hover:border-line cursor-pointer">Configure</button>
             </div>
 
             <div class="rounded-xl border border-line bg-surface p-5">
@@ -374,8 +712,8 @@
                 </thead>
                 <tbody class="text-xs">
                   <tr class="border-b border-line/60"><td class="px-5 py-2.5 font-mono text-info">group:security</td><td class="px-5 py-2.5"><span class="rounded-full bg-primary/15 px-2 py-0.5 font-mono text-[10px] text-primary">native</span></td><td class="px-5 py-2.5 text-right font-mono">4</td><td class="px-5 py-2.5 text-muted">Acme · Research</td></tr>
-                  <tr class="border-b border-line/60"><td class="px-5 py-2.5 font-mono text-muted">ext:okta:finance</td><td class="px-5 py-2.5"><span class="rounded-full bg-slate-600/30 px-2 py-0.5 font-mono text-[10px] text-muted">okta</span></td><td class="px-5 py-2.5 text-right font-mono">11</td><td class="px-5 py-2.5 text-muted">Acme · Research, Project Atlas</td></tr>
-                  <tr><td class="px-5 py-2.5 font-mono text-muted">ext:confluence:eng-space</td><td class="px-5 py-2.5"><span class="rounded-full bg-slate-600/30 px-2 py-0.5 font-mono text-[10px] text-muted">confluence</span></td><td class="px-5 py-2.5 text-right font-mono">12</td><td class="px-5 py-2.5 text-muted">Acme · Research</td></tr>
+                  <tr class="border-b border-line/60"><td class="px-5 py-2.5 font-mono text-muted">ext:okta:finance</td><td class="px-5 py-2.5"><span class="rounded-full bg-surface2 px-2 py-0.5 font-mono text-[10px] text-muted">okta</span></td><td class="px-5 py-2.5 text-right font-mono">11</td><td class="px-5 py-2.5 text-muted">Acme · Research, Project Atlas</td></tr>
+                  <tr><td class="px-5 py-2.5 font-mono text-muted">ext:confluence:eng-space</td><td class="px-5 py-2.5"><span class="rounded-full bg-surface2 px-2 py-0.5 font-mono text-[10px] text-muted">confluence</span></td><td class="px-5 py-2.5 text-right font-mono">12</td><td class="px-5 py-2.5 text-muted">Acme · Research</td></tr>
                 </tbody>
               </table>
             </div>
