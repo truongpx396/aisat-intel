@@ -7,31 +7,69 @@
   <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
   <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
   <script id="tailwind-config">
+    /* Colours resolve through the --su-* contract in :root, never to hex literals, so a
+       re-theme is a :root edit rather than a config edit. Channel triplets + <alpha-value>
+       keep the /opacity modifiers (bg-primary/15) working. */
     tailwind.config = {
       darkMode: "class",
-      theme: {
-        extend: {
-          colors: {
-            canvas: "#0F172A",
-            surface: "#1E293B",
-            surface2: "#273449",
-            line: "#334155",
-            primary: "#22C55E",
-            info: "#38BDF8",
-            warning: "#FBBF24",
-            danger: "#EF4444",
-            ink: "#F8FAFC",
-            muted: "#94A3B8"
-          },
-          fontFamily: {
-            sans: ['"Fira Sans"', "system-ui", "sans-serif"],
-            mono: ['"Fira Code"', "ui-monospace", "monospace"]
-          }
+      theme: { extend: {
+        colors: {
+          canvas:"rgb(var(--su-canvas-rgb) / <alpha-value>)",     surface:"rgb(var(--su-surface-rgb) / <alpha-value>)",
+          surface2:"rgb(var(--su-surface-2-rgb) / <alpha-value>)", line:"rgb(var(--su-border-rgb) / <alpha-value>)",
+          primary:"rgb(var(--su-accent-rgb) / <alpha-value>)",     info:"rgb(var(--su-info-rgb) / <alpha-value>)",
+          warning:"rgb(var(--su-warn-rgb) / <alpha-value>)",       danger:"rgb(var(--su-danger-rgb) / <alpha-value>)",
+          ink:"rgb(var(--su-text-rgb) / <alpha-value>)",           muted:"rgb(var(--su-text-muted-rgb) / <alpha-value>)"
+        },
+        borderRadius: { card:"var(--su-radius-card)", control:"var(--su-radius-control)", pill:"var(--su-radius-pill)" },
+        fontFamily: {
+          sans:["var(--su-font-sans)","system-ui","sans-serif"],
+          mono:["var(--su-font-mono)","ui-monospace","monospace"]
         }
-      }
+      } }
     }
   </script>
   <style>
+    /* ---------------------------------------------------------------------
+       Design tokens. Two layers, deliberately:
+         1. --color-*-rgb  the AISAT palette (MASTER.md), as CHANNEL TRIPLETS so
+                           Tailwind's /alpha modifiers (bg-primary/15) still work.
+         2. --su-*         the stream-ui theme contract (contracts/stream-ui-ports.md).
+                           This block is the single mapping layer that frontend/src/theme.css
+                           becomes at T077 — the package reads only --su-*, never --color-*.
+       A client app reskins by overriding the --su-* half alone: colour, corner
+       radius, density and typeface, with no component edit and no rebuild.
+       --------------------------------------------------------------------- */
+    :root{
+      --color-background-rgb: 15 23 42;    --color-surface-rgb:    30 41 59;
+      --color-surface-2-rgb:  39 52 73;    --color-border-rgb:     51 65 85;
+      --color-text-rgb:      248 250 252;  --color-text-muted-rgb: 148 163 184;
+      --color-primary-rgb:    34 197 94;   --color-info-rgb:       56 189 248;
+      --color-warning-rgb:   251 191 36;   --color-danger-rgb:    239 68 68;
+
+      /* colour: client tokens -> the --su-* contract */
+      --su-canvas-rgb:     var(--color-background-rgb);
+      --su-surface-rgb:    var(--color-surface-rgb);
+      --su-surface-2-rgb:  var(--color-surface-2-rgb);
+      --su-border-rgb:     var(--color-border-rgb);
+      --su-text-rgb:       var(--color-text-rgb);
+      --su-text-muted-rgb: var(--color-text-muted-rgb);
+      --su-accent-rgb:     var(--color-primary-rgb);
+      --su-info-rgb:       var(--color-info-rgb);
+      --su-warn-rgb:       var(--color-warning-rgb);
+      --su-danger-rgb:     var(--color-danger-rgb);
+
+      /* shape */
+      --su-radius-card: 12px;  --su-radius-control: 8px;  --su-radius-pill: 9999px;
+      --su-border-width: 1px;
+
+      /* density */
+      --su-space: 4px;  --su-row-gap: 2px;  --su-indent: 16px;
+
+      /* type */
+      --su-font-sans: "Fira Sans";  --su-font-mono: "Fira Code";
+      --su-text-size: 14px;         --su-text-size-mono: 11px;
+    }
+
     body {
       background: #080D1A;
       background:
@@ -97,6 +135,8 @@
       <span class="text-line">|</span>
       <button @click="chatState = 'approval'"   :class="chatState === 'approval'   ? 'text-primary' : 'text-muted hover:text-ink'">approval gate</button>
       <span class="text-line">|</span>
+      <button @click="chatState = 'clarify'"    :class="chatState === 'clarify'    ? 'text-primary' : 'text-muted hover:text-ink'">clarification</button>
+      <span class="text-line">|</span>
       <button @click="chatState = 'empty'"      :class="chatState === 'empty'      ? 'text-primary' : 'text-muted hover:text-ink'">empty results</button>
       <span class="text-line">|</span>
       <button @click="chatState = 'exhausted'"  :class="chatState === 'exhausted'  ? 'text-primary' : 'text-muted hover:text-ink'">credits exhausted</button>
@@ -142,12 +182,49 @@
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg> Notifications
           <span class="ml-auto grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 font-mono text-[10px] font-bold text-[#04210F]">3</span></a>
       </nav>
-      <!-- Conversation list -->
-      <div class="border-t border-line px-3 py-3">
-        <p class="px-2 pb-1 text-[11px] uppercase tracking-wider text-muted">Recent</p>
-        <a href="#" class="block truncate rounded-md px-2 py-1.5 text-sm text-primary bg-surface2">Q3 revenue drivers</a>
-        <a href="#" class="block truncate rounded-md px-2 py-1.5 text-sm text-muted hover:text-ink">Onboarding policy summary</a>
-        <a href="#" class="block truncate rounded-md px-2 py-1.5 text-sm text-muted hover:text-ink">Security model overview</a>
+      <!-- Conversation list — FR-009 -->
+      <div class="flex min-h-0 flex-1 flex-col border-t border-line">
+        <div class="px-3 pt-3">
+          <button class="flex w-full items-center gap-2 rounded-control border border-line bg-canvas px-2.5 py-1.5 text-sm text-ink hover:border-primary hover:bg-primary/5 transition">
+            <svg class="h-3.5 w-3.5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+            New chat
+          </button>
+        </div>
+
+        <div class="mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+          <!-- Grouped by last_message_at — a chat replied to an hour ago outranks one
+               opened last week and abandoned. Ordering by created_at is the bug this prevents. -->
+          <p class="px-2 pb-1 text-[10px] uppercase tracking-wider text-muted">Today</p>
+          <div class="group flex items-center gap-1 rounded-control bg-surface2 pr-1">
+            <a href="#" class="block flex-1 truncate px-2 py-1.5 text-sm text-primary" title="Q3 revenue drivers">Q3 revenue drivers</a>
+            <!-- row actions: rename · archive · delete. Archive and delete are DIFFERENT
+                 actions and are never merged into one control. -->
+            <span class="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 transition">
+              <button class="grid h-5 w-5 place-items-center rounded-control text-muted hover:text-ink" title="Rename">
+                <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+              </button>
+              <button class="grid h-5 w-5 place-items-center rounded-control text-muted hover:text-ink" title="Archive — hides this chat, keeps its memory">
+                <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><path d="M10 12h4"/></svg>
+              </button>
+              <button class="grid h-5 w-5 place-items-center rounded-control text-muted hover:text-danger" title="Delete — destroys this chat AND purges its memories">
+                <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1L5 6"/></svg>
+              </button>
+            </span>
+          </div>
+
+          <p class="px-2 pb-1 pt-3 text-[10px] uppercase tracking-wider text-muted">Previous 7 days</p>
+          <a href="#" class="block truncate rounded-control px-2 py-1.5 text-sm text-muted hover:bg-surface2 hover:text-ink" title="Onboarding policy summary">Onboarding policy summary</a>
+          <!-- deleting: shown in-flight, NOT optimistically removed — the Mem0 purge must
+               confirm before the row goes, and a failed purge retries rather than silently
+               resurrecting the chat later. -->
+          <div class="flex items-center gap-2 rounded-control px-2 py-1.5 opacity-60">
+            <svg class="h-3 w-3 shrink-0 animate-spin text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+            <span class="min-w-0 flex-1 truncate text-sm text-muted line-through">Security model overview</span>
+          </div>
+          <p class="px-2 pb-1 font-mono text-[10px] text-muted">deleting · purging memory</p>
+
+          <button class="mt-2 w-full rounded-control px-2 py-1 text-left font-mono text-[11px] text-muted hover:text-ink">load more ↓</button>
+        </div>
       </div>
     </aside>
 
@@ -337,38 +414,113 @@
                 <span class="font-mono">smart · gpt-class</span>
                 <span class="rounded-full bg-surface2 px-2 py-0.5 font-mono text-[11px] text-muted animate-pulse">streaming…</span>
               </div>
-              <!-- Horizontal step progress bar -->
-              <div class="flex items-center gap-0 rounded-lg border border-line bg-surface px-4 py-2.5">
-                <!-- Step 1: moderating (completed) -->
-                <div class="flex items-center gap-1.5">
-                  <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/20 border border-primary">
-                    <svg class="h-3 w-3 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
-                  </span>
-                  <span class="font-mono text-[11px] text-primary">moderating</span>
-                </div>
-                <div class="h-px flex-1 min-w-[12px] bg-primary mx-2"></div>
-                <!-- Step 2: retrieving (completed) -->
-                <div class="flex items-center gap-1.5">
-                  <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/20 border border-primary">
-                    <svg class="h-3 w-3 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
-                  </span>
-                  <span class="font-mono text-[11px] text-primary">retrieving</span>
-                </div>
-                <div class="h-px flex-1 min-w-[12px] bg-line mx-2"></div>
-                <!-- Step 3: reranking (active) -->
-                <div class="flex items-center gap-1.5">
-                  <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-primary bg-canvas">
-                    <span class="h-2 w-2 rounded-full bg-primary animate-pulse"></span>
-                  </span>
-                  <span class="font-mono text-[11px] font-semibold text-primary">reranking</span>
-                </div>
-                <div class="h-px flex-1 min-w-[12px] bg-line mx-2"></div>
-                <!-- Step 4: generating (pending) -->
-                <div class="flex items-center gap-1.5">
-                  <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-line bg-canvas">
-                    <span class="font-mono text-[9px] text-muted">4</span>
-                  </span>
-                  <span class="font-mono text-[11px] text-muted">generating</span>
+              <!-- Activity trail — a NESTED tree built from agent_step id/parent_id plus correlated
+                   tool_use/tool_result pairs (contracts/sse-events.md), rendered by the generic
+                   AgentTraceInspector (contracts/stream-ui-ports.md). Phase 1's built-in graph is
+                   linear, so the common case reads as a list; the tree exists so a subagent /
+                   skill / planner run needs no redesign. -->
+              <div class="rounded-card border border-line bg-surface" x-data="{ trailOpen: true, subOpen: true, thinkOpen: false }">
+                <button class="flex w-full items-center gap-2 px-4 py-2 text-left" @click="trailOpen = !trailOpen">
+                  <svg class="h-3 w-3 shrink-0 text-muted transition-transform" :class="trailOpen && 'rotate-90'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                  <span class="font-mono text-[11px] uppercase tracking-wider text-muted">Activity</span>
+                  <span class="ml-auto font-mono text-[10px] text-muted">6 steps · 3 tools</span>
+                </button>
+
+                <div class="space-y-0.5 px-4 pb-3" x-show="trailOpen" x-transition>
+
+                  <!-- node · ok -->
+                  <div class="flex items-center gap-2 py-0.5">
+                    <span class="flex h-4 w-4 shrink-0 items-center justify-center rounded-pill border border-primary bg-primary/20">
+                      <svg class="h-2.5 w-2.5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                    </span>
+                    <span class="font-mono text-[11px] text-primary">moderating</span>
+                    <span class="ml-auto font-mono text-[10px] text-muted">31ms</span>
+                  </div>
+
+                  <!-- node · ok, with its tool call nested UNDER it (parent_id), not beside it -->
+                  <div class="flex items-center gap-2 py-0.5">
+                    <span class="flex h-4 w-4 shrink-0 items-center justify-center rounded-pill border border-primary bg-primary/20">
+                      <svg class="h-2.5 w-2.5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                    </span>
+                    <span class="font-mono text-[11px] text-primary">retrieving</span>
+                    <span class="ml-auto font-mono text-[10px] text-muted">412ms</span>
+                  </div>
+                  <div class="ml-2 border-l border-line pl-4">
+                    <div class="flex items-center gap-2 py-0.5">
+                      <svg class="h-3 w-3 shrink-0 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                      <span class="font-mono text-[11px] text-ink">search_workspace_knowledge</span>
+                      <span class="rounded-control bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] text-primary">ok</span>
+                      <span class="ml-auto font-mono text-[10px] text-muted">240ms</span>
+                    </div>
+                  </div>
+
+                  <!-- subagent · a COLLAPSIBLE GROUP wrapping its own nested children -->
+                  <div class="flex items-center gap-2 py-0.5">
+                    <button class="flex items-center gap-2" @click="subOpen = !subOpen">
+                      <svg class="h-3 w-3 shrink-0 text-muted transition-transform" :class="subOpen && 'rotate-90'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                      <span class="rounded-control bg-info/15 px-1.5 py-0.5 font-mono text-[10px] text-info">subagent</span>
+                      <span class="font-mono text-[11px] text-ink">web-research</span>
+                    </button>
+                    <span class="ml-auto font-mono text-[10px] text-muted">2.4s</span>
+                  </div>
+                  <div class="ml-2 border-l border-info/30 pl-4" x-show="subOpen" x-transition>
+                    <div class="flex items-center gap-2 py-0.5">
+                      <svg class="h-3 w-3 shrink-0 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                      <span class="font-mono text-[11px] text-ink">web_search</span>
+                      <span class="rounded-control bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] text-primary">ok</span>
+                      <span class="ml-auto font-mono text-[10px] text-muted">1.2s</span>
+                    </div>
+                    <!-- a failed tool is styled from tool_result.status — NEVER inferred from output text -->
+                    <div class="flex items-center gap-2 py-0.5">
+                      <svg class="h-3 w-3 shrink-0 text-danger" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 7h3a5 5 0 0 1 0 10h-3m-6 0H6A5 5 0 0 1 6 7h3"/></svg>
+                      <span class="font-mono text-[11px] text-ink">fetch_url</span>
+                      <span class="rounded-control bg-danger/15 px-1.5 py-0.5 font-mono text-[10px] text-danger">error</span>
+                      <span class="ml-auto font-mono text-[10px] text-muted">timeout</span>
+                    </div>
+                  </div>
+
+                  <!-- DEGRADED ≠ error: the node still ended (rerank → RRF fallback). Amber, not red. -->
+                  <div class="flex items-center gap-2 py-0.5">
+                    <span class="flex h-4 w-4 shrink-0 items-center justify-center rounded-pill border border-warning bg-warning/15">
+                      <svg class="h-2.5 w-2.5 text-warning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    </span>
+                    <span class="font-mono text-[11px] text-warning">reranking</span>
+                    <span class="rounded-control bg-warning/15 px-1.5 py-0.5 font-mono text-[10px] text-warning">degraded · RRF fallback</span>
+                    <span class="ml-auto font-mono text-[10px] text-muted">96ms</span>
+                  </div>
+
+                  <!-- UNKNOWN kind → generic collapsible row. Forward-compat made visible: a capability
+                       shipped after this mockup still renders instead of being dropped. -->
+                  <div class="flex items-center gap-2 py-0.5">
+                    <span class="flex h-4 w-4 shrink-0 items-center justify-center rounded-pill border border-line bg-surface2">
+                      <span class="h-1.5 w-1.5 rounded-pill bg-muted"></span>
+                    </span>
+                    <span class="rounded-control bg-surface2 px-1.5 py-0.5 font-mono text-[10px] text-muted">planner</span>
+                    <span class="font-mono text-[11px] text-muted">decompose_query</span>
+                    <span class="ml-auto font-mono text-[10px] text-muted">18ms</span>
+                  </div>
+
+                  <!-- active -->
+                  <div class="flex items-center gap-2 py-0.5">
+                    <span class="flex h-4 w-4 shrink-0 items-center justify-center rounded-pill border-2 border-primary bg-canvas">
+                      <span class="h-1.5 w-1.5 rounded-pill bg-primary animate-pulse"></span>
+                    </span>
+                    <span class="font-mono text-[11px] font-semibold text-primary">generating</span>
+                    <span class="ml-auto font-mono text-[10px] text-muted animate-pulse">…</span>
+                  </div>
+
+                  <!-- thinking: opt-in, COLLAPSED BY DEFAULT, never mistaken for the answer -->
+                  <div class="mt-1 border-t border-line pt-1.5">
+                    <button class="flex w-full items-center gap-2 text-left" @click="thinkOpen = !thinkOpen">
+                      <svg class="h-3 w-3 shrink-0 text-muted transition-transform" :class="thinkOpen && 'rotate-90'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                      <span class="font-mono text-[10px] uppercase tracking-wider text-muted">Thinking</span>
+                      <span class="ml-auto font-mono text-[10px] text-muted">opt-in</span>
+                    </button>
+                    <p class="mt-1.5 border-l-2 border-line pl-3 font-mono text-[11px] italic leading-relaxed text-muted" x-show="thinkOpen" x-transition>
+                      Q3 revenue question — needs the workspace finance deck plus the board summary. Reranker returned low spread, falling back to RRF order…
+                    </p>
+                  </div>
+
                 </div>
               </div>
               <!-- Skeleton shimmer lines -->
@@ -422,6 +574,47 @@
               </div>
             </div>
 
+            <!-- STATE: clarification (FR-045). The card IS the assistant's turn — not a modal, not an
+                 overlay, not an interrupt. Nothing is paused and no run is held open; picking an option
+                 (or typing a reply) sends a NORMAL follow-up query. Deliberately styled UNLIKE the
+                 suggestion chips below the answer: suggestions are optional follow-ups AFTER an answer,
+                 this is a blocking question BEFORE one, and identical treatment makes members conflate them. -->
+            <div class="max-w-[80%] space-y-3" x-show="chatState === 'clarify'" x-cloak x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 translate-y-1" x-transition:enter-end="opacity-100 translate-y-0">
+              <div class="flex items-center gap-2 text-xs text-muted">
+                <span class="grid h-6 w-6 place-items-center rounded-control bg-primary/15 text-primary font-mono">AI</span>
+                <span class="font-mono">smart · gpt-class</span>
+              </div>
+              <div class="rounded-card border border-info/40 bg-info/5 p-4" style="border-left: 3px solid #38BDF8;">
+                <div class="mb-3 flex items-start gap-2.5">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  <div>
+                    <p class="text-sm text-ink">Three things match &ldquo;Q3 revenue&rdquo; — which did you mean?</p>
+                    <p class="mt-0.5 text-xs text-muted">They give different numbers, so I&rsquo;d rather ask than pick.</p>
+                  </div>
+                </div>
+                <div class="space-y-1.5">
+                  <button class="flex w-full items-center justify-between gap-3 rounded-control border border-line bg-surface px-3 py-2 text-left hover:border-info hover:bg-info/5 transition">
+                    <span class="min-w-0"><span class="block truncate text-sm text-ink">Q3 FY26 actuals</span><span class="block truncate font-mono text-[11px] text-muted">board deck · Oct 2026</span></span>
+                    <svg class="h-3.5 w-3.5 shrink-0 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                  </button>
+                  <button class="flex w-full items-center justify-between gap-3 rounded-control border border-line bg-surface px-3 py-2 text-left hover:border-info hover:bg-info/5 transition">
+                    <span class="min-w-0"><span class="block truncate text-sm text-ink">Q3 CY25 actuals</span><span class="block truncate font-mono text-[11px] text-muted">finance export · Jan 2026</span></span>
+                    <svg class="h-3.5 w-3.5 shrink-0 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                  </button>
+                  <button class="flex w-full items-center justify-between gap-3 rounded-control border border-line bg-surface px-3 py-2 text-left hover:border-info hover:bg-info/5 transition">
+                    <span class="min-w-0"><span class="block truncate text-sm text-ink">Q3 FY26 forecast</span><span class="block truncate font-mono text-[11px] text-muted">planning model · Aug 2026</span></span>
+                    <svg class="h-3.5 w-3.5 shrink-0 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                  </button>
+                  <!-- always present: a member is never trapped in a menu that omits what they meant -->
+                  <button class="flex w-full items-center gap-2 rounded-control border border-dashed border-line px-3 py-2 text-left text-sm text-muted hover:border-info hover:text-ink transition">
+                    <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                    Something else…
+                  </button>
+                </div>
+                <p class="mt-3 font-mono text-[11px] text-muted">nothing paused · your pick just sends a follow-up</p>
+              </div>
+            </div>
+
             <!-- STATE: empty results -->
             <div class="max-w-[80%] space-y-3" x-show="chatState === 'empty'" x-cloak x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 translate-y-1" x-transition:enter-end="opacity-100 translate-y-0">
               <div class="flex items-center gap-2 text-xs text-muted">
@@ -463,7 +656,49 @@
           <!-- Composer -->
           <div class="border-t border-line bg-canvas px-6 py-4" x-show="chatState !== 'exhausted'">
             <div class="mx-auto max-w-3xl">
+              <!-- Scope chip (FR-042) — narrowing only; NEVER widens what the member may read.
+                   Removable, so the unscoped workspace query is always one click away. -->
+              <div class="mb-2 flex flex-wrap items-center gap-2">
+                <span class="inline-flex items-center gap-1.5 rounded-pill border border-info/40 bg-info/10 px-2.5 py-1 text-xs text-info">
+                  <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+                  answering from: 2 documents
+                  <button class="ml-0.5 text-info/70 hover:text-info" title="Clear scope — ask across the whole workspace">
+                    <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                  </button>
+                </span>
+              </div>
+
+              <!-- Attachment chips (FR-043). An attachment is a REAL personal-library document —
+                   billed as an ingestion, retained, deletable. The "saved to your library" line
+                   below is shown BEFORE send: a member who thinks this is transient has been
+                   misled about what the system keeps. -->
+              <div class="mb-2 flex flex-wrap items-center gap-2">
+                <span class="inline-flex items-center gap-2 rounded-control border border-line bg-surface px-2.5 py-1.5 text-xs">
+                  <svg class="h-3.5 w-3.5 shrink-0 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+                  <span class="max-w-[16ch] truncate text-ink" title="acme-msa-2026.pdf">acme-msa-2026.pdf</span>
+                  <span class="rounded-control bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] text-primary">indexed</span>
+                  <button class="text-muted hover:text-danger" title="Remove"><svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+                </span>
+                <!-- mid-ingestion: answerable this turn from converted text once conversion lands -->
+                <span class="inline-flex items-center gap-2 rounded-control border border-line bg-surface px-2.5 py-1.5 text-xs">
+                  <svg class="h-3.5 w-3.5 shrink-0 animate-spin text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                  <span class="max-w-[16ch] truncate text-muted" title="q3-board-deck.pdf">q3-board-deck.pdf</span>
+                  <span class="rounded-control bg-surface2 px-1.5 py-0.5 font-mono text-[10px] text-muted">embedding…</span>
+                </span>
+                <!-- library's own rules apply verbatim: nothing is accepted here the library would refuse -->
+                <span class="inline-flex items-center gap-2 rounded-control border border-danger/40 bg-danger/10 px-2.5 py-1.5 text-xs">
+                  <svg class="h-3.5 w-3.5 shrink-0 text-danger" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  <span class="max-w-[16ch] truncate text-danger" title="standup.mp4">standup.mp4</span>
+                  <span class="font-mono text-[10px] text-danger">501 · video unsupported</span>
+                  <button class="text-danger/70 hover:text-danger" title="Remove"><svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+                </span>
+              </div>
+
               <div class="flex items-end gap-2 rounded-2xl border border-line bg-surface p-2 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20 transition">
+                <!-- attach: click, drag-drop onto the composer, or paste an image -->
+                <button class="grid h-9 w-9 shrink-0 place-items-center rounded-control text-muted hover:bg-surface2 hover:text-ink transition" title="Attach a file — saved to your library, private to you">
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.4 11.05 12.25 20.2a6 6 0 0 1-8.49-8.49l9.2-9.19a4 4 0 0 1 5.65 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                </button>
                 <textarea rows="1" class="flex-1 resize-none bg-transparent px-3 py-2 text-sm text-ink placeholder:text-slate-500 focus:outline-none" placeholder="Ask anything about your workspace knowledge…"></textarea>
                 <button class="flex items-center gap-1.5 rounded-xl btn-gradient px-4 py-2 text-sm font-semibold transition cursor-pointer">
                   Send
@@ -471,6 +706,7 @@
                 </button>
               </div>
               <p class="mt-2 px-2 text-xs text-muted">Scoped to <span class="text-ink">your documents + L1–L3 workspace knowledge</span> <span class="text-ink">in</span> <span class="font-mono text-info">security</span><span class="text-slate-500">, </span><span class="font-mono text-info">eng-space</span> <span class="rounded bg-slate-600/30 px-1 py-0.5 text-[10px]">Phase 2</span> · est. <span class="font-mono text-ink">~42</span> credits / query</p>
+              <p class="mt-1 px-2 text-xs text-muted">Attachments are <span class="text-ink">saved to your library</span> · <span class="text-ink">private to you</span> · billed as an ingestion</p>
             </div>
           </div>
 
@@ -505,58 +741,191 @@
           </div>
           <div class="flex-1 overflow-y-auto p-4 space-y-4 text-sm">
 
-            <div class="rounded-lg border border-line bg-canvas p-3">
+            <!-- The drawer is an ORDERED LIST OF LABELLED SECTIONS, not one fixed form. Every section
+                 carries a header row with its label + kind so the boundary is visible even when only
+                 one is present — that is what makes a second section look designed, not bolted on.
+                 This one is kind="rag_retrieval"; its payload is opaque to the panel kernel and is
+                 rendered by the registered RagRetrievalSection (contracts/stream-ui-ports.md). -->
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] font-semibold uppercase tracking-wider text-ink">Retrieval</span>
+              <span class="rounded-control bg-surface2 px-1.5 py-0.5 font-mono text-[10px] text-muted">rag_retrieval</span>
+              <span class="h-px flex-1 bg-line"></span>
+            </div>
+
+            <div class="rounded-card border border-line bg-canvas p-3">
               <p class="text-[11px] uppercase tracking-wider text-muted">Intent → Tool</p>
               <p class="mt-1 font-mono text-xs">analytical_lookup → <span class="text-primary">search_workspace</span></p>
             </div>
 
-            <div class="rounded-lg border border-line bg-canvas p-3">
+            <div class="rounded-card border border-line bg-canvas p-3">
               <p class="text-[11px] uppercase tracking-wider text-muted">Index tier</p>
               <p class="mt-1 font-mono text-xs">workspace · hybrid (BM25 + dense)</p>
             </div>
 
-            <div class="rounded-lg border border-warning/40 bg-warning/10 p-3">
-              <p class="text-[11px] uppercase tracking-wider text-warning">Access filter</p>
-              <p class="mt-1 text-xs text-ink"><span class="font-mono">9</span> candidate chunks · <span class="font-mono text-warning">2</span> filtered out above clearance <span class="font-mono">L3</span></p>
-              <p class="mt-1 text-xs text-ink"><span class="font-mono text-warning">2</span> filtered out by group <span class="rounded bg-slate-600/30 px-1 py-0.5 text-[10px]">Phase 2</span></p>
-              <p class="mt-1 font-mono text-[11px] text-muted">both conjuncts pre-filtered — never post-filtered</p>
-            </div>
+            <!-- THE FUNNEL, not five parallel score tables. Each stage states what entered, what left,
+                 how long it took, and WHERE THE LINE WAS DRAWN. Five arrays made the reader join them
+                 by eye and still could not answer "where did my document fall out?". -->
+            <div class="rounded-card border border-line bg-canvas p-3">
+              <div class="mb-2 flex items-baseline justify-between">
+                <p class="text-[11px] uppercase tracking-wider text-muted">Retrieval funnel</p>
+                <p class="font-mono text-[11px] text-muted">12 → 9 → 3 · 412ms</p>
+              </div>
 
-            <div class="rounded-lg border border-line bg-canvas p-3">
-              <p class="mb-2 text-[11px] uppercase tracking-wider text-muted">Retrieval + rerank scores</p>
-              <div class="space-y-2">
-                <div>
-                  <div class="flex justify-between font-mono text-xs"><span>board-deck#p12</span><span class="text-primary">0.91</span></div>
-                  <div class="score-bar mt-1"><span class="block h-full bg-primary" style="width:91%"></span></div>
+              <!-- stage: hybrid candidates -->
+              <div class="mb-2">
+                <div class="flex items-baseline justify-between font-mono text-[11px]">
+                  <span class="text-ink">bm25 + vector → rrf</span>
+                  <span class="text-muted">12 in · 9 out · 148ms</span>
                 </div>
-                <div>
-                  <div class="flex justify-between font-mono text-xs"><span>pricing#t4</span><span class="text-primary">0.87</span></div>
-                  <div class="score-bar mt-1"><span class="block h-full bg-primary" style="width:87%"></span></div>
+                <div class="mt-1.5 space-y-1.5">
+                  <div>
+                    <div class="flex items-baseline justify-between gap-2 text-xs">
+                      <span class="min-w-0 truncate text-ink">Q3 Board Deck <span class="font-mono text-[10px] text-muted">· p12</span></span>
+                      <span class="shrink-0 font-mono text-primary">0.91</span>
+                    </div>
+                    <p class="truncate font-mono text-[10px] text-muted">“…revenue came in at $4.2M against a $3.8M plan…”</p>
+                    <div class="score-bar mt-1"><span class="block h-full bg-primary" style="width:91%"></span></div>
+                  </div>
+                  <div>
+                    <div class="flex items-baseline justify-between gap-2 text-xs">
+                      <span class="min-w-0 truncate text-ink">Pricing Model v4 <span class="font-mono text-[10px] text-muted">· t4</span></span>
+                      <span class="shrink-0 font-mono text-primary">0.87</span>
+                    </div>
+                    <p class="truncate font-mono text-[10px] text-muted">“…blended ARPU assumptions for the Q3 forecast…”</p>
+                    <div class="score-bar mt-1"><span class="block h-full bg-primary" style="width:87%"></span></div>
+                  </div>
+
+                  <!-- THE CUTOFF LINE. Everything below is a near-miss, shown greyed rather than absent:
+                       a doc that lost by 0.02 and a doc that was never retrieved are different problems,
+                       and an absence cannot tell them apart. -->
+                  <div class="flex items-center gap-2 py-0.5">
+                    <span class="h-px flex-1 bg-warning/40"></span>
+                    <span class="font-mono text-[10px] text-warning">cutoff 0.70</span>
+                    <span class="h-px flex-1 bg-warning/40"></span>
+                  </div>
+
+                  <div class="opacity-50">
+                    <div class="flex items-baseline justify-between gap-2 text-xs">
+                      <span class="min-w-0 truncate text-ink">Onboarding Policy <span class="font-mono text-[10px] text-muted">· s3</span></span>
+                      <span class="shrink-0 font-mono text-muted">0.68</span>
+                    </div>
+                    <p class="truncate font-mono text-[10px] text-muted">“…quarterly review cadence for new hires…”</p>
+                    <div class="score-bar mt-1"><span class="block h-full bg-muted" style="width:68%"></span></div>
+                  </div>
                 </div>
-                <div>
-                  <div class="flex justify-between font-mono text-xs"><span>onboarding#s3</span><span class="text-info">0.74</span></div>
-                  <div class="score-bar mt-1"><span class="block h-full bg-info" style="width:74%"></span></div>
+              </div>
+
+              <!-- stage: clearance. COUNTS ONLY — naming a filtered doc would make the panel an
+                   existence oracle for content the member may not read (SC-001). -->
+              <div class="my-2 rounded-control border border-warning/40 bg-warning/10 px-2.5 py-2">
+                <div class="flex items-baseline justify-between font-mono text-[11px]">
+                  <span class="text-warning">clearance filter</span>
+                  <span class="text-muted">9 in · 7 out · 6ms</span>
                 </div>
+                <p class="mt-1 text-xs text-ink"><span class="font-mono text-warning">2</span> removed above clearance <span class="font-mono">L3</span> · <span class="font-mono text-warning">0</span> by group <span class="rounded-control bg-slate-600/30 px-1 py-0.5 text-[10px]">Phase 2</span></p>
+                <p class="mt-1 font-mono text-[10px] text-muted">counts only — a doc you can’t read is never named · pre-filter, never post-filter</p>
+              </div>
+
+              <!-- stage: rerank, DEGRADED. Recorded, not smoothed over. -->
+              <div class="flex items-baseline justify-between font-mono text-[11px]">
+                <span class="text-warning">rerank <span class="rounded-control bg-warning/15 px-1 py-0.5 text-[10px]">degraded</span></span>
+                <span class="text-muted">7 in · 3 out · 96ms</span>
+              </div>
+              <p class="mt-1 font-mono text-[10px] text-muted">reranker unavailable — RRF order retained</p>
+
+              <div class="mt-2 flex items-baseline justify-between border-t border-line pt-2 font-mono text-[11px]">
+                <span class="text-ink">expand child → parent</span>
+                <span class="text-muted">3 → 7 neighbors · 12ms</span>
               </div>
             </div>
 
-            <div class="grid grid-cols-2 gap-3">
-              <div class="rounded-lg border border-line bg-canvas p-3">
-                <p class="text-[11px] uppercase tracking-wider text-muted">Chunk expansion</p>
-                <p class="mt-1 font-mono text-xs">3 → 7 neighbors</p>
+            <!-- Injected memory: a LIST with per-memory clearance, not an opaque "2 turns" string.
+                 This is a security surface (memories carry a stamped access_level checked against
+                 CURRENT clearance), so it is the last place that should be a black box. -->
+            <div class="rounded-card border border-line bg-canvas p-3">
+              <p class="mb-2 text-[11px] uppercase tracking-wider text-muted">Injected memory</p>
+              <div class="space-y-1 text-xs">
+                <div class="flex items-baseline gap-2">
+                  <span class="shrink-0 rounded-control bg-surface2 px-1 py-0.5 font-mono text-[10px] text-muted">L2</span>
+                  <span class="min-w-0 truncate text-ink">prefers revenue figures in USD, not local currency</span>
+                </div>
+                <div class="flex items-baseline gap-2">
+                  <span class="shrink-0 rounded-control bg-surface2 px-1 py-0.5 font-mono text-[10px] text-muted">L1</span>
+                  <span class="min-w-0 truncate text-ink">works in the Research workspace, finance-adjacent</span>
+                </div>
               </div>
-              <div class="rounded-lg border border-line bg-canvas p-3">
-                <p class="text-[11px] uppercase tracking-wider text-muted">Injected memory</p>
-                <p class="mt-1 font-mono text-xs">2 turns</p>
+              <p class="mt-2 font-mono text-[10px] text-muted">1 elided (budget, lowest-salience) · 1 elided (above current clearance)</p>
+            </div>
+
+            <!-- GROUNDING — the panel's most valuable view, and the one that was missing entirely:
+                 the old shape showed what was RETRIEVED, the thread showed citations, and nothing
+                 joined them, so "is this answer supported?" was unanswerable. -->
+            <div class="flex items-center gap-2 pt-1">
+              <span class="text-[11px] font-semibold uppercase tracking-wider text-ink">Grounding</span>
+              <span class="rounded-control bg-surface2 px-1.5 py-0.5 font-mono text-[10px] text-muted">grounding</span>
+              <span class="h-px flex-1 bg-line"></span>
+            </div>
+            <div class="rounded-card border border-line bg-canvas p-3">
+              <div class="space-y-2 text-xs">
+                <div class="border-l-2 border-primary pl-2">
+                  <p class="text-ink">“Q3 revenue was $4.2M, ahead of the $3.8M plan.”</p>
+                  <p class="mt-0.5 font-mono text-[10px] text-primary">[1] Q3 Board Deck · p12</p>
+                </div>
+                <div class="border-l-2 border-primary pl-2">
+                  <p class="text-ink">“The beat was driven mainly by expansion revenue.”</p>
+                  <p class="mt-0.5 font-mono text-[10px] text-primary">[1] Q3 Board Deck · p12 · [2] Pricing Model v4 · t4</p>
+                </div>
+                <!-- unsupported: a DISTINCT amber state. Not necessarily wrong — may be connective
+                     prose — but it is the one thing a reviewer must see at a glance, so it is never
+                     hidden and never styled like a cited claim. -->
+                <div class="border-l-2 border-warning bg-warning/5 pl-2">
+                  <p class="text-ink">“This trend is expected to continue into Q4.”</p>
+                  <p class="mt-0.5 font-mono text-[10px] text-warning">no supporting chunk — unsupported claim</p>
+                </div>
+              </div>
+              <div class="mt-2 border-t border-line pt-2">
+                <p class="font-mono text-[10px] text-muted">retrieved but never cited — usually the prompt, not retrieval, was at fault</p>
+                <p class="mt-1 truncate text-xs text-muted">Pricing Model v4 · t9 <span class="font-mono text-[10px]">(rank 3)</span></p>
               </div>
             </div>
 
-            <div class="rounded-lg border border-line bg-canvas p-3">
-              <p class="mb-2 text-[11px] uppercase tracking-wider text-muted">Model · cost</p>
+            <!-- COST — per call. One number could not answer "why did this cost 42 credits?", and
+                 query-time vision made that worse: image tokens vary by an order of magnitude. -->
+            <div class="flex items-center gap-2 pt-1">
+              <span class="text-[11px] font-semibold uppercase tracking-wider text-ink">Cost</span>
+              <span class="rounded-control bg-surface2 px-1.5 py-0.5 font-mono text-[10px] text-muted">cost</span>
+              <span class="h-px flex-1 bg-line"></span>
+            </div>
+            <div class="rounded-card border border-line bg-canvas p-3">
+              <table class="w-full font-mono text-[11px]">
+                <thead><tr class="text-muted"><th class="py-0.5 text-left font-normal">stage</th><th class="text-right font-normal">tokens</th><th class="text-right font-normal">ms</th><th class="text-right font-normal">cr</th></tr></thead>
+                <tbody class="text-ink">
+                  <tr><td class="py-0.5">rewrite <span class="text-muted">· fast</span></td><td class="text-right">180/40</td><td class="text-right text-muted">120</td><td class="text-right">2</td></tr>
+                  <tr><td class="py-0.5">rerank <span class="text-muted">· rerank</span></td><td class="text-right">—</td><td class="text-right text-muted">96</td><td class="text-right">3</td></tr>
+                  <tr><td class="py-0.5">vision <span class="text-muted">· vision</span></td><td class="text-right">640<span class="text-info">+img</span></td><td class="text-right text-muted">1420</td><td class="text-right">19</td></tr>
+                  <tr><td class="py-0.5">generate <span class="text-muted">· smart</span></td><td class="text-right">1,284/312</td><td class="text-right text-muted">2180</td><td class="text-right">18</td></tr>
+                </tbody>
+                <tfoot><tr class="border-t border-line text-ink"><td class="pt-1">total</td><td></td><td class="pt-1 text-right text-muted">3,816</td><td class="pt-1 text-right text-primary">42</td></tr></tfoot>
+              </table>
+              <p class="mt-1.5 font-mono text-[10px] text-muted">image tokens priced by tile/resolution · 0 fallback hops · reconciles to done.credits_deducted</p>
+            </div>
+
+            <!-- A SECOND section, and an UNRECOGNIZED kind at that. The panel has no renderer
+                 registered for "planner_trace", so it degrades to a generic key-value table rather
+                 than dropping the section or blanking the drawer. A blank panel is a worse failure
+                 than an ugly one — this is the forward-compat guarantee made visible. -->
+            <div class="flex items-center gap-2 pt-1">
+              <span class="text-[11px] font-semibold uppercase tracking-wider text-muted">Plan</span>
+              <span class="rounded-control bg-surface2 px-1.5 py-0.5 font-mono text-[10px] text-muted">planner_trace</span>
+              <span class="rounded-control border border-dashed border-line px-1.5 py-0.5 font-mono text-[10px] text-muted">no renderer · generic</span>
+              <span class="h-px flex-1 bg-line"></span>
+            </div>
+
+            <div class="rounded-card border border-dashed border-line bg-canvas p-3">
               <dl class="space-y-1 font-mono text-xs">
-                <div class="flex justify-between"><dt class="text-muted">model</dt><dd>smart (fallback: 0 hops)</dd></div>
-                <div class="flex justify-between"><dt class="text-muted">tokens</dt><dd>1,284 in / 312 out</dd></div>
-                <div class="flex justify-between"><dt class="text-muted">credits</dt><dd class="text-primary">−42</dd></div>
+                <div class="flex justify-between gap-3"><dt class="shrink-0 text-muted">strategy</dt><dd class="truncate text-right">decompose_then_retrieve</dd></div>
+                <div class="flex justify-between gap-3"><dt class="shrink-0 text-muted">sub_questions</dt><dd class="truncate text-right">2</dd></div>
+                <div class="flex justify-between gap-3"><dt class="shrink-0 text-muted">fanout</dt><dd class="truncate text-right">web-research</dd></div>
               </dl>
             </div>
           </div>

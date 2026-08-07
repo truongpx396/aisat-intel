@@ -35,12 +35,52 @@ NAV = [
 ]
 UNREAD = 3
 
-CHAT_EXTRA = '''      <!-- Conversation list -->
-      <div class="border-t border-line px-3 py-3">
-        <p class="px-2 pb-1 text-[11px] uppercase tracking-wider text-muted">Recent</p>
-        <a href="#" class="block truncate rounded-md px-2 py-1.5 text-sm text-primary bg-surface2">Q3 revenue drivers</a>
-        <a href="#" class="block truncate rounded-md px-2 py-1.5 text-sm text-muted hover:text-ink">Onboarding policy summary</a>
-        <a href="#" class="block truncate rounded-md px-2 py-1.5 text-sm text-muted hover:text-ink">Security model overview</a>
+# Conversation list (FR-009). APP CHROME — deliberately not part of the reusable
+# stream-ui/ package: history is a host persistence concern, and the package renders
+# A run, not the history of runs. Ordering is by last_message_at, never created_at.
+CHAT_EXTRA = '''      <!-- Conversation list — FR-009 -->
+      <div class="flex min-h-0 flex-1 flex-col border-t border-line">
+        <div class="px-3 pt-3">
+          <button class="flex w-full items-center gap-2 rounded-control border border-line bg-canvas px-2.5 py-1.5 text-sm text-ink hover:border-primary hover:bg-primary/5 transition">
+            <svg class="h-3.5 w-3.5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+            New chat
+          </button>
+        </div>
+
+        <div class="mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+          <!-- Grouped by last_message_at — a chat replied to an hour ago outranks one
+               opened last week and abandoned. Ordering by created_at is the bug this prevents. -->
+          <p class="px-2 pb-1 text-[10px] uppercase tracking-wider text-muted">Today</p>
+          <div class="group flex items-center gap-1 rounded-control bg-surface2 pr-1">
+            <a href="#" class="block flex-1 truncate px-2 py-1.5 text-sm text-primary" title="Q3 revenue drivers">Q3 revenue drivers</a>
+            <!-- row actions: rename · archive · delete. Archive and delete are DIFFERENT
+                 actions and are never merged into one control. -->
+            <span class="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 transition">
+              <button class="grid h-5 w-5 place-items-center rounded-control text-muted hover:text-ink" title="Rename">
+                <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+              </button>
+              <button class="grid h-5 w-5 place-items-center rounded-control text-muted hover:text-ink" title="Archive — hides this chat, keeps its memory">
+                <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><path d="M10 12h4"/></svg>
+              </button>
+              <button class="grid h-5 w-5 place-items-center rounded-control text-muted hover:text-danger" title="Delete — destroys this chat AND purges its memories">
+                <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1L5 6"/></svg>
+              </button>
+            </span>
+          </div>
+
+          <p class="px-2 pb-1 pt-3 text-[10px] uppercase tracking-wider text-muted">Previous 7 days</p>
+          <a href="#" class="block truncate rounded-control px-2 py-1.5 text-sm text-muted hover:bg-surface2 hover:text-ink" title="Onboarding policy summary">Onboarding policy summary</a>
+          <!-- deleting: shown in-flight, NOT optimistically removed — the Mem0 purge must
+               confirm before the row goes, and a failed purge retries rather than silently
+               resurrecting the chat later. -->
+          <div class="flex items-center gap-2 rounded-control px-2 py-1.5 opacity-60">
+            <svg class="h-3 w-3 shrink-0 animate-spin text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+            <span class="min-w-0 flex-1 truncate text-sm text-muted line-through">Security model overview</span>
+          </div>
+          <p class="px-2 pb-1 font-mono text-[10px] text-muted">deleting · purging memory</p>
+
+          <button class="mt-2 w-full rounded-control px-2 py-1 text-left font-mono text-[11px] text-muted hover:text-ink">load more ↓</button>
+        </div>
       </div>
 '''
 

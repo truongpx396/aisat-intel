@@ -363,7 +363,7 @@ Test batch (dispatch together, must FAIL — note the SC-001 adversarial tests):
 US2 — write these first; MUST fail before implementation:
   T057 contract POST /query (stream_id, moderation short-circuit injection_blocked/disallowed
        BEFORE spend, idempotency) per contracts/bff-rest.md
-  T058 contract query SSE taxonomy + DebugTrace shape per contracts/sse-events.md
+  T058 contract query SSE taxonomy + DebugResponse section envelope per contracts/sse-events.md
   T059 contract MCP knowledge tools — search_workspace_knowledge NEVER returns access_level >
        effective_access_level; structured tools reject raw SQL (typed filters only) per contracts/mcp-tools.md
   T060 integration graph happy path (moderate→rewrite→retrieve→rerank→memory→generate→cite)

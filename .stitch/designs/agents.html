@@ -7,15 +7,69 @@
   <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
   <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
   <script id="tailwind-config">
+    /* Colours resolve through the --su-* contract in :root, never to hex literals, so a
+       re-theme is a :root edit rather than a config edit. Channel triplets + <alpha-value>
+       keep the /opacity modifiers (bg-primary/15) working. */
     tailwind.config = {
       darkMode: "class",
       theme: { extend: {
-        colors: { canvas:"#0F172A", surface:"#1E293B", surface2:"#273449", line:"#334155", primary:"#22C55E", info:"#38BDF8", warning:"#FBBF24", danger:"#EF4444", ink:"#F8FAFC", muted:"#94A3B8" },
-        fontFamily: { sans:['"Fira Sans"',"system-ui","sans-serif"], mono:['"Fira Code"',"ui-monospace","monospace"] }
+        colors: {
+          canvas:"rgb(var(--su-canvas-rgb) / <alpha-value>)",     surface:"rgb(var(--su-surface-rgb) / <alpha-value>)",
+          surface2:"rgb(var(--su-surface-2-rgb) / <alpha-value>)", line:"rgb(var(--su-border-rgb) / <alpha-value>)",
+          primary:"rgb(var(--su-accent-rgb) / <alpha-value>)",     info:"rgb(var(--su-info-rgb) / <alpha-value>)",
+          warning:"rgb(var(--su-warn-rgb) / <alpha-value>)",       danger:"rgb(var(--su-danger-rgb) / <alpha-value>)",
+          ink:"rgb(var(--su-text-rgb) / <alpha-value>)",           muted:"rgb(var(--su-text-muted-rgb) / <alpha-value>)"
+        },
+        borderRadius: { card:"var(--su-radius-card)", control:"var(--su-radius-control)", pill:"var(--su-radius-pill)" },
+        fontFamily: {
+          sans:["var(--su-font-sans)","system-ui","sans-serif"],
+          mono:["var(--su-font-mono)","ui-monospace","monospace"]
+        }
       } }
     }
   </script>
   <style>
+    /* ---------------------------------------------------------------------
+       Design tokens. Two layers, deliberately:
+         1. --color-*-rgb  the AISAT palette (MASTER.md), as CHANNEL TRIPLETS so
+                           Tailwind's /alpha modifiers (bg-primary/15) still work.
+         2. --su-*         the stream-ui theme contract (contracts/stream-ui-ports.md).
+                           This block is the single mapping layer that frontend/src/theme.css
+                           becomes at T077 — the package reads only --su-*, never --color-*.
+       A client app reskins by overriding the --su-* half alone: colour, corner
+       radius, density and typeface, with no component edit and no rebuild.
+       --------------------------------------------------------------------- */
+    :root{
+      --color-background-rgb: 15 23 42;    --color-surface-rgb:    30 41 59;
+      --color-surface-2-rgb:  39 52 73;    --color-border-rgb:     51 65 85;
+      --color-text-rgb:      248 250 252;  --color-text-muted-rgb: 148 163 184;
+      --color-primary-rgb:    34 197 94;   --color-info-rgb:       56 189 248;
+      --color-warning-rgb:   251 191 36;   --color-danger-rgb:    239 68 68;
+
+      /* colour: client tokens -> the --su-* contract */
+      --su-canvas-rgb:     var(--color-background-rgb);
+      --su-surface-rgb:    var(--color-surface-rgb);
+      --su-surface-2-rgb:  var(--color-surface-2-rgb);
+      --su-border-rgb:     var(--color-border-rgb);
+      --su-text-rgb:       var(--color-text-rgb);
+      --su-text-muted-rgb: var(--color-text-muted-rgb);
+      --su-accent-rgb:     var(--color-primary-rgb);
+      --su-info-rgb:       var(--color-info-rgb);
+      --su-warn-rgb:       var(--color-warning-rgb);
+      --su-danger-rgb:     var(--color-danger-rgb);
+
+      /* shape */
+      --su-radius-card: 12px;  --su-radius-control: 8px;  --su-radius-pill: 9999px;
+      --su-border-width: 1px;
+
+      /* density */
+      --su-space: 4px;  --su-row-gap: 2px;  --su-indent: 16px;
+
+      /* type */
+      --su-font-sans: "Fira Sans";  --su-font-mono: "Fira Code";
+      --su-text-size: 14px;         --su-text-size-mono: 11px;
+    }
+
     body {
       background: #080D1A;
       background:
