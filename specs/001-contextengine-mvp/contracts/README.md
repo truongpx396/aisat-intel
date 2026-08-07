@@ -22,6 +22,7 @@ These contracts define the external/internal interfaces the system exposes. They
 | [approval-ports.md](./approval-ports.md) | Reusable `HumanGate`/`ApprovalStore` ports — the durable, fail-closed, no-spend-while-paused human-in-the-loop gate (`interrupt()`/resume seam) | Go kernel `approval`, Go BFF, Python agent + ingestion tiers |
 | [audit-ports.md](./audit-ports.md) | Reusable `Recorder`/`Sink`/`HashChain` ports — the append-only, tamper-evident, tenant-scoped audit backbone (domain-agnostic; unifies `audit_log` + `agent_audit_log` behind one opaque `Actor`/`Tenant`) | Go kernel `audit`, all audit producers (auth/billing/invite/agent/admin/approval/sandbox) |
 | [sse-events.md](./sse-events.md) | SSE event taxonomy | Go BFF ↔ React SPA |
+| [credits-ui-ports.md](./credits-ui-ports.md) | Reusable `CreditsSource`/`LimitView`/`LedgerColumn` ports — the props-only balance, ceilings, breakdown and ledger surface (domain-agnostic; AISAT's `credits` unit and LLM ledger columns are injected, not built in). The UI half of [metering-ports.md](./metering-ports.md) | React SPA (`frontend/src/credits-ui/`), Go BFF `GET /credits` |
 | [stream-ui-ports.md](./stream-ui-ports.md) | Reusable `StreamRenderer`/`StreamSource`/`TraceSection` ports — the props-only, app-dep-free chat + trace-inspector kernel (domain-agnostic; AISAT's RAG retrieval trace is one registered `rag_retrieval` renderer, not the panel's schema) | React SPA (`frontend/src/stream-ui/`), Go BFF debug endpoint |
 
 ## Conventions

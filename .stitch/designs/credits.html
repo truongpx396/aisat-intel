@@ -18,7 +18,10 @@
           surface2:"rgb(var(--su-surface-2-rgb) / <alpha-value>)", line:"rgb(var(--su-border-rgb) / <alpha-value>)",
           primary:"rgb(var(--su-accent-rgb) / <alpha-value>)",     info:"rgb(var(--su-info-rgb) / <alpha-value>)",
           warning:"rgb(var(--su-warn-rgb) / <alpha-value>)",       danger:"rgb(var(--su-danger-rgb) / <alpha-value>)",
-          ink:"rgb(var(--su-text-rgb) / <alpha-value>)",           muted:"rgb(var(--su-text-muted-rgb) / <alpha-value>)"
+          ink:"rgb(var(--su-text-rgb) / <alpha-value>)",           muted:"rgb(var(--su-text-muted-rgb) / <alpha-value>)",
+          faint:"rgb(var(--su-text-faint-rgb) / <alpha-value>)",
+          chart1:"rgb(var(--su-chart-1-rgb) / <alpha-value>)",     chart2:"rgb(var(--su-chart-2-rgb) / <alpha-value>)",
+          chart3:"rgb(var(--su-chart-3-rgb) / <alpha-value>)",     chart4:"rgb(var(--su-chart-4-rgb) / <alpha-value>)"
         },
         borderRadius: { card:"var(--su-radius-card)", control:"var(--su-radius-control)", pill:"var(--su-radius-pill)" },
         fontFamily: {
@@ -28,6 +31,30 @@
       } }
     }
   </script>
+  <style id="shell-style">
+    /* Meter: the shared credit/progress bar. Driven by --meter-pct so the painted
+       width and the ARIA value read from one source and cannot drift apart. */
+    /* display:block, NOT inline-block — a bare `.meter` with no width utility must fill
+       its container (the balance hero, the ceiling cards). Width-constrained instances
+       (the top-bar meters) carry their own w-* utility. */
+    .meter { overflow: hidden; border-radius: var(--su-radius-pill); background: rgb(var(--su-canvas-rgb)); display: block; }
+    .meter > .meter-fill { display: block; height: 100%; width: var(--meter-pct, 0%); transition: width 200ms ease; }
+
+    :where(a, button, [tabindex]):focus-visible {
+      outline: 2px solid rgb(var(--su-accent-rgb));
+      outline-offset: 2px;
+      border-radius: var(--su-radius-control);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+  </style>
   <style>
     /* ---------------------------------------------------------------------
        Design tokens. Two layers, deliberately:
@@ -46,6 +73,23 @@
       --color-primary-rgb:    34 197 94;   --color-info-rgb:       56 189 248;
       --color-warning-rgb:   251 191 36;   --color-danger-rgb:    239 68 68;
 
+      /* Third text step. slate-500/600 were being used for captions and fail WCAG on
+         every surface here (1.9:1 / 3.1:1 on --color-surface). This is the darkest
+         step that still clears 4.5:1, so a caption can recede without going illegible. */
+      --color-text-faint-rgb: 128 143 166;
+
+      /* Categorical chart ramp — a SEPARATE job from status colour.
+         primary/warning/danger/info encode credit STATE (healthy → near-limit →
+         exhausted) and are reserved; reusing them to mean "Query" or "Captioning"
+         makes amber mean two things on one screen. Validated as a set for this dark
+         surface (OKLCH L in band, chroma floor, adjacent-pair CVD ΔE 16.0 worst,
+         normal-vision ΔE 19.7 worst, all >= 3:1 on --color-surface). Fixed order —
+         slot n is always the nth series, never cycled, never re-assigned by rank. */
+      --color-chart-1-rgb:  57 135 229;  /* blue    */
+      --color-chart-2-rgb: 217  89  38;  /* orange  */
+      --color-chart-3-rgb: 144 133 233;  /* violet  */
+      --color-chart-4-rgb: 213  81 129;  /* magenta */
+
       /* colour: client tokens -> the --su-* contract */
       --su-canvas-rgb:     var(--color-background-rgb);
       --su-surface-rgb:    var(--color-surface-rgb);
@@ -53,10 +97,15 @@
       --su-border-rgb:     var(--color-border-rgb);
       --su-text-rgb:       var(--color-text-rgb);
       --su-text-muted-rgb: var(--color-text-muted-rgb);
+      --su-text-faint-rgb: var(--color-text-faint-rgb);
       --su-accent-rgb:     var(--color-primary-rgb);
       --su-info-rgb:       var(--color-info-rgb);
       --su-warn-rgb:       var(--color-warning-rgb);
       --su-danger-rgb:     var(--color-danger-rgb);
+      --su-chart-1-rgb:    var(--color-chart-1-rgb);
+      --su-chart-2-rgb:    var(--color-chart-2-rgb);
+      --su-chart-3-rgb:    var(--color-chart-3-rgb);
+      --su-chart-4-rgb:    var(--color-chart-4-rgb);
 
       /* shape */
       --su-radius-card: 12px;  --su-radius-control: 8px;  --su-radius-pill: 9999px;
@@ -106,6 +155,8 @@
     }
     .sidebar-texture > * { position: relative; z-index: 1; }
     [x-cloak] { display: none !important; }
+    /* .meter, the focus ring and reduced-motion live in the generated #shell-style
+       block above — they are shell-wide, not page-specific. */
   </style>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
@@ -154,25 +205,47 @@
     <!-- Main -->
     <div class="flex flex-1 flex-col min-w-0">
       <header class="flex h-16 shrink-0 items-center gap-4 border-b border-line bg-canvas/80 px-5 backdrop-blur">
-        <h1 class="text-lg font-semibold text-gradient">Credits &amp; Budgets</h1>
-        <!-- Notification bell -->
-        <div class="relative ml-auto" x-data="{ notifOpen: false }">
-          <button @click="notifOpen = !notifOpen" class="relative grid h-9 w-9 place-items-center rounded-lg border border-line bg-surface text-muted transition hover:border-slate-500 hover:text-ink cursor-pointer" title="Notifications" aria-label="Notifications">
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
-            <span class="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 font-mono text-[10px] font-bold text-[#04210F]">3</span>
-          </button>
-          <div x-show="notifOpen" @click.outside="notifOpen = false" x-transition style="display:none" class="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-xl border border-line bg-surface2 shadow-xl">
-            <div class="flex items-center justify-between border-b border-line px-4 py-2.5">
-              <span class="text-sm font-semibold">Notifications <span class="ml-1 font-mono text-xs text-muted">3 unread</span></span>
-              <button class="text-xs text-primary hover:underline cursor-pointer">Mark all read</button>
-            </div>
-            <div class="max-h-80 divide-y divide-line overflow-y-auto">
+        <h1 class="shrink-0 text-lg font-semibold text-gradient">Credits &amp; Budgets</h1>
+        <!-- @shell:chrome -->
+        <div class="ml-auto flex items-center gap-3">
+          <!-- Credit meters. MASTER.md requires these on EVERY screen: a balance you have
+               to navigate to is a balance you discover after it blocks you. -->
+          <div class="hidden sm:flex items-center gap-3">
+          <div class="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-1.5" title="Shared workspace balance — all members draw from this pool">
+            <svg class="h-3.5 w-3.5 text-warning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span class="font-mono text-sm">12,480</span>
+            <span class="text-xs text-muted">ws left</span>
+            <span class="meter h-1.5 w-12" style="--meter-pct:82%" role="progressbar"
+                  aria-label="Shared workspace balance — all members draw from this pool" aria-valuenow="82" aria-valuemin="0" aria-valuemax="100"
+                  aria-valuetext="82% of 70,000 used, 12,480 left"><span class="meter-fill bg-warning"></span></span>
+          </div>
+          <div class="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-1.5" title="Your personal daily allowance — resets at midnight UTC">
+            <svg class="h-3.5 w-3.5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/></svg>
+            <span class="font-mono text-sm">410</span>
+            <span class="text-xs text-muted">daily left</span>
+            <span class="meter h-1.5 w-12" style="--meter-pct:59%" role="progressbar"
+                  aria-label="Your personal daily allowance — resets at midnight UTC" aria-valuenow="59" aria-valuemin="0" aria-valuemax="100"
+                  aria-valuetext="59% of 1,000 used, 410 left"><span class="meter-fill bg-primary"></span></span>
+          </div>
+          </div>
+          <!-- Notification bell -->
+          <div class="relative" x-data="{ notifOpen: false }">
+            <button @click="notifOpen = !notifOpen" class="relative grid h-9 w-9 place-items-center rounded-lg border border-line bg-surface text-muted transition hover:border-line hover:text-ink cursor-pointer" title="Notifications" aria-label="Notifications" :aria-expanded="notifOpen">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+              <span class="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 font-mono text-[10px] font-bold text-[#04210F]">3</span>
+            </button>
+            <div x-show="notifOpen" @click.outside="notifOpen = false" x-transition style="display:none" class="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-xl border border-line bg-surface2 shadow-xl">
+              <div class="flex items-center justify-between border-b border-line px-4 py-2.5">
+                <span class="text-sm font-semibold">Notifications <span class="ml-1 font-mono text-xs text-muted">3 unread</span></span>
+                <button class="text-xs text-primary hover:underline cursor-pointer">Mark all read</button>
+              </div>
+              <div class="max-h-80 divide-y divide-line overflow-y-auto">
               <a href="library.html" class="flex gap-3 bg-surface2 px-4 py-3 transition hover:bg-surface">
                 <span class="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-info/15 text-info"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="m9 15 2 2 4-4"/></svg></span>
                 <span class="min-w-0 flex-1"><span class="block text-sm text-ink">Ingestion complete — <span class="font-medium">Q3-revenue.pdf</span></span><span class="block text-xs text-muted">Ready to query · 2m ago</span></span>
                 <span class="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary"></span>
               </a>
-              <a href="#" class="flex gap-3 bg-surface2 px-4 py-3 transition hover:bg-surface">
+              <a href="credits.html" class="flex gap-3 bg-surface2 px-4 py-3 transition hover:bg-surface">
                 <span class="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-warning/15 text-warning"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></span>
                 <span class="min-w-0 flex-1"><span class="block text-sm text-ink">Workspace credits 82% used</span><span class="block text-xs text-muted">12,480 of 70,000 left · 1h ago</span></span>
                 <span class="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary"></span>
@@ -182,10 +255,13 @@
                 <span class="min-w-0 flex-1"><span class="block text-sm text-ink">Agent task halted at cost cap</span><span class="block text-xs text-muted">“Competitor scan” · 3h ago</span></span>
                 <span class="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary"></span>
               </a>
+              </div>
+              <a href="notifications.html" class="block border-t border-line px-4 py-2.5 text-center text-xs font-medium text-primary transition hover:bg-surface">View all notifications</a>
             </div>
-            <a href="notifications.html" class="block border-t border-line px-4 py-2.5 text-center text-xs font-medium text-primary transition hover:bg-surface">View all notifications</a>
           </div>
+          <button class="grid h-9 w-9 place-items-center rounded-full bg-surface2 font-mono text-sm cursor-pointer" title="Truong P." aria-label="Account menu">TP</button>
         </div>
+        <!-- /@shell:chrome -->
       </header>
 
       <div class="flex-1 overflow-y-auto px-6 py-6 space-y-6" x-data="{ scope: 'workspace', feature: 'all' }">
@@ -194,42 +270,63 @@
         <div class="flex items-center gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3">
           <svg class="h-5 w-5 text-warning shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.7 18-9-16a1.5 1.5 0 0 0-2.6 0l-9 16A1.5 1.5 0 0 0 2.4 20h19.2a1.5 1.5 0 0 0 1.3-2z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
           <p class="flex-1 text-sm">You've used <span class="font-mono text-warning">82%</span> of this workspace's balance (threshold <span class="font-mono">80%</span>).</p>
-          <button class="rounded-lg btn-gradient px-3 py-1.5 text-sm font-semibold transition cursor-pointer">Upgrade</button>
+          <!-- Near-limit → a TIER decision ("we keep running out"), so this lands on the
+               subscription grid. It navigates to the organization rather than gating on
+               role here: the catalogue already degrades correctly for a viewer who cannot
+               buy, and duplicating that check would be a second place to get it wrong. -->
+          <a href="organization.html#plans" class="shrink-0 rounded-lg btn-gradient px-3 py-1.5 text-sm font-semibold transition cursor-pointer">Upgrade</a>
         </div>
 
         <!-- Balance hero + three ceilings -->
         <section class="grid gap-4 lg:grid-cols-3">
           <div class="lg:col-span-2 rounded-xl border border-line bg-surface p-6">
-            <p class="text-[11px] uppercase tracking-wider text-muted">Workspace Credits <span class="ml-1 normal-case tracking-normal text-slate-500">· allocation from Acme Corp</span></p>
+            <p class="text-[11px] uppercase tracking-wider text-muted">Workspace Credits <span class="ml-1 normal-case tracking-normal text-faint">· allocation from Acme Corp</span></p>
             <div class="mt-2 flex items-end gap-3">
               <span class="font-mono text-4xl font-semibold">12,480</span>
               <span class="mb-1 text-sm text-muted">credits left of a <span class="font-mono text-ink">70,000</span> allocation</span>
             </div>
-            <div class="mt-4 h-2.5 rounded-full bg-canvas overflow-hidden">
-              <span class="block h-full bg-warning" style="width:82%"></span>
+            <!-- The bar always encodes SPENT, never remaining — the headline number is
+                 what is left, so the two must be labelled or they read as contradicting. -->
+            <div class="meter mt-4 h-2.5" style="--meter-pct:82%" role="progressbar"
+                 aria-label="Workspace credits used" aria-valuenow="82" aria-valuemin="0" aria-valuemax="100"
+                 aria-valuetext="82% of 70,000 credits used; 12,480 left">
+              <span class="meter-fill bg-warning"></span>
             </div>
             <div class="mt-1.5 flex justify-between text-[11px] text-muted">
               <span>0%</span>
               <span class="text-warning font-mono">82% Used</span>
               <span>100%</span>
             </div>
-            <p class="mt-2 text-xs text-muted">Resets on <span class="font-mono text-ink">Jul 1</span> · burn rate <span class="font-mono text-ink">~2,100/day</span></p>
+            <p class="mt-2 text-xs text-muted">Resets on <span class="font-mono text-ink">Aug 1</span> · burn rate <span class="font-mono text-ink">~2,100/day</span></p>
           </div>
           <div class="grid grid-rows-3 gap-3">
+            <!-- Three INDEPENDENT ceilings, not one budget shown three ways. Any one of
+                 them can block an operation on its own, which is why each states its own
+                 window: the pool resets on the billing period, the allowance at midnight
+                 UTC, and the per-call cap not at all — it is a per-request ceiling. -->
             <div class="rounded-xl border border-line bg-surface p-3">
-              <div class="flex justify-between text-xs"><span class="text-muted">Workspace pool <span class="text-slate-600">(all members)</span></span><span class="font-mono text-warning">12,480 left</span></div>
-              <div class="mt-2 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full bg-warning" style="width:82%"></span></div>
-              <p class="mt-1 text-[10px] text-slate-600">82% used of 70,000</p>
+              <div class="flex justify-between text-xs"><span class="text-muted">Workspace pool <span class="text-faint">(all members)</span></span><span class="font-mono text-warning">12,480 left</span></div>
+              <div class="meter mt-2 h-1.5" style="--meter-pct:82%" role="progressbar"
+                   aria-label="Workspace pool used" aria-valuenow="82" aria-valuemin="0" aria-valuemax="100"
+                   aria-valuetext="82% of 70,000 used"><span class="meter-fill bg-warning"></span></div>
+              <p class="mt-1 text-[10px] text-faint">82% used of 70,000 · resets Aug 1</p>
             </div>
             <div class="rounded-xl border border-line bg-surface p-3">
               <div class="flex justify-between text-xs"><span class="text-muted">Your daily allowance</span><span class="font-mono text-primary">410 left</span></div>
-              <div class="mt-2 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full bg-primary" style="width:59%"></span></div>
-              <p class="mt-1 text-[10px] text-slate-600">59% used of 1,000 · resets midnight UTC</p>
+              <div class="meter mt-2 h-1.5" style="--meter-pct:59%" role="progressbar"
+                   aria-label="Your daily allowance used" aria-valuenow="59" aria-valuemin="0" aria-valuemax="100"
+                   aria-valuetext="59% of 1,000 used today"><span class="meter-fill bg-primary"></span></div>
+              <p class="mt-1 text-[10px] text-faint">59% used of 1,000 · resets midnight UTC</p>
             </div>
             <div class="rounded-xl border border-line bg-surface p-3">
               <div class="flex justify-between text-xs"><span class="text-muted">Your per-call output cap</span><span class="font-mono text-ink">4,000 tok</span></div>
-              <div class="mt-2 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full bg-info" style="width:30%"></span></div>
-              <p class="mt-1 text-[10px] text-slate-600">max tokens per single AI call</p>
+              <!-- Not a consumption meter: a ceiling with no window. The bar shows the
+                   LAST call against the cap, so it is labelled rather than left to imply
+                   a balance draining like the two above. -->
+              <div class="meter mt-2 h-1.5" style="--meter-pct:30%" role="progressbar"
+                   aria-label="Last call against the per-call output cap" aria-valuenow="30" aria-valuemin="0" aria-valuemax="100"
+                   aria-valuetext="last call used 1,200 of the 4,000 token cap"><span class="meter-fill bg-info"></span></div>
+              <p class="mt-1 text-[10px] text-faint">last call <span class="font-mono">1,200</span> tok · per single AI call</p>
             </div>
           </div>
         </section>
@@ -282,43 +379,53 @@
               </div>
             </div>
             <!-- Workspace chart (all members, higher volume) -->
-            <svg id="chart-ws" viewBox="0 0 600 180" class="mt-4 w-full" preserveAspectRatio="none" x-show="scope === 'workspace'">
+            <!-- Single series, so no legend — the title above names it. Colour comes from
+                 the chart ramp, NOT from run-green: green means "healthy balance" in the
+                 meters above, and a green trend line climbing toward a limit would be
+                 saying the opposite of what the colour means everywhere else here. -->
+            <svg id="chart-ws" viewBox="0 0 600 180" class="mt-4 w-full" preserveAspectRatio="none"
+                 role="img" aria-labelledby="chart-ws-t" x-show="scope === 'workspace'">
+              <title id="chart-ws-t">Workspace credits consumed per day over the last 14 days, rising from about 1,400 to about 3,200 per day</title>
               <defs>
                 <linearGradient id="gws" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stop-color="#22C55E" stop-opacity="0.35"/>
-                  <stop offset="100%" stop-color="#22C55E" stop-opacity="0"/>
+                  <stop offset="0%" stop-color="rgb(var(--su-chart-1-rgb))" stop-opacity="0.35"/>
+                  <stop offset="100%" stop-color="rgb(var(--su-chart-1-rgb))" stop-opacity="0"/>
                 </linearGradient>
               </defs>
               <polygon fill="url(#gws)" points="0,160 0,120 50,108 100,85 150,95 200,65 250,75 300,50 350,58 400,38 450,48 500,28 550,38 600,22 600,180 0,180"/>
-              <polyline fill="none" stroke="#22C55E" stroke-width="2.5" points="0,120 50,108 100,85 150,95 200,65 250,75 300,50 350,58 400,38 450,48 500,28 550,38 600,22"/>
+              <polyline fill="none" stroke="rgb(var(--su-chart-1-rgb))" stroke-width="2.5" points="0,120 50,108 100,85 150,95 200,65 250,75 300,50 350,58 400,38 450,48 500,28 550,38 600,22"/>
             </svg>
             <!-- My usage chart (single user, lower volume) -->
-            <svg id="chart-me" viewBox="0 0 600 180" class="mt-4 w-full" preserveAspectRatio="none" x-show="scope === 'me'" x-cloak>
+            <svg id="chart-me" viewBox="0 0 600 180" class="mt-4 w-full" preserveAspectRatio="none"
+                 role="img" aria-labelledby="chart-me-t" x-show="scope === 'me'" x-cloak>
+              <title id="chart-me-t">Your credits consumed per day over the last 14 days, rising gently from about 250 to about 480 per day</title>
               <defs>
                 <linearGradient id="gme" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.30"/>
-                  <stop offset="100%" stop-color="#38BDF8" stop-opacity="0"/>
+                  <stop offset="0%" stop-color="rgb(var(--su-chart-1-rgb))" stop-opacity="0.30"/>
+                  <stop offset="100%" stop-color="rgb(var(--su-chart-1-rgb))" stop-opacity="0"/>
                 </linearGradient>
               </defs>
               <polygon fill="url(#gme)" points="0,170 0,155 50,162 100,148 150,158 200,140 250,150 300,130 350,142 400,125 450,138 500,118 550,130 600,110 600,180 0,180"/>
-              <polyline fill="none" stroke="#38BDF8" stroke-width="2.5" points="0,155 50,162 100,148 150,158 200,140 250,150 300,130 350,142 400,125 450,138 500,118 550,130 600,110"/>
+              <polyline fill="none" stroke="rgb(var(--su-chart-1-rgb))" stroke-width="2.5" points="0,155 50,162 100,148 150,158 200,140 250,150 300,130 350,142 400,125 450,138 500,118 550,130 600,110"/>
             </svg>
           </div>
           <div class="rounded-xl border border-line bg-surface p-5">
             <p class="mb-4 text-sm font-medium">Cost by feature <span class="text-xs font-normal text-muted" x-text="scope === 'workspace' ? '(workspace)' : '(you)'"></span></p>
             <!-- Workspace feature totals -->
             <ul id="features-ws" class="space-y-3 text-sm" x-show="scope === 'workspace'">
-              <li><div class="flex justify-between"><span class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-primary"></span>Query</span><span class="font-mono">28,140</span></div><div class="mt-1.5 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full bg-primary" style="width:60%"></span></div></li>
-              <li><div class="flex justify-between"><span class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-info"></span>Ingestion</span><span class="font-mono">14,900</span></div><div class="mt-1.5 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full bg-info" style="width:32%"></span></div></li>
-              <li><div class="flex justify-between"><span class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-warning"></span>Captioning</span><span class="font-mono">9,120</span></div><div class="mt-1.5 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full bg-warning" style="width:20%"></span></div></li>
-              <li><div class="flex justify-between"><span class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-slate-400"></span>Rerank</span><span class="font-mono">5,360</span></div><div class="mt-1.5 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full bg-slate-400" style="width:12%"></span></div></li>
+              <li><div class="flex justify-between"><span class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-chart1"></span>Query</span><span class="font-mono">28,140</span></div><div class="meter mt-1.5 h-1.5" style="--meter-pct:60%" role="progressbar" aria-label="Query share of workspace spend" aria-valuenow="60" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Query 28,140 credits, 60% of spend"><span class="meter-fill bg-chart1"></span></div></li>
+              <li><div class="flex justify-between"><span class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-chart2"></span>Ingestion</span><span class="font-mono">14,900</span></div><div class="meter mt-1.5 h-1.5" style="--meter-pct:32%" role="progressbar" aria-label="Ingestion share of workspace spend" aria-valuenow="32" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Ingestion 14,900 credits, 32% of spend"><span class="meter-fill bg-chart2"></span></div></li>
+              <li><div class="flex justify-between"><span class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-chart3"></span>Captioning</span><span class="font-mono">9,120</span></div><div class="meter mt-1.5 h-1.5" style="--meter-pct:20%" role="progressbar" aria-label="Captioning share of workspace spend" aria-valuenow="20" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Captioning 9,120 credits, 20% of spend"><span class="meter-fill bg-chart3"></span></div></li>
+              <li><div class="flex justify-between"><span class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-chart4"></span>Rerank</span><span class="font-mono">5,360</span></div><div class="meter mt-1.5 h-1.5" style="--meter-pct:12%" role="progressbar" aria-label="Rerank share of workspace spend" aria-valuenow="12" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Rerank 5,360 credits, 12% of spend"><span class="meter-fill bg-chart4"></span></div></li>
             </ul>
             <!-- My usage feature totals -->
+            <!-- Same slot order as the workspace list. Colour follows the FEATURE, never
+                 its rank — switching scope re-orders nothing and repaints nothing. -->
             <ul id="features-me" class="space-y-3 text-sm" x-show="scope === 'me'" x-cloak>
-              <li><div class="flex justify-between"><span class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-primary"></span>Query</span><span class="font-mono">4,820</span></div><div class="mt-1.5 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full bg-primary" style="width:55%"></span></div></li>
-              <li><div class="flex justify-between"><span class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-info"></span>Ingestion</span><span class="font-mono">3,100</span></div><div class="mt-1.5 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full bg-info" style="width:35%"></span></div></li>
-              <li><div class="flex justify-between"><span class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-warning"></span>Captioning</span><span class="font-mono">990</span></div><div class="mt-1.5 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full bg-warning" style="width:11%"></span></div></li>
-              <li><div class="flex justify-between"><span class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-slate-400"></span>Rerank</span><span class="font-mono">330</span></div><div class="mt-1.5 h-1.5 rounded-full bg-canvas overflow-hidden"><span class="block h-full bg-slate-400" style="width:4%"></span></div></li>
+              <li><div class="flex justify-between"><span class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-chart1"></span>Query</span><span class="font-mono">4,820</span></div><div class="meter mt-1.5 h-1.5" style="--meter-pct:55%" role="progressbar" aria-label="Query share of your spend" aria-valuenow="55" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Query 4,820 credits, 55% of your spend"><span class="meter-fill bg-chart1"></span></div></li>
+              <li><div class="flex justify-between"><span class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-chart2"></span>Ingestion</span><span class="font-mono">3,100</span></div><div class="meter mt-1.5 h-1.5" style="--meter-pct:35%" role="progressbar" aria-label="Ingestion share of your spend" aria-valuenow="35" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Ingestion 3,100 credits, 35% of your spend"><span class="meter-fill bg-chart2"></span></div></li>
+              <li><div class="flex justify-between"><span class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-chart3"></span>Captioning</span><span class="font-mono">990</span></div><div class="meter mt-1.5 h-1.5" style="--meter-pct:11%" role="progressbar" aria-label="Captioning share of your spend" aria-valuenow="11" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Captioning 990 credits, 11% of your spend"><span class="meter-fill bg-chart3"></span></div></li>
+              <li><div class="flex justify-between"><span class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-chart4"></span>Rerank</span><span class="font-mono">330</span></div><div class="meter mt-1.5 h-1.5" style="--meter-pct:4%" role="progressbar" aria-label="Rerank share of your spend" aria-valuenow="4" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Rerank 330 credits, 4% of your spend"><span class="meter-fill bg-chart4"></span></div></li>
             </ul>
           </div>
         </section>
@@ -347,11 +454,13 @@
               <tbody class="font-mono text-xs">
                 <tr class="border-b border-line/60"><td class="px-5 py-2.5">query #9af2</td><td class="px-5 py-2.5 font-sans text-muted">Truong P.</td><td class="px-5 py-2.5 font-sans">Query</td><td class="px-5 py-2.5">smart</td><td class="px-5 py-2.5 text-right">1,596</td><td class="px-5 py-2.5 text-right text-danger">−42</td><td class="px-5 py-2.5 text-muted">2m ago</td></tr>
                 <tr class="border-b border-line/60"><td class="px-5 py-2.5">query #8cc3</td><td class="px-5 py-2.5 font-sans text-muted">Rahul S.</td><td class="px-5 py-2.5 font-sans">Query</td><td class="px-5 py-2.5">smart</td><td class="px-5 py-2.5 text-right">2,104</td><td class="px-5 py-2.5 text-right text-danger">−56</td><td class="px-5 py-2.5 text-muted">8m ago</td></tr>
-                <tr class="border-b border-line/60"><td class="px-5 py-2.5">ingest #7be1 <span class="ml-1 rounded bg-slate-600/30 px-1.5 py-0.5 text-[10px] text-muted font-sans">deduped</span></td><td class="px-5 py-2.5 font-sans text-muted">Mina K.</td><td class="px-5 py-2.5 font-sans">Ingestion</td><td class="px-5 py-2.5">embed</td><td class="px-5 py-2.5 text-right">8,204</td><td class="px-5 py-2.5 text-right text-danger">−120</td><td class="px-5 py-2.5 text-muted">14m ago</td></tr>
+                <tr class="border-b border-line/60"><td class="px-5 py-2.5">ingest #7be1 <span class="ml-1 rounded bg-surface2 px-1.5 py-0.5 text-[10px] text-muted font-sans">deduped</span></td><td class="px-5 py-2.5 font-sans text-muted">Mina K.</td><td class="px-5 py-2.5 font-sans">Ingestion</td><td class="px-5 py-2.5">embed</td><td class="px-5 py-2.5 text-right">8,204</td><td class="px-5 py-2.5 text-right text-danger">−120</td><td class="px-5 py-2.5 text-muted">14m ago</td></tr>
                 <tr class="border-b border-line/60"><td class="px-5 py-2.5">caption #3cd9</td><td class="px-5 py-2.5 font-sans text-muted">Truong P.</td><td class="px-5 py-2.5 font-sans">Captioning</td><td class="px-5 py-2.5">fast</td><td class="px-5 py-2.5 text-right">612</td><td class="px-5 py-2.5 text-right text-danger">−18</td><td class="px-5 py-2.5 text-muted">31m ago</td></tr>
-                <!-- Phase 2 credit-positive operation types — signed delta, one row per payment idem_key -->
-                <tr class="border-b border-line/60"><td class="px-5 py-2.5">refund <span class="ml-1 rounded bg-slate-600/30 px-1.5 py-0.5 text-[10px] text-muted font-sans">Phase 2</span></td><td class="px-5 py-2.5 font-sans text-muted">billing</td><td class="px-5 py-2.5 font-sans">Billing</td><td class="px-5 py-2.5">—</td><td class="px-5 py-2.5 text-right">—</td><td class="px-5 py-2.5 text-right text-danger">−5,000</td><td class="px-5 py-2.5 text-muted">Jun 12</td></tr>
-                <tr class="border-b border-line/60"><td class="px-5 py-2.5">subscription_grant <span class="ml-1 rounded bg-slate-600/30 px-1.5 py-0.5 text-[10px] text-muted font-sans">Phase 2</span></td><td class="px-5 py-2.5 font-sans text-muted">billing</td><td class="px-5 py-2.5 font-sans">Billing</td><td class="px-5 py-2.5">—</td><td class="px-5 py-2.5 text-right">—</td><td class="px-5 py-2.5 text-right text-primary">+50,000</td><td class="px-5 py-2.5 text-muted">Jun 1</td></tr>
+                <!-- Phase 2 credit-positive operation types — signed delta, one row per payment idem_key.
+                     Current period reconciles: +70,000 granted Jul 1 − 57,520 spent = 12,480 balance.
+                     Rows below Jul 1 are the previous period; the ledger is append-only history. -->
+                <tr class="border-b border-line/60"><td class="px-5 py-2.5">subscription_grant <span class="ml-1 rounded bg-surface2 px-1.5 py-0.5 text-[10px] text-muted font-sans">Phase 2</span></td><td class="px-5 py-2.5 font-sans text-muted">billing</td><td class="px-5 py-2.5 font-sans">Billing</td><td class="px-5 py-2.5">—</td><td class="px-5 py-2.5 text-right">—</td><td class="px-5 py-2.5 text-right text-primary">+70,000</td><td class="px-5 py-2.5 text-muted">Jul 1</td></tr>
+                <tr class="border-b border-line/60"><td class="px-5 py-2.5">refund <span class="ml-1 rounded bg-surface2 px-1.5 py-0.5 text-[10px] text-muted font-sans">Phase 2</span></td><td class="px-5 py-2.5 font-sans text-muted">billing</td><td class="px-5 py-2.5 font-sans">Billing</td><td class="px-5 py-2.5">—</td><td class="px-5 py-2.5 text-right">—</td><td class="px-5 py-2.5 text-right text-danger">−5,000</td><td class="px-5 py-2.5 text-muted">Jun 12</td></tr>
                 <tr><td class="px-5 py-2.5">topup</td><td class="px-5 py-2.5 font-sans text-muted">billing</td><td class="px-5 py-2.5 font-sans">Billing</td><td class="px-5 py-2.5">—</td><td class="px-5 py-2.5 text-right">—</td><td class="px-5 py-2.5 text-right text-primary">+50,000</td><td class="px-5 py-2.5 text-muted">Jun 1</td></tr>
               </tbody>
             </table>
@@ -386,7 +495,7 @@
             <div class="min-w-0">
               <p class="flex flex-wrap items-center gap-2 text-sm font-medium">
                 Plan &amp; billing
-                <span class="rounded bg-slate-600/30 px-1.5 py-0.5 text-[10px] font-normal text-muted">Phase 2</span>
+                <span class="rounded bg-surface2 px-1.5 py-0.5 text-[10px] font-normal text-muted">Phase 2</span>
                 <span class="text-xs font-normal text-muted">· managed for <span class="text-ink">Acme Corp</span></span>
               </p>
               <p class="mt-1 text-xs leading-relaxed text-muted">This workspace does not hold a plan of its own. The organization buys credits once and allocates them to each workspace, so there is one contract and one invoice rather than one per workspace.</p>
@@ -407,7 +516,7 @@
             </div>
             <div class="rounded-lg border border-line bg-canvas p-3">
               <dt class="text-[11px] uppercase tracking-wider text-muted">Org pool left</dt>
-              <dd class="mt-1 font-mono text-sm text-primary">148,200</dd>
+              <dd class="mt-1 font-mono text-sm text-primary">182,780</dd>
             </div>
             <div class="rounded-lg border border-line bg-canvas p-3">
               <dt class="text-[11px] uppercase tracking-wider text-muted">Renews</dt>
@@ -421,7 +530,11 @@
         <div class="flex items-center gap-3 rounded-xl border border-danger/40 bg-danger/10 px-4 py-3">
           <svg class="h-5 w-5 text-danger shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
           <p class="flex-1 text-sm"><span class="font-medium">Preview — exhausted state:</span> AI operations are blocked with a clear "limit reached" message and an upgrade path (never a silent failure).</p>
-          <button class="rounded-lg border border-danger/50 px-3 py-1.5 text-sm text-danger hover:bg-danger/10 transition cursor-pointer">Add credits</button>
+          <!-- Exhausted → a PACK, not a tier. Someone blocked mid-task needs the pool
+               topped up now; making them evaluate an annual commitment first is how a
+               billing screen turns an outage into a churn moment. Deep-links past the
+               tier grid straight to the one-time packs. -->
+          <a href="organization.html#packs" class="shrink-0 rounded-lg border border-danger/50 px-3 py-1.5 text-sm text-danger hover:bg-danger/10 transition cursor-pointer">Add credits</a>
         </div>
       </div>
     </div>

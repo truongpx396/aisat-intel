@@ -25,12 +25,34 @@
 | Border / divider | `#334155` | `--color-border` |
 | Text primary | `#F8FAFC` | `--color-text` |
 | Text muted | `#94A3B8` | `--color-text-muted` |
+| Text faint (captions) | `#808FA6` | `--color-text-faint` |
 | Accent / CTA (run green) | `#22C55E` | `--color-cta` |
 | Info (cyan) | `#38BDF8` | `--color-info` |
 | Warning (amber) | `#FBBF24` | `--color-warning` |
 | Danger (red) | `#EF4444` | `--color-danger` |
 
 **Color Notes:** "Code dark + run green" — a slate-900 canvas with slate-800 elevated surfaces, run-green for primary/success actions, and a small semantic accent set (cyan/amber/red) reserved for status, scores, and credit states. This is a dark-first developer/observability product; there is no light mode in Phase 1.
+
+**Three text steps, and no fourth.** `--color-text` → `--color-text-muted` → `--color-text-faint`. There is no darker step, because there is no darker step that stays legible: the Tailwind slate ramp below this — `slate-500` (3.1:1) and `slate-600` (1.9:1 on `--color-surface`) — fails the 4.5:1 rule outright, and both were in use on real metric captions before being replaced. Reaching past `--color-text-faint` for "even quieter" means the content is either not needed or needs a different treatment (smaller, grouped, behind a disclosure), not a fainter grey.
+
+### Categorical chart ramp (`--color-chart-1…4`)
+
+| Slot | Hue | Value | CSS variable |
+|------|-----|-------|--------------|
+| 1 | blue | `#3987E5` | `--color-chart-1` |
+| 2 | orange | `#D95926` | `--color-chart-2` |
+| 3 | violet | `#9085E9` | `--color-chart-3` |
+| 4 | magenta | `#D55181` | `--color-chart-4` |
+
+**Encoding identity is a different job from encoding state, and this system needs both on one screen.** The status set (run-green / amber / red / cyan) means *healthy → near-limit → exhausted → informational*, and the Credits screen paints that language on every meter. Using those same hues for chart *series* made amber mean "near limit" in the meter and "Captioning" in the legend six pixels below it. So the categorical ramp is deliberately disjoint from the status set — no green, no amber, no red, no cyan.
+
+Validated as a set against `--color-surface` (worst adjacent CVD ΔE 16.0, worst normal-vision ΔE 19.7, all ≥ 3:1, all inside the dark lightness band). Rules that come with it:
+
+- **Fixed order.** Slot *n* is always the *n*th series. Never cycled, never re-assigned when a filter changes the series count — colour follows the entity, not its rank.
+- **Never a 5th generated hue.** Past four series, fold the tail into "Other" or use small multiples.
+- **Never a status colour as "series 5"**, and never a categorical colour to mean a state.
+- **Identity is never colour-alone** — every series carries its label and value as text.
+- Re-validate with the data-viz validator before changing any value; the set passes as a *set*, not per colour.
 
 **Authoring form — channel triplets, not hex.** Each colour above is declared in `:root` as a **space-separated RGB triplet** (`--color-primary-rgb: 34 197 94`) and consumed as `rgb(var(--color-primary-rgb) / <alpha-value>)`. The hex column is the human-readable reference; the triplet is what ships. This is not cosmetic — Tailwind cannot inject an alpha channel into an opaque `var()`, so declaring the token as a plain hex `var()` silently breaks every `/opacity` modifier in the system (`bg-primary/15`, `border-primary/40`, `bg-warning/10` — all of which this design system uses heavily for status pills and elevated states).
 
@@ -214,7 +236,7 @@ Inside that surface, **use `rounded-card` / `rounded-control` / `rounded-pill`, 
 
 - **Layout:** Fixed left sidebar (org + workspace switcher, then primary nav), sticky top bar (search, credit meter, notification bell, user menu), scrollable content region. Optional right-hand inspector/debug drawer that slides in.
 - **Navigation:** Sidebar items — Library, Chat, Workspace, Credits, Admin, Agents, Notifications. Active item marked with run-green left accent bar. The Notifications item carries an unread-count badge and mirrors the top-bar bell's count. The **Organization** screen (`pages/organization.md`) is intentionally *not* a nav item — it opens from the switcher and is hidden entirely for single-workspace customers.
-- **Shared shell:** the sidebar is generated for every mockup by `.stitch/build.py`; edit it there, not per file (`--check` fails on drift).
+- **Shared shell:** the sidebar **and the top-bar chrome** (credit meters, notification bell, user menu) are generated for every mockup by `.stitch/build.py`; edit them there, not per file (`--check` fails on drift). The chrome is generated rather than hand-copied because hand-copying had already failed — the "always-visible credit meter" below was specified in this file and present on two of eight screens. The demo balance figures also live in that one script, so no two screens can disagree about the same workspace's usage (they did: 82% on Credits and Admin, 67% on Organization).
 - **Density:** Information-dense but grouped into cards/panels with clear headers; use the spacing scale, not large landing-page gaps.
 - **Global chrome:** Credit balance meter is always visible in the top bar; near-limit (≥80%) turns amber, exhausted turns red. A **notification bell** sits beside the user menu: it shows an unread-count badge and opens a dropdown inbox; the unread count and new items update live over the existing stream (SSE) without a page reload. Full history + per-category delivery preferences live on the dedicated Notifications screen (`pages/notifications.md`).
 
@@ -227,6 +249,7 @@ Inside that surface, **use `rounded-card` / `rounded-control` / `rounded-pill`, 
 - **Phase chip:** muted pill reading `Phase 2` / `Phase 4`, marking future-phase affordances staged in the mockups so reviewers can separate shipped surface from design intent.
 - **Citation chip:** inline numbered `[1]` chip in run-green that links to the source document/section.
 - **Metric/score:** numeric values, scores, token counts, and credit amounts always set in Fira Code.
+- **Meter (`.meter` / `.meter-fill`):** the one bar used for every credit balance, allocation and share-of-total, generated into every page by `.stitch/build.py`. Two rules make it trustworthy rather than decorative: **the fill always encodes the amount *consumed*, never the amount remaining** (a bar next to a "12,480 left" headline is otherwise read backwards), and it is a real `role="progressbar"` with `aria-valuenow` + an `aria-valuetext` that spells out the ratio. The painted width and the ARIA value both derive from a single `--meter-pct`, so they cannot drift apart. Tone comes from the state rule below, never from the categorical ramp.
 - **Notification bell + badge:** outline bell in the top bar; unread count shown as a small run-green pill (red when any item is `urgent` priority). Empty/zero state hides the badge entirely. Badge count is Fira Code.
 - **Notification item:** a left category icon, a title (Fira Sans 14, semibold) + one-line body, a relative timestamp (muted), and an unread dot (run-green) on the left edge. The whole row is clickable and deep-links to the originating resource. Unread rows use a faint elevated surface (`--color-surface-2`); read rows drop to the base surface.
 - **Notification category icon/accent:** each category maps to a consistent icon + semantic accent — `ingestion` (cyan), `invite/member` (run-green), `credit` (amber → red when exhausted), `agent/task-halted` (amber), `approval_requested` (a **shield/gavel** icon, run-green — actionable; the item deep-links to the pending approval and, when it is a paused agent run, into its detail), `share/clearance` (info cyan), `broadcast` (run-green megaphone). Use the same SVG icon set as the rest of the app (no emojis).
@@ -262,9 +285,11 @@ Before delivering any UI code, verify:
 - [ ] All icons from consistent icon set (Heroicons/Lucide)
 - [ ] `cursor-pointer` on all clickable elements
 - [ ] Hover states with smooth transitions (150-300ms)
-- [ ] Light mode: text contrast 4.5:1 minimum
-- [ ] Focus states visible for keyboard navigation
-- [ ] `prefers-reduced-motion` respected
+- [ ] Text contrast ≥ 4.5:1 **against the surface it actually sits on** — `--color-surface-2` is the strictest of the three and is where captions fail first. Only the three text tokens are legal for body text; a raw `slate-*` utility is the failure mode this rule exists to catch (the previous wording said "Light mode: …", which is unreachable advice in a dark-only product and let every dark-surface failure through)
+- [ ] Focus states visible for keyboard navigation — Tailwind's reset removes the UA outline, so the ring in the generated `#shell-style` block is what provides it; don't suppress it per page
+- [ ] `prefers-reduced-motion` respected (also in `#shell-style`)
+- [ ] Meters carry `role="progressbar"` + `aria-valuenow`/`aria-valuetext`, and the fill encodes *consumed*, not remaining
+- [ ] Chart series use `--color-chart-1…4` in fixed order; no status colour used as a series, no series colour used as a state
 - [ ] Responsive: 375px, 768px, 1024px, 1440px
 - [ ] No content hidden behind fixed navbars
 - [ ] No horizontal scroll on mobile

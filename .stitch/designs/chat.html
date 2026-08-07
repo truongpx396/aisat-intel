@@ -28,6 +28,30 @@
       } }
     }
   </script>
+  <style id="shell-style">
+    /* Meter: the shared credit/progress bar. Driven by --meter-pct so the painted
+       width and the ARIA value read from one source and cannot drift apart. */
+    /* display:block, NOT inline-block — a bare `.meter` with no width utility must fill
+       its container (the balance hero, the ceiling cards). Width-constrained instances
+       (the top-bar meters) carry their own w-* utility. */
+    .meter { overflow: hidden; border-radius: var(--su-radius-pill); background: rgb(var(--su-canvas-rgb)); display: block; }
+    .meter > .meter-fill { display: block; height: 100%; width: var(--meter-pct, 0%); transition: width 200ms ease; }
+
+    :where(a, button, [tabindex]):focus-visible {
+      outline: 2px solid rgb(var(--su-accent-rgb));
+      outline-offset: 2px;
+      border-radius: var(--su-radius-control);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+  </style>
   <style>
     /* ---------------------------------------------------------------------
        Design tokens. Two layers, deliberately:
@@ -236,35 +260,40 @@
           <svg class="absolute left-3 top-2.5 h-4 w-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
           <input class="w-full rounded-lg border border-line bg-surface py-2 pl-9 pr-3 text-sm text-ink placeholder:text-slate-500 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20" placeholder="Search knowledge…"/>
         </div>
-        <!-- Credit meters -->
-        <div class="hidden sm:flex items-center gap-3">
-          <!-- Workspace pool -->
+        <!-- @shell:chrome -->
+        <div class="ml-auto flex items-center gap-3">
+          <!-- Credit meters. MASTER.md requires these on EVERY screen: a balance you have
+               to navigate to is a balance you discover after it blocks you. -->
+          <div class="hidden sm:flex items-center gap-3">
           <div class="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-1.5" title="Shared workspace balance — all members draw from this pool">
-            <svg class="h-3.5 w-3.5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <svg class="h-3.5 w-3.5 text-warning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             <span class="font-mono text-sm">12,480</span>
             <span class="text-xs text-muted">ws left</span>
-            <span class="h-1.5 w-12 rounded-full bg-canvas overflow-hidden" title="82% used"><span class="block h-full bg-warning" style="width:82%"></span></span>
+            <span class="meter h-1.5 w-12" style="--meter-pct:82%" role="progressbar"
+                  aria-label="Shared workspace balance — all members draw from this pool" aria-valuenow="82" aria-valuemin="0" aria-valuemax="100"
+                  aria-valuetext="82% of 70,000 used, 12,480 left"><span class="meter-fill bg-warning"></span></span>
           </div>
-          <!-- User daily allowance -->
           <div class="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-1.5" title="Your personal daily allowance — resets at midnight UTC">
-            <svg class="h-3.5 w-3.5 text-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/></svg>
+            <svg class="h-3.5 w-3.5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/></svg>
             <span class="font-mono text-sm">410</span>
             <span class="text-xs text-muted">daily left</span>
-            <span class="h-1.5 w-12 rounded-full bg-canvas overflow-hidden" title="59% used"><span class="block h-full bg-primary" style="width:59%"></span></span>
+            <span class="meter h-1.5 w-12" style="--meter-pct:59%" role="progressbar"
+                  aria-label="Your personal daily allowance — resets at midnight UTC" aria-valuenow="59" aria-valuemin="0" aria-valuemax="100"
+                  aria-valuetext="59% of 1,000 used, 410 left"><span class="meter-fill bg-primary"></span></span>
           </div>
-        </div>
-        <!-- Notification bell -->
-        <div class="relative" x-data="{ notifOpen: false }">
-          <button @click="notifOpen = !notifOpen" class="relative grid h-9 w-9 place-items-center rounded-lg border border-line bg-surface text-muted transition hover:border-slate-500 hover:text-ink cursor-pointer" title="Notifications" aria-label="Notifications">
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
-            <span class="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 font-mono text-[10px] font-bold text-[#04210F]">3</span>
-          </button>
-          <div x-show="notifOpen" @click.outside="notifOpen = false" x-transition style="display:none" class="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-xl border border-line bg-surface2 shadow-xl">
-            <div class="flex items-center justify-between border-b border-line px-4 py-2.5">
-              <span class="text-sm font-semibold">Notifications <span class="ml-1 font-mono text-xs text-muted">3 unread</span></span>
-              <button class="text-xs text-primary hover:underline cursor-pointer">Mark all read</button>
-            </div>
-            <div class="max-h-80 divide-y divide-line overflow-y-auto">
+          </div>
+          <!-- Notification bell -->
+          <div class="relative" x-data="{ notifOpen: false }">
+            <button @click="notifOpen = !notifOpen" class="relative grid h-9 w-9 place-items-center rounded-lg border border-line bg-surface text-muted transition hover:border-line hover:text-ink cursor-pointer" title="Notifications" aria-label="Notifications" :aria-expanded="notifOpen">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+              <span class="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 font-mono text-[10px] font-bold text-[#04210F]">3</span>
+            </button>
+            <div x-show="notifOpen" @click.outside="notifOpen = false" x-transition style="display:none" class="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-xl border border-line bg-surface2 shadow-xl">
+              <div class="flex items-center justify-between border-b border-line px-4 py-2.5">
+                <span class="text-sm font-semibold">Notifications <span class="ml-1 font-mono text-xs text-muted">3 unread</span></span>
+                <button class="text-xs text-primary hover:underline cursor-pointer">Mark all read</button>
+              </div>
+              <div class="max-h-80 divide-y divide-line overflow-y-auto">
               <a href="library.html" class="flex gap-3 bg-surface2 px-4 py-3 transition hover:bg-surface">
                 <span class="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-info/15 text-info"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="m9 15 2 2 4-4"/></svg></span>
                 <span class="min-w-0 flex-1"><span class="block text-sm text-ink">Ingestion complete — <span class="font-medium">Q3-revenue.pdf</span></span><span class="block text-xs text-muted">Ready to query · 2m ago</span></span>
@@ -280,11 +309,13 @@
                 <span class="min-w-0 flex-1"><span class="block text-sm text-ink">Agent task halted at cost cap</span><span class="block text-xs text-muted">“Competitor scan” · 3h ago</span></span>
                 <span class="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary"></span>
               </a>
+              </div>
+              <a href="notifications.html" class="block border-t border-line px-4 py-2.5 text-center text-xs font-medium text-primary transition hover:bg-surface">View all notifications</a>
             </div>
-            <a href="notifications.html" class="block border-t border-line px-4 py-2.5 text-center text-xs font-medium text-primary transition hover:bg-surface">View all notifications</a>
           </div>
+          <button class="grid h-9 w-9 place-items-center rounded-full bg-surface2 font-mono text-sm cursor-pointer" title="Truong P." aria-label="Account menu">TP</button>
         </div>
-        <button class="grid h-9 w-9 place-items-center rounded-full bg-surface2 font-mono text-sm">TP</button>
+        <!-- /@shell:chrome -->
       </header>
 
       <!-- Body: thread + debug drawer -->
