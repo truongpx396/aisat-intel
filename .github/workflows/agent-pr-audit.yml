@@ -52,10 +52,20 @@ env:
   AGENT_BRANCH_RE: '^(track|agent|claude|codex|copilot|devin)/'
   # Tooling paths. A PR touching ONLY these is maintenance ON the pipeline rather than work
   # done THROUGH it, and cannot produce a run record — see the meta-work exemption below.
-  META_PATHS_RE: '^(\.github/(skills|workflows|instructions|hooks)/|\.claude/(skills/|settings\.json$)|README\.md$|CLAUDE\.md$|\.gitignore$)'
+  # CHANGELOG.md belongs here for the same reason README.md does, and its omission had a
+  # sharp edge: EVERY release PR must edit the changelog, and a release also produces no run
+  # record — so release PRs could satisfy neither the exemption nor the Auto-block
+  # requirement. That is an unsatisfiable rule, and an unsatisfiable rule gets bypassed
+  # rather than obeyed. install.sh belongs here for the identical reason: it is the
+  # installer for this repo's own tooling, not product code, and a release PR touching it
+  # (this repo's own v0.4.0 release PR is what caught the gap) hit the same unsatisfiable
+  # rule. Adding either widens nothing else: the waiver still fires only when every file
+  # matches, still waives presence and never integrity, and a release PR that touches the
+  # gates still gets the GATE_PATHS_RE warning below.
+  META_PATHS_RE: '^(\.github/(skills|workflows|instructions|hooks)/|README\.md$|CHANGELOG\.md$|CLAUDE\.md$|\.gitignore$|install\.sh$)'
   # The subset of tooling that IS the enforcement. A waived PR touching these is weakening
   # the gates while exempt from them, so the waiver names it explicitly.
-  GATE_PATHS_RE: '(track-audit\.sh|track-report\.sh|track-compact\.sh|track-evidence-gate\.sh|track-guard\.sh|agent-pr-audit\.yml)'
+  GATE_PATHS_RE: '(track-audit\.sh|track-report\.sh|track-compact\.sh|track-brief\.sh|track-evidence-gate\.sh|track-guard\.sh|agent-pr-audit\.yml)'
 
 jobs:
   # ── Is this an agent PR? Decided from signals the agent does not all control. ──────────
@@ -111,7 +121,7 @@ jobs:
             mark "PR author '$AUTHOR' is a bot"
           fi
 
-          # 4 — an agent branch prefix (executing-parallel-tracks worktrees and similar).
+          # 4 — an agent branch prefix (sso-executing-parallel-tracks worktrees and similar).
           if printf '%s' "${HEAD_REF:-}" | grep -qiE "$AGENT_BRANCH_RE"; then
             mark "head branch '$HEAD_REF' matches the agent branch pattern"
           fi
