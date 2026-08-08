@@ -20,7 +20,7 @@ They are **not** authored by this repo — do not edit them in place; see *Updat
 
 ## Why these are here
 
-`single-branch-development` and `executing-parallel-tracks` (both in this same
+`sso-single-branch-development` and `sso-executing-parallel-tracks` (both in this same
 `.claude/skills/` directory) delegate their execution steps to these skills by name —
 `using-git-worktrees` for isolation, `dispatching-parallel-agents` and
 `subagent-driven-development` for the implement loop, `requesting-code-review` for the
