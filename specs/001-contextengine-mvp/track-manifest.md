@@ -46,11 +46,13 @@ files change, update this manifest.
 | `backend-go/go.sum`, `backend-python/uv.lock` | the PR being merged | NEVER hand-merge — regenerate (`go mod tidy` / `uv lock`) after rebase |
 | `backend-go/cmd/api/main.go`, `backend-python/src/app.py` | FROZEN registry iterators | self-register via own module/router file; never edit the entrypoint |
 | `services/llm_gateway.py`, `mcp_server/server.py`, `retrieval/filter.py`, `retrieval/bootstrap.py` | Foundational (frozen after Stage 2) | consume only; never edit |
+| **`intel-agent` (pinned dependency)** | **a different repo** — [truongpx396/intel-agent](https://github.com/truongpx396/intel-agent) | **never edit from a track here.** A needed change is an upstream PR plus a version bump, landing in a **separate merge window**. See [contracts/agent-integration.md](./contracts/agent-integration.md) |
 
 ## Invariants to assert in review
 
 - **SC-001 access control** — every retrieval/cache/memory/RLS path denies-by-default and fails loudly on a missing filter; search results NEVER exceed caller clearance (zero-above-clearance). Release blocker at 100%.
 - **Kernel/product separation** (Principle I/II) — `kernel/` must never import `internal/`.
+- **Agent-runtime boundary** — the agent graph is the pinned `intel-agent` dependency, not local source. A track must never vendor, copy, or fork it; `backend-python/src/services/agent/` holds only the **binding** layer (`AgentDeps` assembly, this repo's `DomainPlugin`, port impls). The `intel_agent.conformance` suites must be green ([contracts/agent-integration.md](./contracts/agent-integration.md)) — a passing product with a red conformance suite is working by accident.
 - **LLM single chokepoint** (Principle IV) — all model calls go through the `llm_gateway.py` client → the standalone LLM gateway service (LiteLLM/Bifrost, research §21); no direct provider SDK calls in app code.
 - Retrieved/external content is DELIMITED UNTRUSTED DATA (prompt-injection defense, SC-007).
 
