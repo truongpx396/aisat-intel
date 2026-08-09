@@ -4,6 +4,17 @@
 
 These contracts define the external/internal interfaces the system exposes. They are the test targets for contract + integration tests (constitution Principle II) and the source of truth for the boundaries between the Go BFF, the Python ML tier, the MCP tool surface, and the React SPA.
 
+> ## The agent runtime now lives in its own repo
+>
+> As of [`369756e`](https://github.com/truongpx396/aisat-intel/commit/369756e) (tag `extraction-baseline-intel-agent`), the agent runtime was extracted to **[truongpx396/intel-agent](https://github.com/truongpx396/intel-agent)** and is consumed here as a pinned dependency. AISAT is its reference **Profile-A** host.
+>
+> **The rule that resolves every ownership question at the seam:** *intel-agent owns the **port**; AISAT owns the **implementation** and the **deployment**.*
+>
+> - **[agent-integration.md](./agent-integration.md)** — start here. How AISAT satisfies the runtime's five host obligations, which version is pinned, and where the conformance suites run.
+> - `agent-graph.md`, `agent-runtime.md`, `mcp-tools.md`, `approval-ports.md` are now **pointer stubs**. Their content and full commit history live upstream.
+>
+> Two things deliberately did **not** move, and both are instances of the rule above: the **tool bodies** (domain code — this repo's `DomainPlugin`) and the **`approval_request` table** (a kernel table that also backs the ingestion `enrich_accept`/`sensitivity_confirm` gates).
+
 ## Files
 
 | Contract | Surface | Consumers |
@@ -12,14 +23,15 @@ These contracts define the external/internal interfaces the system exposes. They
 | [auth-flow.md](./auth-flow.md) | Browser OIDC (PKCE) + device PAT auth sequences | React SPA, local agents |
 | [authorizer-ports.md](./authorizer-ports.md) | Reusable `Authorizer`/`Policy`/`Lowerer` ports — one predicate lowered to RLS **and** Qdrant (parity), the swappable access-model seam | Go BFF middleware, Python retrieval tier, MCP PEP |
 | [nats-subjects.md](./nats-subjects.md) | NATS subject schema | Go BFF ↔ Python workers |
-| [mcp-tools.md](./mcp-tools.md) | 10 MCP tools across 4 categories (A–C read-only; D = HITL-gated `web_search` + `edit_note`) | LangGraph agent, local agents |
-| [agent-graph.md](./agent-graph.md) | LangGraph agent internal contract — `AgentState`, node I/O, checkpointing, streaming, per-node reliability + run-level budgets, node telemetry (logs/metrics, distinct from the debug panel), Phase-2 seams | Python agent tier (`services/agent/`) |
-| [agent-runtime.md](./agent-runtime.md) | Self-contained agent runtime — the `AgentManifest` (config) + `DomainPlugin` (code) composition seam and the backing-service swap matrix / deployment profiles (Profile A full AISAT · Profile B single-container on pgvector + Redis/in-proc bus) that make 'runs self-contained elsewhere' a conformance-tested capability; config selects a `Policy`, never becomes one | Python agent tier, Go kernel `authz`, app-root DI |
+| [agent-integration.md](./agent-integration.md) | **How AISAT satisfies the extracted runtime's host contract** — the pinned `intel-agent` version, the five host obligations and how each is met, the per-port implementation map, and where the conformance suites run | Go BFF, Python agent tier, CI |
+| [mcp-tools.md](./mcp-tools.md) | ⤴ **moved** to intel-agent (stub). The `ToolRegistry` port and dispatch wrapper are upstream; this repo owns the **tool bodies** as its `DomainPlugin` | LangGraph agent, local agents |
+| [agent-graph.md](./agent-graph.md) | ⤴ **moved** to intel-agent (stub) — `AgentState`, node I/O, checkpointing, streaming, reliability, run budgets, telemetry | Python agent tier |
+| [agent-runtime.md](./agent-runtime.md) | ⤴ **moved** to intel-agent (stub) — `AgentManifest` + `DomainPlugin` composition, swap matrix, Profiles A/B. AISAT is the reference Profile-A host | Python agent tier, Go kernel `authz`, app-root DI |
 | [llm-gateway.md](./llm-gateway.md) | Standalone LLM gateway service (LiteLLM, Bifrost-swappable) + per-runtime client | All Go/Python LLM call sites |
 | [sandbox-runtime.md](./sandbox-runtime.md) | Standalone sandbox tier (hardened pod in Phase 1; gVisor/Firecracker-microVM swappable) + `Sandbox` port — the single chokepoint for isolated code/tool exec (crawl4ai, MarkItDown convert, code-gen) | Python crawl/ingest/agent tiers |
 | [metering-ports.md](./metering-ports.md) | Reusable `Meter`/`Pricer`/`Ledger` ports for the credit backbone (domain-agnostic) | Go kernel `metering`/`billing`, all spend producers |
 | [notification-ports.md](./notification-ports.md) | Reusable `Notifier`/`Channel`/`Store` ports for the multi-channel notification backbone (domain-agnostic) | Go kernel `notify`, all notification producers |
-| [approval-ports.md](./approval-ports.md) | Reusable `HumanGate`/`ApprovalStore` ports — the durable, fail-closed, no-spend-while-paused human-in-the-loop gate (`interrupt()`/resume seam) | Go kernel `approval`, Go BFF, Python agent + ingestion tiers |
+| [approval-ports.md](./approval-ports.md) | ⤴ **moved** to intel-agent (stub). The `HumanGate`/`ApprovalStore` **ports** are upstream; the **`approval_request` table stays here** — it also backs the ingestion `enrich_accept`/`sensitivity_confirm` gates | Go kernel `approval`, Go BFF, Python agent + ingestion tiers |
 | [audit-ports.md](./audit-ports.md) | Reusable `Recorder`/`Sink`/`HashChain` ports — the append-only, tamper-evident, tenant-scoped audit backbone (domain-agnostic; unifies `audit_log` + `agent_audit_log` behind one opaque `Actor`/`Tenant`) | Go kernel `audit`, all audit producers (auth/billing/invite/agent/admin/approval/sandbox) |
 | [sse-events.md](./sse-events.md) | SSE event taxonomy | Go BFF ↔ React SPA |
 | [credits-ui-ports.md](./credits-ui-ports.md) | Reusable `CreditsSource`/`LimitView`/`LedgerColumn` ports — the props-only balance, ceilings, breakdown and ledger surface (domain-agnostic; AISAT's `credits` unit and LLM ledger columns are injected, not built in). The UI half of [metering-ports.md](./metering-ports.md) | React SPA (`frontend/src/credits-ui/`), Go BFF `GET /credits` |

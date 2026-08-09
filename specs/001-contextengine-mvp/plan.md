@@ -4,6 +4,10 @@
 
 **Input**: Feature specification from `/specs/001-contextengine-mvp/spec.md`
 
+> **Agent runtime extracted.** As of [`369756e`](https://github.com/truongpx396/aisat-intel/commit/369756e), the LangGraph agent runtime lives in **[truongpx396/intel-agent](https://github.com/truongpx396/intel-agent)** and is consumed here as a pinned dependency. AISAT is its reference **Profile-A** host: it supplies the port implementations and satisfies the five host obligations. The seam is [contracts/agent-integration.md](./contracts/agent-integration.md); the ownership rule is *intel-agent owns the **port**, AISAT owns the **implementation** and the **deployment***.
+>
+> This changes **where the agent code lives, not what the system does** — Profile A is Profile B plus this repo's Go kernel and backing services, a superset relation rather than a fork. Everything below still describes the deployed system; `backend-python/src/services/agent/` is now the *binding* layer rather than the graph itself.
+
 ## Summary
 
 AISAT-INTEL (ContextEngine) is an AI-powered shared second brain for work teams: members ingest files/links/notes; the system converts, auto-tags, chunks, embeds, and indexes them; a stateful RAG agent answers natural-language questions with citations, scoped strictly to what the requester is cleared to see. Access control is enforced at the data layer (Postgres RLS + Qdrant payload pre-filters), never by prompt. Every AI operation is metered against a workspace credit balance, and every answer is observable in a developer-facing debug panel.
@@ -79,13 +83,14 @@ specs/001-contextengine-mvp/
 │   ├── sse-events.md         # SSE event taxonomy (BFF ↔ frontend)
 │   ├── auth-flow.md          # Casdoor OIDC login + session/PAT auth flow
 │   ├── nats-subjects.md      # NATS subject schema (ingestion/query/billing)
-│   ├── mcp-tools.md          # 10 MCP tools across 4 categories
-│   ├── agent-graph.md        # LangGraph node/edge contract (durable + inline forms)
-│   ├── agent-runtime.md      # Self-contained agent runtime — AgentManifest + DomainPlugin, swap matrix, deployment profiles (A full / B single-container)
+│   ├── agent-integration.md  # ⤴ How AISAT satisfies the extracted runtime's host contract (pinned version, 5 obligations, port map, conformance)
+│   ├── mcp-tools.md          # ⤴ stub → intel-agent (port upstream; tool BODIES stay here as the DomainPlugin)
+│   ├── agent-graph.md        # ⤴ stub → intel-agent (LangGraph node/edge contract)
+│   ├── agent-runtime.md      # ⤴ stub → intel-agent (AgentManifest + DomainPlugin, swap matrix, Profiles A/B)
 │   ├── llm-gateway.md        # LLM gateway service (LiteLLM/Bifrost-swappable) + per-runtime client
 │   ├── sandbox-runtime.md    # Sandbox tier (hardened pod default; gVisor/microVM-swappable) + Sandbox port
 │   ├── authorizer-ports.md   # Go Authorizer port (SingleAxisPolicy + SQL/Qdrant lowerers)
-│   ├── approval-ports.md     # Human-in-the-loop gate (HumanGate/ApprovalStore) port
+│   ├── approval-ports.md     # ⤴ stub → intel-agent (ports upstream; the approval_request TABLE stays here — it also backs ingestion gates)
 │   ├── metering-ports.md     # Credits/metering port (billing.deduct ledger writer)
 │   ├── notification-ports.md # Notification fan-out ports (ChannelRegistry/topics)
 │   └── audit-ports.md        # Append-only tamper-evident audit ports (Recorder/Sink/HashChain)
@@ -131,9 +136,13 @@ backend-python/                  # ML/AI workers, agent, ingestion, MCP server
 │   │   ├── llm_gateway.py       # thin client to the standalone LLM gateway (LiteLLM/Bifrost): clearance-cache, PII scrub, budget gate, spend emit, trace; Headroom pre-send seam (research.md §12, §21)
 │   │   ├── sandbox/             # thin client to the standalone sandbox tier (hardened pod default; gVisor/microVM-swappable): stage-files·run·metered·audited (research §24)
 │   │   ├── ingestion/           # pipeline, chunker, captioner, markitdown, web_distill, enrich, tagger, crawl_orchestrator (crawl4ai fetch + markitdown convert run inside sandboxes, never in-process)
-│   │   ├── retrieval/           # hybrid, reranker, hot_cold, filter
-│   │   └── agent/               # graph (guard·route·rewrite·retrieve·rerank·assemble·memory·generate·suggest — contracts/agent-graph.md), memory (Mem0), cache (semantic), suggestions (FR-031); long-horizon worker + stale-heartbeat janitor (deployed as a single-owner janitor role, research §15)
-│   ├── mcp_server/              # server.py + tools/{knowledge,structured,utility}; spend emitted via services/billing (Go kernel is the sole credit_ledger writer)
+│   │   ├── retrieval/           # hybrid, reranker, hot_cold, filter — BINDS intel-agent's RetrievalService port (retrieval.kind=qdrant)
+│   │   └── agent/               # ⤴ BINDING layer, not the graph. The graph itself is `intel-agent` (pinned dep).
+│   │                            #   Here: AgentDeps assembly, the AISAT DomainPlugin (tool bodies + SingleAxisPolicy),
+│   │                            #   port impls (StreamWriter→Redis pub/sub, Meter→billing.deduct, Recorder→agent_audit_log,
+│   │                            #   ApprovalStore→approval_request), cache (semantic), long-horizon worker + janitor.
+│   │                            #   See contracts/agent-integration.md.
+│   ├── mcp_server/              # server.py + tools/{knowledge,structured,utility} — the tool BODIES (this repo's DomainPlugin), exposed outward over MCP; the ToolRegistry port + dispatch wrapper are upstream. Spend emitted via services/billing (Go kernel is the sole credit_ledger writer)
 │   ├── baml_client/             # generated BAML client
 │   └── schemas/                 # ingest, query, agent, billing
 ├── prompts/                     # query_rewrite/, metadata_extract/, image_caption/, response_format/, retrieval/
