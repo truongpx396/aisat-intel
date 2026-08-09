@@ -18,7 +18,7 @@ description: "Task list for AISAT-INTEL MVP (Phase 1) implementation"
 
 The agent runtime was extracted to **[truongpx396/intel-agent](https://github.com/truongpx396/intel-agent)** at [`369756e`](https://github.com/truongpx396/aisat-intel/commit/369756e) (tag `extraction-baseline-intel-agent`). The 32 tasks that built it are **retired in place** and marked `- [↴]` where they sit, each naming the upstream task that now carries it. See [contracts/agent-integration.md](./contracts/agent-integration.md).
 
-**Why retired in place instead of deleted or renumbered.** Task IDs here are addresses, not indices: [dispatch-prompts.md](./dispatch-prompts.md) references 91 of them, [track-manifest.md](./track-manifest.md) references 55, and `runs/*.json` holds live orchestration state keyed by ID. Renumbering would silently break the parallel-track orchestrator; deleting would strand every reference. So the IDs stay, the scope text stays for traceability, and the checkbox becomes `[↴]`.
+**Why retired in place instead of deleted or renumbered.** The scope text is kept so a reader can see *what* was delegated and to which upstream task, without a round-trip to the other repo — the traceability is the point, not the numbering. [track-manifest.md](./track-manifest.md) also addresses tasks by ID, so the IDs stay stable. (`dispatch-prompts.md` and `runs/*.json` are disposable and were **not** a factor.)
 
 **Retired**: T028, T029a, T034a, T060, T060b–T060i, T065a, T065b, T066a, T068, T070, T071, T072, T072a, T073, T073a–T073d, T111, T120, T120a, T120b, T125, T125a, T149.
 
