@@ -30,6 +30,9 @@ The agent runtime was extracted to **[truongpx396/intel-agent](https://github.co
 - [ ] **T153** Subclass every suite from `intel_agent.conformance` in `backend-python/tests/contract/test_intel_agent_conformance.py`, incl. `AccessFloorContract`. **These must be green for the integration to be considered working** — a passing product with a red conformance suite is working by accident.
 - [ ] **T154** Wire the Go policy chain and RLS-GUC middleware to satisfy host obligations **H1** and **H2** ([agent-integration.md](./contracts/agent-integration.md)). H1 (trusted-layer `ctx` stamping) has **no conformance suite** and requires deliberate review.
 - [ ] **T155** Own the four split surfaces the runtime only half-covers: T069 (semantic cache), T074 (prompt assets against this repo's response format), T075 (query router + Redis stream adapter), T101/T101b (debug-panel assembly). These are where a gap is most likely to hide.
+- [ ] **T156** Drive every agent-dependent test from `intel_agent.testing.FakeAgentRuntime` — SSE relay, debug panel, chat UI, credit deduction, notifications. No model, no Qdrant, no NATS, deterministic. **Do not hand-roll a mock agent here**: the double is versioned upstream with the event vocabulary it emits, and a local copy would drift silently the moment the runtime adds an event.
+- [ ] **T157** Subclass `StreamEventContract` against **this repo's** SSE relay, asserting it relays the upstream vocabulary without loss or reordering and tolerates an unknown future event type. Assert against the upstream **golden JSONL fixtures**, not locally invented ones, so both repos check the same bytes.
+- [ ] **T158** Assert the relay treats a **paused** run correctly: `GATE_PAUSE_RESUME` emits `gate_opened` and then silence until resolution. A relay that reads silence as completion closes the connection and strands the approval — green tests, broken product. This is the single most likely integration bug at this seam.
 
 ---
 

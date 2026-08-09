@@ -72,6 +72,33 @@ class TestAisatAccessFloor(AccessFloorContract):
 
 These are what make contract drift a **build failure** rather than something a reviewer might notice. If they are red, the integration is broken even when the product appears to work.
 
+## Testing AISAT without a live agent
+
+The obvious worry after the extraction — *"our transport, debug panel, chat UI, and billing path have no agent to drive them"* — is answered by an export, not by a mock written here.
+
+```python
+from intel_agent.testing import FakeAgentRuntime, scenarios
+
+graph = FakeAgentRuntime(scenarios.GATE_PAUSE_RESUME)   # no model, no Qdrant, no NATS
+async for ev in graph.astream_events({"query": q, "ctx": ctx}):
+    ...   # drive the SSE relay, the debug panel, the credit path
+```
+
+Scenarios: `CITED_ANSWER`, `REFUSAL`, `CLARIFICATION`, `GATE_PAUSE_RESUME`, `DEGRADED_RERANK`, `DEADLINE_DEFERRAL`, `ERROR`.
+
+**Do not hand-roll a mock agent in this repo.** The double is versioned upstream alongside the event vocabulary it emits; a local one would be a second, unversioned definition of that vocabulary and would drift the moment the runtime adds an event — silently, because both sides would still be green. Upstream also ships **golden JSONL fixtures**, so this repo's transport tests and the runtime's own tests assert against the *same files*.
+
+The relevant contract is [stream-events.md](https://github.com/truongpx396/intel-agent/blob/main/specs/001-agent-runtime/contracts/stream-events.md), which also fixes the ownership line:
+
+| | Owner |
+|---|---|
+| Event **vocabulary** — what events exist, payload shape, ordering | **intel-agent** |
+| Wire **framing** — SSE event names, retry, heartbeat, reconnect, HTTP status | **AISAT** (this repo, [sse-events.md](./sse-events.md)) |
+
+This repo may rename an event on the wire; it may not invent a semantic event the runtime never emits, or silently drop one it does. `StreamEventContract` is what checks that, and it runs in **this** repo's CI against **this** repo's relay.
+
+> **The bug this is designed to catch:** a paused run emits `gate_opened` and then **nothing** until resolved. It is *paused*, not finished. A relay that treats stream silence as completion will close the SSE connection and strand the approval — green tests, broken product. `GATE_PAUSE_RESUME` exists specifically to fail on that.
+
 ## Where the split is thinnest
 
 Four upstream tasks are genuinely split — the runtime owns the emission, this repo owns the surface — so both repos carry half. These are the most likely places for a gap to hide, and are worth explicit attention at integration time:
