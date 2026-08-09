@@ -15,9 +15,21 @@ A port-protocol change upstream is **breaking for this repo**. It lands there fi
 
 ## The organizing rule
 
-> **intel-agent owns the port. AISAT owns the implementation and the deployment.**
+> **intel-agent owns the port and ships a minimal default. AISAT overrides with its production implementation.**
 
 Every ownership question at this seam resolves with that sentence. It is why `mcp-tools.md` moved but the tool bodies stayed, and why `approval-ports.md` moved but `approval_request` stayed.
+
+**Refined since the extraction.** `intel-agent` is a **standalone product**, not a library, so it now ships working defaults for ingestion, identity, metering, and a chat interface — enough to run alone. AISAT overrides **every one of them**, because its versions are the real ones:
+
+| Port | intel-agent default | AISAT binds instead |
+|---|---|---|
+| `Ingestor` | files / URLs / text | the full pipeline — conversion, captioning, crawling, sandboxed parsing |
+| `IdentityBinder` | single-user or user list | Casdoor OIDC + device PATs |
+| `Meter` | **no-op — nobody is counting** | the Go kernel billing worker, sole `credit_ledger` writer |
+| UI | minimal built-in chat | the React SPA |
+| moderation | fail-closed stub | the bound provider |
+
+A default is not privileged code: it passes the same conformance suite our override must. So *"which repo owns X"* is unchanged — but *"is there code for X upstream"* is now often **yes**, and picking it up by accident is the thing to avoid. **Bind explicitly; never inherit a default silently.** An unmetered agent in production is exactly what the no-op `Meter` produces if nobody notices.
 
 ## Satisfying the five host obligations
 
@@ -50,6 +62,8 @@ So the guarantee for H1 is **code review of the BFF's stamping path**, not a sui
 | `Meter` | Emits to `billing.deduct.<ws>`; the Go worker owns the ledger |
 | `Recorder` | `agent_audit_log` with the per-tenant hash chain |
 | `ApprovalStore` | The kernel `approval_request` table |
+| `Ingestor` | The full pipeline — presign, convert, caption, crawl, chunk, embed, index (**overrides** upstream's minimal default) |
+| `IdentityBinder` | Casdoor OIDC sessions + device PATs (**overrides** upstream's single-user default) |
 
 ## Conformance in this repo's CI
 
