@@ -148,6 +148,7 @@ flowchart TB
 - **NATS** is the async bus between Go and Python (ingestion / query / billing subjects).
 - **Redis** is the low-latency control plane: credit fast-path, idempotency guards, rate limits / quotas, security throttling, LangGraph checkpoints, semantic answer-cache, and the outbox queue (see [Redis — the Production Hot Path](#-redis--the-production-hot-path)).
 - **The LLM Gateway** is a **standalone OpenAI-wire service** (LiteLLM, Bifrost-swappable) — the *only* place model IDs + provider keys live; both runtimes call it by alias through a thin client. Its own budget + cache are **off**: credit metering stays single-writer in Go, and the clearance-scoped answer-cache stays in the app (SC-006 / SC-001).
+- **The agent runtime** (the LangGraph graph shown above) is the pinned, externally-versioned **[intel-agent](https://github.com/truongpx396/intel-agent)** dependency — AISAT is its reference embedding host, supplying retrieval, tools, identity, metering, moderation, and the UI behind its ports (see [contracts/agent-integration.md](specs/001-contextengine-mvp/contracts/agent-integration.md)).
 - **The MCP server** is the *only* tool surface — every dispatch is allowlist-checked.
 - **The Sandbox Runtime** is the *only* place untrusted or model-**generated** code runs — a **standalone tier** that is the sole holder of the template registry + egress policy, exactly as the LLM Gateway is the sole holder of provider keys. crawl4ai fetch, MarkItDown convert, and the Phase-2 code-gen tools all run as ephemeral, credential-free, egress-locked sandboxes behind a thin `Sandbox` port — never in the orchestrator process, never with ambient credentials. **Phase 1 runs the cheapest boundary that carries that contract (a hardened pod, $0 incremental); gVisor and Firecracker microVMs are the same contract behind the same port, bought per workload.** See [sandbox-runtime.md](specs/001-contextengine-mvp/contracts/sandbox-runtime.md).
 
@@ -435,7 +436,7 @@ flowchart TB
 
 ## 🧩 The RAG Agent — 7+1 Node LangGraph
 
-The query path is a stateful LangGraph graph that makes every production RAG pattern explicit and observable:
+The query path is a stateful LangGraph graph that makes every production RAG pattern explicit and observable. **The graph itself now ships as [intel-agent](https://github.com/truongpx396/intel-agent), a pinned dependency** extracted from this repo — AISAT binds it with a production `RetrievalService` (Qdrant hybrid), `ToolRegistry` (the 10-tool `DomainPlugin`), identity, metering, and moderation; see [contracts/agent-integration.md](specs/001-contextengine-mvp/contracts/agent-integration.md):
 
 ```mermaid
 flowchart LR
@@ -452,7 +453,7 @@ flowchart LR
 
 Patterns shipped: **hybrid search**, **cross-encoder reranking**, **structure-aware parent-child + contextual-retrieval chunking**, **metadata pre-filtering**, **two-tier tools** (knowledge + structured), **visual captioning** for images/diagrams, and a **Redis semantic answer-cache**. Retrieval is served directly from Qdrant — fast enough under load that a separate hot/cold chunk tier is unnecessary; the real latency/cost win comes from caching whole *answers* (see below), not from tiering the vector store. Cross-clearance cache safety is guaranteed by keying any cached answer on `workspace + requester clearance + authorized document set`.
 
-📐 Agent diagram: [langgraph-rag-agent.excalidraw](specs/001-contextengine-mvp/diagrams/langgraph-rag-agent.excalidraw) · Query DFD: [query-path-dfd.excalidraw](specs/001-contextengine-mvp/diagrams/query-path-dfd.excalidraw)
+📐 Agent diagram: [langgraph-rag-agent.excalidraw](https://github.com/truongpx396/intel-agent/blob/main/specs/001-agent-runtime/diagrams/langgraph-rag-agent.excalidraw) *(now maintained in [intel-agent](https://github.com/truongpx396/intel-agent))* · Query DFD: [query-path-dfd.excalidraw](specs/001-contextengine-mvp/diagrams/query-path-dfd.excalidraw)
 
 ### Production RAG design patterns (and where each lives)
 
@@ -514,7 +515,7 @@ These are aligned with **OWASP Top 10 (2025)** — see the repo-wide [security &
 
 #### Human-in-the-loop — a standard pattern, not a bespoke gate
 
-The approval mechanism ([contracts/approval-ports.md](specs/001-contextengine-mvp/contracts/approval-ports.md)) is built from patterns large durable-workflow and agentic systems already run in production — not a one-off:
+The approval mechanism — the `HumanGate`/`ApprovalStore` **ports** now defined in [intel-agent](https://github.com/truongpx396/intel-agent) ([contracts/approval-ports.md](specs/001-contextengine-mvp/contracts/approval-ports.md) is a pointer stub), bound here to the kernel `approval_request` table this repo still owns — is built from patterns large durable-workflow and agentic systems already run in production — not a one-off:
 
 | Our piece | The production pattern it is |
 |---|---|
@@ -567,7 +568,7 @@ sequenceDiagram
 
 📐 Auth contract + sequences: [contracts/auth-flow.md](specs/001-contextengine-mvp/contracts/auth-flow.md) · OIDC sequence: [auth-oidc-sequence.excalidraw](specs/001-contextengine-mvp/diagrams/addition/auth-oidc-sequence.excalidraw) · device/PAT: [local-agent-flow.excalidraw](specs/001-contextengine-mvp/diagrams/addition/local-agent-flow.excalidraw)
 
-📐 Diagrams: [access-control-isolation](specs/001-contextengine-mvp/diagrams/addition/access-control-isolation.excalidraw) · [mcp-tool-allowlist](specs/001-contextengine-mvp/diagrams/addition/mcp-tool-allowlist.excalidraw) · [llm-gateway-chokepoint](specs/001-contextengine-mvp/diagrams/addition/llm-gateway-chokepoint.excalidraw)
+📐 Diagrams: [access-control-isolation](specs/001-contextengine-mvp/diagrams/addition/access-control-isolation.excalidraw) · [mcp-tool-allowlist](https://github.com/truongpx396/intel-agent/blob/main/specs/001-agent-runtime/diagrams/mcp-tool-allowlist.excalidraw) *(now in [intel-agent](https://github.com/truongpx396/intel-agent))* · [llm-gateway-chokepoint](specs/001-contextengine-mvp/diagrams/addition/llm-gateway-chokepoint.excalidraw)
 
 #### Identity-provider portability
 
@@ -799,7 +800,7 @@ Every answer is fully traceable. The **debug panel** (US5) surfaces, per query: 
 | Layer | Technology |
 |---|---|
 | **Go BFF / Gateway / Kernel** | Go 1.23 · Gin · GORM · nats.go · go-redis · OpenTelemetry · zerolog · Sentry |
-| **Python ML / Agent Tier** | Python 3.12 · FastAPI · LangGraph · Mem0 · BAML · FastMCP · MarkItDown · Crawl4AI · qdrant-client · Langfuse SDK |
+| **Python ML / Agent Tier** | Python 3.12 · FastAPI · [intel-agent](https://github.com/truongpx396/intel-agent) (pinned agent runtime, LangGraph-based) · Mem0 · BAML · FastMCP · MarkItDown · Crawl4AI · qdrant-client · Langfuse SDK |
 | **LLM Gateway** | LiteLLM (standalone, OpenAI-wire) · Bifrost-swappable · aliases · multi-key LB · one-hop fallback · sole provider-key holder |
 | **Sandbox Runtime** | Hardened container, **no runtime socket in any environment** — `service` pools + `oneshot` code-gen on the DO droplet, per-job pods via an RBAC-scoped ServiceAccount on k3s/EKS · gVisor (`runsc`) as the per-template runtime ratchet, Firecracker microVMs via **E2B** available but **not required** · versioned templates (`tmpl-crawl`/`convert`/`coderun`) · default-deny + SSRF-allowlisted egress proxy · no bind mounts, allowlisted create-args |
 | **Frontend** | React 19 · Vite · TypeScript 5.x · native EventSource/SSE · PostHog |
@@ -861,7 +862,7 @@ aisat-intel/
 │   │   │   ├── ingestion/             #     pipeline · chunker · captioner · markitdown · crawl_orchestrator · tagger
 │   │   │   ├── retrieval/             #     hybrid · reranker · hot_cold · filter
 │   │   │   ├── sandbox/               #     Sandbox port + client (pod default; gVisor/µVM-swappable) — isolated crawl/convert/code-gen exec
-│   │   │   └── agent/                 #     graph (7+1 nodes) · memory (Mem0) · semantic cache · suggestions
+│   │   │   └── agent/                 #     intel-agent bindings (Qdrant retrieval, DomainPlugin tools, SingleAxisPolicy) · semantic cache · query router · suggestions — the 7+1-node graph itself is the pinned `intel-agent` package
 │   │   ├── mcp_server/                #   server.py + tools/{knowledge,structured,utility} · billing/ledger.py
 │   │   ├── baml_client/               #   generated BAML client
 │   │   └── schemas/                   #   ingest · query · agent · billing
@@ -925,7 +926,8 @@ Source of truth for every system boundary and the target of contract tests — [
 |---|---|
 | [bff-rest.md](specs/001-contextengine-mvp/contracts/bff-rest.md) | Go BFF public REST + SSE endpoints |
 | [nats-subjects.md](specs/001-contextengine-mvp/contracts/nats-subjects.md) | NATS subject schema (ingestion / query / billing) |
-| [mcp-tools.md](specs/001-contextengine-mvp/contracts/mcp-tools.md) | 10 MCP tools across 4 categories (A–C read-only; D = HITL-gated `web_search` + `edit_note`) |
+| [agent-integration.md](specs/001-contextengine-mvp/contracts/agent-integration.md) | How AISAT satisfies the extracted [intel-agent](https://github.com/truongpx396/intel-agent) runtime's five host obligations — pinned version, per-port implementation map, conformance suites |
+| [mcp-tools.md](specs/001-contextengine-mvp/contracts/mcp-tools.md) | ⤴ moved to intel-agent (pointer stub) — the `ToolRegistry` port + allowlist dispatch; the **10 tool bodies stay here** (A–C read-only; D = HITL-gated `web_search` + `edit_note`) as this repo's `DomainPlugin` |
 | [llm-gateway.md](specs/001-contextengine-mvp/contracts/llm-gateway.md) | Standalone LLM gateway service (LiteLLM · Bifrost-swappable) + per-runtime client |
 | [metering-ports.md](specs/001-contextengine-mvp/contracts/metering-ports.md) | Reusable `Meter`/`Pricer`/`Ledger` ports — the credit backbone as a domain-agnostic, extractable engine |
 | [sse-events.md](specs/001-contextengine-mvp/contracts/sse-events.md) | SSE event taxonomy (BFF ↔ frontend) |
@@ -938,14 +940,14 @@ Open `.excalidraw` files at [excalidraw.com](https://excalidraw.com) or with the
 
 **Core**
 - [system-architecture](specs/001-contextengine-mvp/diagrams/system-architecture.excalidraw) — the three-runtime topology
-- [langgraph-rag-agent](specs/001-contextengine-mvp/diagrams/langgraph-rag-agent.excalidraw) — the 7+1 node agent graph
+- [langgraph-rag-agent](https://github.com/truongpx396/intel-agent/blob/main/specs/001-agent-runtime/diagrams/langgraph-rag-agent.excalidraw) — the 7+1 node agent graph *(now maintained in [intel-agent](https://github.com/truongpx396/intel-agent))*
 - [ingestion-pipeline](specs/001-contextengine-mvp/diagrams/ingestion-pipeline.excalidraw) — convert → caption → chunk → tag → embed
 - [query-path-dfd](specs/001-contextengine-mvp/diagrams/query-path-dfd.excalidraw) — query data-flow
 - [credit-metering-swimlane](specs/001-contextengine-mvp/diagrams/credit-metering-swimlane.excalidraw) — credit deduction lifecycle
 - [data-model-er](specs/001-contextengine-mvp/diagrams/data-model-er.excalidraw) — entity-relationship model
 
 **Deep dives** ([diagrams/addition/](specs/001-contextengine-mvp/diagrams/addition/))
-- access-control-isolation · mcp-tool-allowlist · llm-gateway-chokepoint · auth-oidc-sequence · billing-payment-flow · sse-streaming-sequence · nats-subject-topology · notification-flow · local-agent-flow
+- access-control-isolation · [mcp-tool-allowlist](https://github.com/truongpx396/intel-agent/blob/main/specs/001-agent-runtime/diagrams/mcp-tool-allowlist.excalidraw) *(moved to intel-agent)* · llm-gateway-chokepoint · auth-oidc-sequence · billing-payment-flow · sse-streaming-sequence · nats-subject-topology · notification-flow · local-agent-flow
 
 ---
 
