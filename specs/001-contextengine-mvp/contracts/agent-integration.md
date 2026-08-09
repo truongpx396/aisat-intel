@@ -19,17 +19,20 @@ A port-protocol change upstream is **breaking for this repo**. It lands there fi
 
 Every ownership question at this seam resolves with that sentence. It is why `mcp-tools.md` moved but the tool bodies stayed, and why `approval-ports.md` moved but `approval_request` stayed.
 
-**Refined since the extraction.** `intel-agent` is a **standalone product**, not a library, so it now ships working defaults for ingestion, identity, metering, and a chat interface — enough to run alone. AISAT overrides **every one of them**, because its versions are the real ones:
+**Refined since the extraction.** `intel-agent` is a **standalone product**, not a library. Every port has a **working default** — it ingests, authenticates, meters, moderates, and answers on its own. AISAT overrides each one because *its* version is the right one **for AISAT**, not because upstream ships placeholders:
 
-| Port | intel-agent default | AISAT binds instead |
-|---|---|---|
-| `Ingestor` | files / URLs / text | the full pipeline — conversion, captioning, crawling, sandboxed parsing |
-| `IdentityBinder` | single-user or user list | Casdoor OIDC + device PATs |
-| `Meter` | **no-op — nobody is counting** | the Go kernel billing worker, sole `credit_ledger` writer |
-| UI | minimal built-in chat | the React SPA |
-| moderation | fail-closed stub | the bound provider |
+| Port | intel-agent default (works) | AISAT binds instead | Why we override |
+|---|---|---|---|
+| `Ingestor` | files / URLs / text | conversion, captioning, crawling, sandboxed parsing | our corpus needs formats and isolation the default doesn't cover |
+| `IdentityBinder` | single-user or user list | Casdoor OIDC + device PATs | we have real auth and multi-tenancy |
+| `Meter` | real local usage ledger | the Go kernel billing worker | the `credit_ledger` must have exactly one writer (SC-006), and it is ours |
+| `RetrievalService` | pgvector / sqlite | Qdrant hybrid + payload pre-filter | we need hybrid search at our scale |
+| moderation | gateway moderation endpoint | our bound provider | policy and provider are ours to choose |
+| UI | minimal built-in chat | the React SPA | product surface |
 
-A default is not privileged code: it passes the same conformance suite our override must. So *"which repo owns X"* is unchanged — but *"is there code for X upstream"* is now often **yes**, and picking it up by accident is the thing to avoid. **Bind explicitly; never inherit a default silently.** An unmetered agent in production is exactly what the no-op `Meter` produces if nobody notices.
+**Overriding is an upgrade, not a rescue.** A default is not privileged code — it passes the same conformance suite our override must. And per upstream's AR-035 there are **no hollow defaults**: a capability that cannot work without host context fails to start rather than silently passing.
+
+So the practical rule is simply: **bind deliberately, and say why.** Not because inheriting is dangerous, but because a reviewer should be able to see which capabilities we replaced and which we accepted.
 
 ## Satisfying the five host obligations
 
