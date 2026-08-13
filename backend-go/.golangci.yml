@@ -1,0 +1,47 @@
+version: "2"
+
+# golangci-lint v2 configuration for the Go BFF/kernel runtime.
+# Run via `golangci-lint run ./...` from backend-go/ (see root Makefile's
+# `lint` target). Zero-suppression baseline: no `//nolint` should be needed
+# for this scaffold's own files (Constitution Principle I).
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+    - depguard
+  settings:
+    depguard:
+      rules:
+        # Constitution Principle II (Clean Architecture): kernel/ is the
+        # reusable, template-level tier and MUST NEVER import product code
+        # under internal/. Product code depends on the kernel through
+        # interfaces, never the reverse. This boundary is enforced
+        # mechanically here rather than relying on code review alone.
+        kernel-forbidden-imports:
+          files:
+            - "kernel/**"
+            - "**/kernel/**"
+          deny:
+            - pkg: github.com/truongpx396/aisat-intel/backend-go/internal
+              desc: "kernel/ must never import product code under internal/ (Constitution Principle II)"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/truongpx396/aisat-intel/backend-go
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
