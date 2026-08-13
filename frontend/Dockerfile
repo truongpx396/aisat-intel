@@ -21,7 +21,7 @@ ARG VITE_API_BASE_URL=/api
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN if [ -f pnpm-lock.yaml ]; then pnpm run build; else npm run build; fi
 
-FROM caddy:2.8-alpine
+FROM caddy:2.11-alpine
 # SPA assets only — routing/TLS come from the mounted deploy/Caddyfile.
 COPY --from=build /app/dist /srv
 EXPOSE 80 443
