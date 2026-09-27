@@ -40,7 +40,9 @@ duplicating them across two screens would give two places to change one thing.
 - Exhausted (red blocking banner, AI actions disabled elsewhere).
 
 ## Reusability
-This screen is built from the **`credits-ui` package**, not as a bespoke page: see
+This screen is built from the **`credits-ui` package**, not as a bespoke page. The package now
+lives in [**intel-payment**](https://github.com/truongpx396/intel-payment/blob/main/specs/001-metering-billing-core/contracts/credits-ui-ports.md)
+(authoritative); this product's binding is
 [credits-ui-ports.md](../../../specs/001-contextengine-mvp/contracts/credits-ui-ports.md).
 The layout, copy and vocabulary here are *one binding* of it — the unit ("credits"), the
 feature names, the LLM ledger columns (`model`, `tokens`) and the org billing anchor are
@@ -71,4 +73,4 @@ binding; without the UI half, that generality would be discarded at the last ste
 | Plan catalog, subscription, portal, receipts | 2 | Moved to [organization.md](./organization.md) — billing anchors to `organization_id` |
 | `subscription_grant` / `refund` ledger rows | 2 | `credit_ledger.operation_type` extension |
 
-The mocked ledger uses the **signed-delta** convention (draft-plan open decision #1) — the Phase 1 mockup already rendered `+50,000` alongside `−42`, so signed is the convention the design has effectively assumed all along. Worth confirming as the implementation decision rather than adopting separate debit/credit columns. See [specs/draft-plan.md](../../../specs/draft-plan.md).
+The mocked ledger uses the **signed-delta** convention — now **resolved**, not open: the mockup already rendered `+50,000` alongside `−42`, so signed is what the design assumed all along, and it is the decision upstream took ([design-decisions.md D1](https://github.com/truongpx396/intel-payment/blob/main/specs/001-metering-billing-core/design-decisions.md)). One signed column, not a debit/credit pair.
