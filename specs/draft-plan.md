@@ -96,6 +96,14 @@ Rationale for each: upstream's
   during migration.
 - **An `Entitler` port exists** for plan capabilities beyond credits (seats, SSO, retention). Worth
   adopting instead of branching on plan codes when this product adds tiers.
+- **`Transfer` implements the org-pool → workspace-allocation model** specified in
+  [Tenancy & Delegated Administration](#phase-2--tenancy--delegated-administration), atomically
+  under one idempotency key with an optional per-workspace cap (`MaxDestBalance`). This replaces
+  what would otherwise be two independent grants — where a crash between them leaves the org pool
+  debited and the workspace uncredited, with no way for a reconcile to tell which happened.
+- **`Window: Job` implements the per-run `credits_cap`** (§4.5, FR-028) as an engine ceiling rather
+  than a loop check in this product's worker. It is a counter, not a granted balance, so a run
+  accrues no ledger rows of its own and an abandoned run leaks nothing.
 
 ## Phase 2 — AI Response Rating (Thumbs Up / Down)
 

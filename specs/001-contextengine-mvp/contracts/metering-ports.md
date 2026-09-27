@@ -37,6 +37,8 @@ The engine is generic; a host provides exactly three things.
 | Rate card | versioned rows; `MicrosPerCredit` set so 1 credit ≈ $0.001 with margin ([draft-plan.md — pricing](../../draft-plan.md)) |
 | `Limit[]` | three ceilings: `workspace_balance` (Balance → `402`), `role_daily` on `agent_policies.token_budget_day` (Daily → `429`), `user_daily` (Daily → `429`), `WarnAt = 0.8` (FR-016…FR-020) |
 | `Charge.Reason` / `Grant.Reason` | `credit_ledger.operation_type`: `query` · `ingest` · `enrich` · `caption` · `sandbox.crawl` · `sandbox.convert` · `sandbox.run_script` |
+| `Window: Job` | the long-horizon run cap. `agent_run.credits_cap` becomes a `Job`-window `Limit` on `{Kind:"agent_run", ID:run_id}` — a counter, so no ledger rows accrue per run and an abandoned run leaks nothing ([draft-idea.md §4.5](../../../draft-idea.md)) |
+| `Transfer` | Phase 2 org pool → workspace allocation. `organization_credits` is the pool, `workspace_credits` the allocation, with `MaxDestBalance` as the optional per-workspace cap ([Tenancy](../../draft-plan.md#phase-2--tenancy--delegated-administration)) |
 | `SettlementDurability` | `outbox` — bounded under-bill RPO is acceptable for commodity token metering |
 | `AdmitFailPolicy` | `fail_closed` |
 | Deployment shape | **embedded library** in `backend-go` (Go host, one product). The durable writer runs in `cmd/worker` |
@@ -63,5 +65,10 @@ Both are refinements made during the extraction; the full list is in upstream's
    `created_at` and carry a global `UNIQUE (idem_key)` — PostgreSQL rejects it. Upstream uses a
    non-partitioned `credit_idem (realm, idem_key)` guard written in the same transaction.
    [data-model.md](../data-model.md) reflects this.
+3. **Two of this product's own patterns are now engine primitives.** The per-run `credits_cap`
+   (FR-028's runaway-loop defense) is a `Window: Job` ceiling, and the Phase 2 org-pool →
+   workspace-allocation model is `Transfer` — atomic under one idem key, so a crash cannot leave
+   the pool debited and the workspace uncredited. Both were previously this repo's to implement;
+   neither needs bespoke code now.
 
 Everything else in this spec's credit behaviour is unchanged.
