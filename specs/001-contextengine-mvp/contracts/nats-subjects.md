@@ -27,6 +27,15 @@
 | `notify.retention.tick` | Scheduler (k8s `CronJob` / DO scheduled component / cron / single-owner `worker` ticker) | Go `cmd/worker` (queue group) | `{ trace_id }` → one worker prunes/archives read notifications older than the configured window (default 90d) or drops an aged `created_at` partition (FR-039, research §15) |
 | `dlq.sweep.tick` | Scheduler (k8s `CronJob` / DO scheduled component / cron / single-owner `worker` ticker) | Go `cmd/worker` (queue group) | `{ trace_id }` → one worker sweeps every `*.dlq.<ws>` subject: re-drives messages under the attempt cap to their owning work subject (incrementing `dlq_attempts`, exponential backoff), and terminally parks poison messages (`dlq_attempts ≥ MAX_DLQ_ATTEMPTS`, default 5) into `dead_letters` with a `dlq.dead.count` alert (research §18) |
 
+> **The `billing.*` subjects are owned upstream.** Their payloads, guarantees and the scheduled
+> `billing.*.tick` set are specified in
+> [intel-payment/contracts/bus-subjects.md](https://github.com/truongpx396/intel-payment/blob/main/specs/001-metering-billing-core/contracts/bus-subjects.md),
+> which is authoritative. Upstream defaults its bus to **Redis Streams**; this product configures the
+> **JetStream adapter** instead, because it already operates JetStream for every other subject here —
+> so the billing subjects below stay on the same cluster, with the same durable-pull-consumer and
+> queue-group semantics as the rest. Subject names, payloads and idempotency rules are identical
+> across both adapters.
+
 ## Rules
 
 - **Transport is JetStream, not core NATS.** Every subject is a JetStream stream; workers consume via **durable pull consumers** bound to a **per-subject queue group**. Crash recovery, DLQ redelivery, and consumer-lag autoscaling all depend on JetStream persistence — core NATS is not used (research §6, §14).

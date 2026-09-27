@@ -42,6 +42,7 @@ The engine is generic; a host provides exactly three things.
 | `SettlementDurability` | `outbox` — bounded under-bill RPO is acceptable for commodity token metering |
 | `AdmitFailPolicy` | `fail_closed` |
 | Deployment shape | **embedded library** in `backend-go` (Go host, one product). The durable writer runs in `cmd/worker` |
+| `Bus` adapter | **`nats_jetstream`** — not the upstream default. Upstream defaults to Redis Streams to keep required infrastructure to Redis + Postgres, but this product **already runs JetStream** for ingestion, query, notification and the `*.tick` schedule, so adding a Redis-Streams bus here would mean operating two async substrates to save a dependency this product already has. The billing subjects stay on the same JetStream cluster as everything else ([nats-subjects.md](./nats-subjects.md)) |
 
 ## Where the seam touches this spec
 
@@ -65,7 +66,14 @@ Both are refinements made during the extraction; the full list is in upstream's
    `created_at` and carry a global `UNIQUE (idem_key)` — PostgreSQL rejects it. Upstream uses a
    non-partitioned `credit_idem (realm, idem_key)` guard written in the same transaction.
    [data-model.md](../data-model.md) reflects this.
-3. **Two of this product's own patterns are now engine primitives.** The per-run `credits_cap`
+3. **The bus is now a swappable port with a Redis-Streams default.** Upstream's atomic hot-path
+   script publishes the debit intent directly onto a stream, which removes the window in which an
+   intent exists in the outbox but not on the bus. **This product selects the JetStream adapter
+   instead** (see the table above) — the choice is one config value, and the subjects, payloads and
+   guarantees in [nats-subjects.md](./nats-subjects.md) are unchanged either way. That this product
+   picks the non-default adapter is the useful part: it is the first evidence the seam is real rather
+   than asserted.
+4. **Two of this product's own patterns are now engine primitives.** The per-run `credits_cap`
    (FR-028's runaway-loop defense) is a `Window: Job` ceiling, and the Phase 2 org-pool →
    workspace-allocation model is `Transfer` — atomic under one idem key, so a crash cannot leave
    the pool debited and the workspace uncredited. Both were previously this repo's to implement;

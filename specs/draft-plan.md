@@ -104,6 +104,30 @@ Rationale for each: upstream's
 - **`Window: Job` implements the per-run `credits_cap`** (§4.5, FR-028) as an engine ceiling rather
   than a loop check in this product's worker. It is a counter, not a granted balance, so a run
   accrues no ledger rows of its own and an abandoned run leaks nothing.
+- **The bus is a swappable port.** Upstream defaults to Redis Streams (so a host needs only Redis +
+  Postgres); this product configures the **JetStream adapter**, because it already runs JetStream for
+  every other subject. Subjects and guarantees are identical
+  ([bus-subjects.md](https://github.com/truongpx396/intel-payment/blob/main/specs/001-metering-billing-core/contracts/bus-subjects.md)).
+
+### If this product ever sells to enterprises: post-paid invoicing exists upstream
+
+This product's credit model is **prepaid** — credits are granted or bought, then drawn down, and an
+exhausted balance blocks work. That is right for self-serve and wrong for the contract an enterprise
+buyer expects: *"meter us, invoice us monthly, we pay net-30."*
+
+Upstream designs that as
+[feature 002 — post-paid usage invoicing](https://github.com/truongpx396/intel-payment/tree/main/specs/002-postpaid-invoicing),
+additive to everything here and selectable **per scope**, so a self-serve workspace stays prepaid
+while an enterprise organization is invoiced. It brings graduated/volume/package rate schedules,
+minimum and prepaid commitments, immutable invoices with lines traceable back to `credit_ledger` rows,
+credit notes, discounts and trials.
+
+Worth knowing now for one reason: it is **not** something this product could add later by making its
+`Pricer` cleverer. Tiered pricing depends on period-to-date volume, and a `Pricer` that reads
+cumulative state stops being pure — which would break the replayability every credit guarantee here
+rests on. Upstream therefore adds a separate `Rater` that is pure over the period's event *set*.
+Nothing in this product needs to change to keep that door open; the ledger rows it already writes are
+the input.
 
 ## Phase 2 — AI Response Rating (Thumbs Up / Down)
 
