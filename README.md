@@ -801,6 +801,39 @@ DLQ DRAIN (dlq.sweep.tick · single-owner cmd/worker)
 
 ---
 
+## 🧾 Audit Trail
+
+Every member action and every AI tool call lands in an **append-only, tamper-evident** trail: one
+record shape for a human, an agent or a sandbox, distinguished by an opaque actor kind — never a
+table per domain. Each entry links the previous by hash under a monotonic per-tenant sequence, so an
+edited, deleted or reordered row breaks the chain and is detectable.
+
+> **Extracted & reusable — it now lives in its own repo.** The engine was factored behind
+> domain-agnostic ports (`Recorder`, `Sink`, `HashChain`, `AuditQuery` over an opaque
+> `Tenant`/`Actor`/`Action`/`Subject`) with the same litmus test the other backbones passed:
+>
+> ### 📦 **[truongpx396/intel-audit](https://github.com/truongpx396/intel-audit)** — a tamper-evident audit trail as an independent service
+>
+> A self-contained container (or Go library) any product can adopt by supplying **one `Realm`, one
+> `Tenant`/`Actor` binding and its action vocabulary**. It carries the git history of the contract
+> designed here, and adds what this product had not needed yet: a chain anchor that keeps retention
+> compatible with verification, a durable sequence head, database-enforced immutability, per-severity
+> retention with legal hold, and an outbox for SIEM fan-out. PostgreSQL is its only required
+> infrastructure.
+>
+> **Three upstream findings change this product's migrations**, all found by applying the schema
+> rather than reading it: the idempotency guard cannot sit on a partitioned table (the same defect
+> [intel-payment found in `credit_ledger`](https://github.com/truongpx396/intel-payment) and
+> [intel-notification found in `notifications`](https://github.com/truongpx396/intel-notification) —
+> the third occurrence); retention and tamper-evidence contradicted each other, so **enabling
+> retention without a chain anchor makes the trail permanently unverifiable**; and the chain head
+> cannot live in Redis, which also restores this product's own rule that Redis is never the source of
+> truth. All three are in [notes on the binding](specs/001-contextengine-mvp/contracts/audit-ports.md).
+
+📦 The engine, extracted: **[intel-audit](https://github.com/truongpx396/intel-audit)** · 🔌 This product's binding: [audit-ports.md](specs/001-contextengine-mvp/contracts/audit-ports.md) · 🗄️ Tables: [data-model.md](specs/001-contextengine-mvp/data-model.md)
+
+---
+
 ## 🔭 Observability
 
 Every answer is fully traceable. The **debug panel** (US5) surfaces, per query: detected intent, tool called, whether a semantic-cache hit served the answer, access-filter summary (how many docs filtered out by clearance), hybrid/rerank scores, chunk expansion, injected memory, model used, token cost, credits deducted — plus a link to the full **Langfuse + OpenTelemetry** trace. LLM call logs (`llm_call_log`) drive the admin cost dashboard; raw prompt/response bodies are retained 30 days, then purged to PII-scrubbed metadata.
