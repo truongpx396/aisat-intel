@@ -722,7 +722,7 @@ HOT PATH (api · per request, sub-ms)          ASYNC DRAIN (cmd/worker · sole l
 >
 > ContextEngine consumes it as an **embedded library** in `backend-go`, with `Realm=aisat-intel` and `Scope={workspace|organization}`. The binding is [contracts/metering-ports.md](specs/001-contextengine-mvp/contracts/metering-ports.md); the engine itself is specified [upstream](https://github.com/truongpx396/intel-payment/blob/main/specs/001-metering-billing-core/contracts/metering-ports.md), which is authoritative.
 
-📦 The engine, extracted: **[intel-payment](https://github.com/truongpx396/intel-payment)** · 🔌 This product's binding: [metering-ports.md](specs/001-contextengine-mvp/contracts/metering-ports.md) · 📄 Payments binding: [draft-plan.md — Phase 2](specs/draft-plan.md#phase-2-billing-and-payments) · 📐 [credit-metering-swimlane](specs/001-contextengine-mvp/diagrams/credit-metering-swimlane.excalidraw) · [billing-payment-flow](specs/001-contextengine-mvp/diagrams/addition/billing-payment-flow.excalidraw)
+📦 The engine, extracted: **[intel-payment](https://github.com/truongpx396/intel-payment)** · 🔌 This product's binding: [metering-ports.md](specs/001-contextengine-mvp/contracts/metering-ports.md) · 📄 Payments binding: [draft-plan.md — Phase 2](specs/draft-plan.md#phase-2-billing-and-payments) · 📐 [credit-metering-swimlane](https://github.com/truongpx396/intel-payment/blob/main/specs/001-metering-billing-core/diagrams/credit-metering-swimlane.excalidraw) · [billing-payment-flow](https://github.com/truongpx396/intel-payment/blob/main/specs/001-metering-billing-core/diagrams/billing-payment-flow.excalidraw) *(both moved to intel-payment)*
 
 ---
 
@@ -797,7 +797,7 @@ DLQ DRAIN (dlq.sweep.tick · single-owner cmd/worker)
 >
 > ContextEngine consumes it as an **embedded library** in `backend-go`, with `Realm=aisat-intel`, `Tenant={workspace}` and `Recipient={user}`. The binding is [contracts/notification-ports.md](specs/001-contextengine-mvp/contracts/notification-ports.md); the engine itself is specified [upstream](https://github.com/truongpx396/intel-notification/blob/main/specs/001-notification-core/contracts/notification-ports.md), which is authoritative.
 
-📦 The engine, extracted: **[intel-notification](https://github.com/truongpx396/intel-notification)** · 🔌 This product's binding: [notification-ports.md](specs/001-contextengine-mvp/contracts/notification-ports.md) · 📐 [notification-flow.excalidraw](specs/001-contextengine-mvp/diagrams/addition/notification-flow.excalidraw) · 📄 Subjects: [nats-subjects.md](specs/001-contextengine-mvp/contracts/nats-subjects.md) · UI: [notifications.md](design-system/aisat-intel/pages/notifications.md)
+📦 The engine, extracted: **[intel-notification](https://github.com/truongpx396/intel-notification)** · 🔌 This product's binding: [notification-ports.md](specs/001-contextengine-mvp/contracts/notification-ports.md) · 📐 [notification-flow.excalidraw](https://github.com/truongpx396/intel-notification/blob/main/specs/001-notification-core/diagrams/notification-flow.excalidraw) *(moved to intel-notification)* · 📄 Subjects: [nats-subjects.md](specs/001-contextengine-mvp/contracts/nats-subjects.md) · UI: [notifications.md](design-system/aisat-intel/pages/notifications.md)
 
 ---
 
@@ -955,11 +955,11 @@ Open `.excalidraw` files at [excalidraw.com](https://excalidraw.com) or with the
 - [langgraph-rag-agent](https://github.com/truongpx396/intel-agent/blob/main/specs/001-agent-runtime/diagrams/langgraph-rag-agent.excalidraw) — the 7+1 node agent graph *(now maintained in [intel-agent](https://github.com/truongpx396/intel-agent))*
 - [ingestion-pipeline](specs/001-contextengine-mvp/diagrams/ingestion-pipeline.excalidraw) — convert → caption → chunk → tag → embed
 - [query-path-dfd](specs/001-contextengine-mvp/diagrams/query-path-dfd.excalidraw) — query data-flow
-- [credit-metering-swimlane](specs/001-contextengine-mvp/diagrams/credit-metering-swimlane.excalidraw) — credit deduction lifecycle
+- [credit-metering-swimlane](https://github.com/truongpx396/intel-payment/blob/main/specs/001-metering-billing-core/diagrams/credit-metering-swimlane.excalidraw) — credit deduction lifecycle *(moved to intel-payment)*
 - [data-model-er](specs/001-contextengine-mvp/diagrams/data-model-er.excalidraw) — entity-relationship model
 
 **Deep dives** ([diagrams/addition/](specs/001-contextengine-mvp/diagrams/addition/))
-- access-control-isolation · [mcp-tool-allowlist](https://github.com/truongpx396/intel-agent/blob/main/specs/001-agent-runtime/diagrams/mcp-tool-allowlist.excalidraw) *(moved to intel-agent)* · llm-gateway-chokepoint · auth-oidc-sequence · billing-payment-flow · sse-streaming-sequence · nats-subject-topology · notification-flow · local-agent-flow
+- access-control-isolation · [mcp-tool-allowlist](https://github.com/truongpx396/intel-agent/blob/main/specs/001-agent-runtime/diagrams/mcp-tool-allowlist.excalidraw) *(moved to intel-agent)* · llm-gateway-chokepoint · auth-oidc-sequence · [billing-payment-flow](https://github.com/truongpx396/intel-payment/blob/main/specs/001-metering-billing-core/diagrams/billing-payment-flow.excalidraw) *(moved to intel-payment)* · sse-streaming-sequence · nats-subject-topology · [notification-flow](https://github.com/truongpx396/intel-notification/blob/main/specs/001-notification-core/diagrams/notification-flow.excalidraw) *(moved to intel-notification)* · local-agent-flow
 
 ---
 

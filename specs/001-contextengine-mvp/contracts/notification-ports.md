@@ -59,7 +59,7 @@ never an `ALTER TYPE`.
 | Concern | This repo |
 |---|---|
 | Producers | ingestion · billing · invite · agent-run · approval · admin BFF publish `notify.<ws>` ([nats-subjects.md](./nats-subjects.md)); thin by design |
-| Recipient surface | `/notifications*` ([bff-rest.md](./bff-rest.md)), streamed per [sse-events.md](./contracts/sse-events.md), rendered per [notifications.md](../../../design-system/aisat-intel/pages/notifications.md) |
+| Recipient surface | `/notifications*` ([bff-rest.md](./bff-rest.md)), streamed per [sse-events.md](./sse-events.md), rendered per [notifications.md](../../../design-system/aisat-intel/pages/notifications.md) |
 | Delivery workers | `notify.<ws>` fan-out + `notify.email.<ws>` email worker, N idempotent replicas in `cmd/worker` |
 | Tasks | T011 defines `kernel/notify.go` against the upstream port set; Stage 10 (T129–T132e) tests this binding |
 
