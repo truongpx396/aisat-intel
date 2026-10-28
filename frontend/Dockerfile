@@ -6,7 +6,7 @@
 # and the /api + SSE reverse proxies. Node is not in the runtime image.
 #
 # TODO(supply-chain): pin base images by @sha256 digest.
-FROM node:20-alpine AS build
+FROM node:25-alpine AS build
 WORKDIR /app
 ENV CI=true
 RUN corepack enable
